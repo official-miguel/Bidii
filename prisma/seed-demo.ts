@@ -22,7 +22,7 @@ import path from "path";
 })();
 
 import { PrismaClient, Module } from "@prisma/client";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 
 /**
  * Demo seed — a FULL institution to click around in.

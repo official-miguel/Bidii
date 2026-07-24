@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { cookies } from "next/headers";
 import { randomBytes, createHash, createHmac } from "crypto";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import { prisma } from "./prisma";
 import type { Role, User } from "@prisma/client";
 
