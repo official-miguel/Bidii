@@ -8,12 +8,12 @@ export const metadata: Metadata = {
   description: "School management system for Kenyan schools.",
   icons: {
     icon: [
-      { url: "/icons/favicon.ico", sizes: "any" },
-      { url: "/icons/icon-192.svg", type: "image/svg+xml" },
+      { url: "/logo.png", type: "image/png" },
       { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
     ],
-    apple: { url: "/icons/icon-192.png", sizes: "192x192" },
-    shortcut: "/icons/favicon.ico",
+    apple: { url: "/logo.png", type: "image/png" },
+    shortcut: "/logo.png",
   },
 };
 
