@@ -1,0 +1,807 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Font ──────────────────────────────────────────────────────────────────
+   Inter only — no secondary typeface.
+   font-display=swap prevents invisible text while the font loads.
+────────────────────────────────────────────────────────────────────────── */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+/* ── Design tokens as CSS custom properties ────────────────────────────────
+   Kept in sync with tailwind.config.ts so raw CSS (e.g. recharts, print
+   styles) can reference the same values via var(--color-*).
+────────────────────────────────────────────────────────────────────────── */
+:root {
+  /* ── Shell dimensions ──────────────────────────────────────────────────
+     Keep these in sync with the Tailwind classes used in layout files:
+       sidebar  → md:pl-16  (w-16  = 4rem = 64px)
+       top-bar  → pt-16     (h-16  = 4rem = 64px)
+  ───────────────────────────────────────────────────────────────────── */
+  --shell-sidebar-w:   4rem;    /* 64px  — icon rail */
+  --shell-topbar-h:    4rem;    /* 64px  — fixed top bar */
+
+  /* Brand */
+  --color-teal:        #2C7F7E;
+  --color-teal-light:  #3A9998;
+  --color-teal-dark:   #1F5C5B;
+  --color-teal-50:     #EDF7F7;
+
+  /* Surfaces */
+  --color-ink:         #1F2933;
+  --color-paper:       #FAFBFC;
+  --color-card:        #FFFFFF;
+  --color-line:        #E8EDF2;
+
+  /* Text */
+  --color-text-primary:   #1F2933;
+  --color-text-secondary: #667085;
+  --color-text-muted:     #98A2B3;
+
+  /* Semantic */
+  --color-danger:      #F04438;
+  --color-danger-bg:   #FEF3F2;
+  --color-success:     #17B26A;
+  --color-success-bg:  #ECFDF3;
+  --color-warn:        #F79009;
+  --color-warn-bg:     #FFFAEB;
+  --color-info:        #2E90FA;
+  --color-info-bg:     #EFF8FF;
+
+  /* Radius */
+  --radius-sm:   6px;
+  --radius-md:   10px;
+  --radius-lg:   12px;
+  --radius-xl:   16px;
+  --radius-full: 9999px;
+
+  /* Shadow */
+  --shadow-xs: 0 1px 2px 0 rgba(31,41,51,0.05);
+  --shadow-sm: 0 1px 3px 0 rgba(31,41,51,0.08), 0 1px 2px -1px rgba(31,41,51,0.04);
+  --shadow-md: 0 4px 12px -2px rgba(31,41,51,0.10), 0 2px 6px -2px rgba(31,41,51,0.06);
+  --shadow-lg: 0 8px 24px -4px rgba(31,41,51,0.10), 0 4px 12px -4px rgba(31,41,51,0.06);
+
+  /* Motion */
+  --duration-fast:    100ms;
+  --duration-default: 150ms;
+  --duration-slow:    300ms;
+  --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring:  cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ── Dark mode tokens ──────────────────────────────────────────────────────
+   Applied when <html class="dark"> is set by ThemeProvider.
+────────────────────────────────────────────────────────────────────────── */
+html.dark {
+  --color-ink:         #E8EDF2;
+  --color-paper:       #0D1B2A;
+  --color-card:        #162233;
+  --color-line:        #1E3347;
+  --color-text-primary:   #E8EDF2;
+  --color-text-secondary: #8FA3B8;
+  --color-text-muted:     #667085;
+}
+
+/* ── Base reset ────────────────────────────────────────────────────────────*/
+
+html,
+body {
+  background-color: #FAFBFC;
+  color: #1F2933;
+  font-family: "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+html.dark,
+html.dark body {
+  background-color: #0D1B2A;
+  color: #E8EDF2;
+}
+
+/* ── Global border colour ──────────────────────────────────────────────────*/
+
+* {
+  border-color: #E8EDF2;
+}
+
+html.dark * {
+  border-color: #1E3347;
+}
+
+/* ── Smooth theme transitions ──────────────────────────────────────────────
+   Animate colour swaps when toggling light ↔ dark.
+   Intentionally excludes transform / opacity so animations stay crisp.
+────────────────────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Interactive elements are snappier */
+*:where(a, button, [role="button"]) {
+  transition-duration: 100ms;
+}
+
+/* Disable all transitions while ThemeProvider applies the saved class */
+html.no-transitions *,
+html.no-transitions *::before,
+html.no-transitions *::after {
+  transition-duration: 0ms !important;
+}
+
+/* ── Focus ring ────────────────────────────────────────────────────────────
+   Teal ring instead of gold — matches new brand primary.
+────────────────────────────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid #2C7F7E;
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+html.dark :focus-visible {
+  outline-color: #3A9998;
+}
+
+/* ── Selection ─────────────────────────────────────────────────────────────*/
+
+::selection {
+  background-color: #D0EDED;
+  color: #1F5C5B;
+}
+
+html.dark ::selection {
+  background-color: #1F5C5B;
+  color: #E8EDF2;
+}
+
+/* ── Scrollbar (Webkit) ────────────────────────────────────────────────────*/
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #E8EDF2;
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #98A2B3;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background-color: #1E3347;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: #667085;
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────────────*/
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Dark mode surface overrides ───────────────────────────────────────────
+   Cards are white in light mode; in dark mode they lift slightly from bg.
+────────────────────────────────────────────────────────────────────────── */
+html.dark .bg-card {
+  background-color: #162233;
+}
+
+html.dark .bg-paper {
+  background-color: #0D1B2A;
+}
+
+html.dark .bg-white {
+  background-color: #162233;
+}
+
+/* ── Dark mode form inputs ─────────────────────────────────────────────────*/
+
+html.dark input,
+html.dark textarea,
+html.dark select {
+  background-color: #162233;
+  color: #E8EDF2;
+  border-color: #1E3347;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #667085;
+}
+
+/* ── Keyframe animations ───────────────────────────────────────────────────*/
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in-backdrop {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96) translateY(4px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0); }
+}
+
+@keyframes scale-in-spring {
+  from { opacity: 0; transform: scale(0.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+@keyframes slide-in-right {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+@keyframes slide-out-right {
+  from { transform: translateX(0);    opacity: 1; }
+  to   { transform: translateX(100%); opacity: 0; }
+}
+
+@keyframes bounce-in {
+  0%   { opacity: 0; transform: scale(0.6); }
+  60%  { transform: scale(1.05); }
+  80%  { transform: scale(0.97); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes check-draw {
+  from { stroke-dashoffset: 24; }
+  to   { stroke-dashoffset: 0; }
+}
+
+@keyframes pulse-ring {
+  0%   { transform: scale(1);    opacity: 0.6; }
+  100% { transform: scale(1.5);  opacity: 0; }
+}
+
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes progress-fill {
+  from { width: 0; }
+}
+
+/* ── Animation utility classes ─────────────────────────────────────────────*/
+
+.animate-fade-in        { animation: fade-in         200ms var(--ease-default) both; }
+.animate-fade-in-slow   { animation: fade-in         300ms var(--ease-default) both; }
+.animate-scale-in       { animation: scale-in        220ms var(--ease-default) both; }
+.animate-scale-in-spring{ animation: scale-in-spring 280ms var(--ease-spring)  both; }
+.animate-slide-in-right { animation: slide-in-right  300ms var(--ease-default) both; }
+.animate-slide-down     { animation: slide-down      180ms var(--ease-default) both; }
+.animate-bounce-in      { animation: bounce-in       350ms var(--ease-default) both; }
+
+/* Stagger children via CSS custom property */
+.animate-stagger > * { animation-fill-mode: both; }
+.animate-stagger > *:nth-child(1) { animation-delay:  0ms; }
+.animate-stagger > *:nth-child(2) { animation-delay: 40ms; }
+.animate-stagger > *:nth-child(3) { animation-delay: 80ms; }
+.animate-stagger > *:nth-child(4) { animation-delay:120ms; }
+.animate-stagger > *:nth-child(5) { animation-delay:160ms; }
+
+/* ── Form field interaction styles ─────────────────────────────────────────*/
+
+/* Input hover lift — very subtle */
+input:not(:disabled):not(:focus):hover,
+textarea:not(:disabled):not(:focus):hover,
+select:not(:disabled):not(:focus):hover {
+  border-color: #98A2B3;
+}
+
+/* Input valid state */
+input.is-valid,
+textarea.is-valid,
+select.is-valid {
+  border-color: #17B26A;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%2317B26A'%3E%3Cpath fill-rule='evenodd' d='M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z' clip-rule='evenodd'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 16px;
+  padding-right: 2.25rem;
+}
+
+/* Input error state */
+input.is-error,
+textarea.is-error,
+select.is-error {
+  border-color: #F04438;
+  background-color: #FEF3F2;
+}
+
+input.is-error:focus,
+textarea.is-error:focus,
+select.is-error:focus {
+  --tw-ring-color: rgb(240 68 56 / 0.15);
+  border-color: #F04438;
+}
+
+/* ── Card hover effects ─────────────────────────────────────────────────────*/
+
+.card-hover {
+  transition: box-shadow 150ms var(--ease-default), transform 150ms var(--ease-default);
+}
+
+.card-hover:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+/* ── Button pressed state ──────────────────────────────────────────────────*/
+
+button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+/* ── Radio card (framework selector, channel picker) ───────────────────────*/
+
+.radio-card {
+  position: relative;
+  cursor: pointer;
+  border: 2px solid #E8EDF2;
+  border-radius: var(--radius-lg);
+  padding: 0.875rem 1rem;
+  transition: border-color 150ms var(--ease-default),
+              background-color 150ms var(--ease-default),
+              box-shadow 150ms var(--ease-default);
+}
+
+.radio-card:hover {
+  border-color: #3A9998;
+  background-color: #EDF7F7;
+}
+
+.radio-card.selected {
+  border-color: #2C7F7E;
+  background-color: #EDF7F7;
+  box-shadow: 0 0 0 3px rgba(44, 127, 126, 0.12);
+}
+
+.radio-card input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+/* ── Modal dialog ──────────────────────────────────────────────────────────*/
+
+.modal-backdrop {
+  animation: fade-in-backdrop 200ms var(--ease-default) both;
+}
+
+.modal-content {
+  animation: scale-in 220ms var(--ease-default) both;
+}
+
+/* ── Drawer / slide-over ────────────────────────────────────────────────────*/
+
+.drawer-backdrop {
+  animation: fade-in-backdrop 200ms var(--ease-default) both;
+}
+
+.drawer-panel {
+  animation: slide-in-right 300ms var(--ease-default) both;
+}
+
+/* ── Form section card ──────────────────────────────────────────────────────*/
+
+.form-section {
+  background: #FFFFFF;
+  border: 1px solid #E8EDF2;
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+}
+
+html.dark .form-section {
+  background: #162233;
+  border-color: #1E3347;
+}
+
+.form-section-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #667085;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.875rem;
+  padding-bottom: 0.625rem;
+  border-bottom: 1px solid #E8EDF2;
+}
+
+html.dark .form-section-title {
+  color: #8FA3B8;
+  border-color: #1E3347;
+}
+
+/* ── Loading shimmer ────────────────────────────────────────────────────────*/
+
+.skeleton {
+  background: linear-gradient(90deg, #E8EDF2 25%, #F4F6F8 50%, #E8EDF2 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: var(--radius-sm);
+}
+
+html.dark .skeleton {
+  background: linear-gradient(90deg, #1E3347 25%, #243A52 50%, #1E3347 75%);
+  background-size: 200% 100%;
+}
+
+/* ── Success check animation ────────────────────────────────────────────────*/
+
+.check-icon path {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: check-draw 400ms var(--ease-default) 100ms forwards;
+}
+
+/* ── Scrollbar hide utility ────────────────────────────────────────────────
+   Used by ContextNavigation tabs to hide the horizontal scrollbar while
+   still allowing scroll.
+────────────────────────────────────────────────────────────────────────── */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Shell offset helpers ──────────────────────────────────────────────────*/
+
+.shell-content {
+  padding-left: var(--shell-sidebar-w);
+  padding-top:  var(--shell-topbar-h);
+}
+
+/* ── Stage 9: Mobile / touch responsive additions ─────────────────────────*/
+
+/* Safe-area inset tokens — for iPhone notch / home-bar clearance */
+:root {
+  --safe-top:    env(safe-area-inset-top,    0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left:   env(safe-area-inset-left,   0px);
+  --safe-right:  env(safe-area-inset-right,  0px);
+}
+
+/* Suppress the 300ms tap delay on mobile browsers */
+html {
+  touch-action: manipulation;
+}
+
+/* Suppress default iOS tap highlight on interactive elements */
+a, button, [role="button"], input, select, textarea, label {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Mobile drawer ─────────────────────────────────────────────────────── */
+
+@keyframes drawer-slide-in {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+
+@keyframes drawer-slide-out {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-100%); }
+}
+
+.drawer-enter {
+  animation: drawer-slide-in 280ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.drawer-exit {
+  animation: drawer-slide-out 240ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+/* ── Mobile modal bottom-sheet ─────────────────────────────────────────── */
+
+@keyframes sheet-slide-up {
+  from { transform: translateY(100%); opacity: 0.6; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+@keyframes sheet-slide-down {
+  from { transform: translateY(0);    opacity: 1; }
+  to   { transform: translateY(100%); opacity: 0.6; }
+}
+
+.sheet-enter {
+  animation: sheet-slide-up 300ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.sheet-exit {
+  animation: sheet-slide-down 260ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+/* ── Touch target minimum size ─────────────────────────────────────────── */
+/* Any element with this class will have at least a 44×44px tap area       */
+.touch-target {
+  position: relative;
+}
+.touch-target::after {
+  content: "";
+  position: absolute;
+  inset: 50% 50%;
+  transform: translate(-50%, -50%);
+  min-width:  44px;
+  min-height: 44px;
+}
+
+/* ── Responsive card table ─────────────────────────────────────────────── */
+
+.responsive-table-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+/* ── Print base ────────────────────────────────────────────────────────────*/
+
+@media print {
+  html, body {
+    background-color: #fff !important;
+    color: #000 !important;
+  }
+
+  aside, nav, [data-print="hide"] {
+    display: none !important;
+  }
+}
+
+/* ── Soma AI — markdown prose styles ──────────────────────────────────────
+   Applied inside `.soma-prose` — scoped so they never bleed into the rest
+   of the app. All colours reference design tokens so dark mode is automatic.
+────────────────────────────────────────────────────────────────────────── */
+
+.soma-prose {
+  font-size: 0.875rem;   /* text-sm */
+  line-height: 1.6;
+  color: var(--color-text-primary);
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.soma-prose .soma-p {
+  margin: 0 0 0.75em;
+}
+.soma-prose .soma-p:last-child {
+  margin-bottom: 0;
+}
+
+.soma-prose .soma-h1 {
+  font-size: 1.125rem;
+  font-weight: 700;
+  margin: 0.25em 0 0.5em;
+  color: var(--color-text-primary);
+}
+.soma-prose .soma-h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0.5em 0 0.4em;
+  color: var(--color-text-primary);
+}
+.soma-prose .soma-h3 {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin: 0.5em 0 0.35em;
+  color: var(--color-text-primary);
+}
+
+.soma-prose .soma-ul,
+.soma-prose .soma-ol {
+  margin: 0.25em 0 0.75em;
+  padding-left: 1.4em;
+}
+.soma-prose .soma-ul {
+  list-style-type: disc;
+}
+.soma-prose .soma-ol {
+  list-style-type: decimal;
+}
+.soma-prose .soma-li {
+  margin-bottom: 0.25em;
+}
+
+.soma-prose .soma-blockquote {
+  margin: 0.5em 0;
+  padding: 0.5em 0.875em;
+  border-left: 3px solid #2C7F7E;
+  background: #EDF7F7;
+  border-radius: 0 6px 6px 0;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+html.dark .soma-prose .soma-blockquote {
+  background: rgba(44, 127, 126, 0.12);
+  border-left-color: #3A9998;
+}
+
+.soma-prose .soma-hr {
+  border: none;
+  border-top: 1px solid #E8EDF2;
+  margin: 0.875em 0;
+}
+html.dark .soma-prose .soma-hr {
+  border-top-color: #1E3347;
+}
+
+/* Inline code */
+.soma-prose .soma-inline-code {
+  font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+  font-size: 0.8125rem;
+  background: #EDF7F7;
+  color: #1F5C5B;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  border: 1px solid #D0EDED;
+}
+html.dark .soma-prose .soma-inline-code {
+  background: rgba(44, 127, 126, 0.15);
+  color: #3A9998;
+  border-color: rgba(44, 127, 126, 0.3);
+}
+
+/* Code block container */
+.soma-prose .soma-code-block {
+  position: relative;
+  margin: 0.625em 0;
+  border-radius: 10px;
+  border: 1px solid #E8EDF2;
+  background: #F8FAFB;
+  overflow: hidden;
+}
+html.dark .soma-prose .soma-code-block {
+  background: #0A1520;
+  border-color: #1E3347;
+}
+
+/* Language label */
+.soma-prose .soma-code-lang {
+  display: block;
+  padding: 0.35em 0.875em 0;
+  font-size: 0.6875rem;
+  font-family: ui-monospace, monospace;
+  font-weight: 600;
+  color: #667085;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+html.dark .soma-prose .soma-code-lang {
+  color: #667085;
+}
+
+/* Copy button */
+.soma-prose .soma-code-copy {
+  position: absolute;
+  top: 0.375rem;
+  right: 0.5rem;
+  padding: 0.2em 0.6em;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: #667085;
+  background: transparent;
+  border: 1px solid #E8EDF2;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 100ms, color 100ms;
+}
+.soma-prose .soma-code-copy:hover {
+  background: #E8EDF2;
+  color: #1F2933;
+}
+html.dark .soma-prose .soma-code-copy {
+  color: #667085;
+  border-color: #1E3347;
+}
+html.dark .soma-prose .soma-code-copy:hover {
+  background: #1E3347;
+  color: #E8EDF2;
+}
+
+/* Pre + code */
+.soma-prose .soma-pre {
+  margin: 0;
+  padding: 0.625em 0.875em 0.75em;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.soma-prose .soma-code {
+  font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+  font-size: 0.8125rem;
+  line-height: 1.65;
+  color: #1F2933;
+  white-space: pre;
+  display: block;
+}
+html.dark .soma-prose .soma-code {
+  color: #C9D8E8;
+}
+
+/* Table */
+.soma-prose .soma-table-wrap {
+  overflow-x: auto;
+  margin: 0.625em 0;
+  border-radius: 8px;
+  border: 1px solid #E8EDF2;
+}
+html.dark .soma-prose .soma-table-wrap {
+  border-color: #1E3347;
+}
+.soma-prose .soma-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+.soma-prose .soma-th {
+  padding: 0.5em 0.75em;
+  background: #EDF7F7;
+  font-weight: 600;
+  text-align: left;
+  color: #1F5C5B;
+  border-bottom: 1px solid #D0EDED;
+  white-space: nowrap;
+}
+html.dark .soma-prose .soma-th {
+  background: rgba(44, 127, 126, 0.15);
+  color: #3A9998;
+  border-bottom-color: #1E3347;
+}
+.soma-prose .soma-td {
+  padding: 0.45em 0.75em;
+  border-bottom: 1px solid #E8EDF2;
+  color: var(--color-text-primary);
+  vertical-align: top;
+}
+html.dark .soma-prose .soma-td {
+  border-bottom-color: #1E3347;
+}
+.soma-prose .soma-table tr:last-child .soma-td {
+  border-bottom: none;
+}
+
+/* Links */
+.soma-prose .soma-link {
+  color: #2C7F7E;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.soma-prose .soma-link:hover {
+  color: #1F5C5B;
+}
+html.dark .soma-prose .soma-link {
+  color: #3A9998;
+}
+
+/* Ensure Soma AI side panel sits above the fixed TopAppBar (z-30) and
+   sidebar (z-20) but doesn't interfere with modals (z-50 already used). */

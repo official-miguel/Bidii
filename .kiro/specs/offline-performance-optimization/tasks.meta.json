@@ -1,0 +1,133 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "3. Checkpoint — verify data bug fixes": [
+      {
+        "executionId": "f6134740-ae98-41d3-b614-5398b24de787",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784544230959
+      }
+    ],
+    "11. Checkpoint — verify sync and API fixes": [
+      {
+        "executionId": "f6134740-ae98-41d3-b614-5398b24de787",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784544231119
+      }
+    ],
+    "16. Final checkpoint — full integration verification": [
+      {
+        "executionId": "f6134740-ae98-41d3-b614-5398b24de787",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784544231319
+      }
+    ],
+    "1. Fix attendance date normalisation bug": [
+      {
+        "executionId": "f6134740-ae98-41d3-b614-5398b24de787",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784544256345
+      },
+      {
+        "executionId": "f6134740-ae98-41d3-b614-5398b24de787",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784544428206
+      }
+    ],
+    "2. Fix student delete write queue method": [
+      {
+        "executionId": "f6134740-ae98-41d3-b614-5398b24de787",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784544263660
+      },
+      {
+        "executionId": "f6134740-ae98-41d3-b614-5398b24de787",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784544433123
+      }
+    ],
+    "4. Fix SSE reconnect exponential backoff": [
+      {
+        "executionId": "f6134740-ae98-41d3-b614-5398b24de787",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784544441905
+      },
+      {
+        "executionId": "f6134740-ae98-41d3-b614-5398b24de787",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784544477303
+      }
+    ],
+    "5. Add ThemeProvider and SyncStatusBar hydration guards (enforce pattern)": [
+      {
+        "executionId": "f6134740-ae98-41d3-b614-5398b24de787",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784544449515
+      },
+      {
+        "executionId": "f6134740-ae98-41d3-b614-5398b24de787",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784544484183
+      }
+    ],
+    "6. Memoize StudentsPage renders": [
+      {
+        "executionId": "f6134740-ae98-41d3-b614-5398b24de787",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784544455639
+      },
+      {
+        "executionId": "305ceecf-0f2d-42ad-a65d-65aa7bdb3d6b",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784544631085
+      }
+    ],
+    "7. Prioritise OfflineProvider store hydration order": [
+      {
+        "executionId": "305ceecf-0f2d-42ad-a65d-65aa7bdb3d6b",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784544636788
+      },
+      {
+        "executionId": "88d3dcb2-49d4-4302-8a61-b7c3903be038",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784545169723
+      }
+    ],
+    "8. Add `runSyncDomains()` to sync engine": [
+      {
+        "executionId": "305ceecf-0f2d-42ad-a65d-65aa7bdb3d6b",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784544642402
+      }
+    ],
+    "9. Optimise `GET /api/students` — remove nested relations from list": [
+      {
+        "executionId": "305ceecf-0f2d-42ad-a65d-65aa7bdb3d6b",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784544648514
+      }
+    ],
+    "10. Add pagination cursors to delta pull endpoint": [
+      {
+        "executionId": "305ceecf-0f2d-42ad-a65d-65aa7bdb3d6b",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784544654700
+      }
+    ],
+    "12. Add missing PostgreSQL indexes via Prisma migration": [
+      {
+        "executionId": "5f7d7c1a-daa2-4117-9b63-d25d802b21c4",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784550359162
+      }
+    ],
+    "13. Add virtual scrolling to students list": [
+      {
+        "executionId": "5f7d7c1a-daa2-4117-9b63-d25d802b21c4",
+        "chatSessionId": "sess_866d8c9a-90fc-41bd-858d-6248b02fa890",
+        "timestamp": 1784550365083
+      }
+    ]
+  }
+}

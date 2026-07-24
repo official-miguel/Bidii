@@ -1,0 +1,404 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "0.1 Add `RankingConfig` model to `prisma/schema.prisma`": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403805156
+      },
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403839228
+      },
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403903674
+      }
+    ],
+    "0.2 Add `ReportRemark` model to `prisma/schema.prisma`": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403805578
+      },
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403909726
+      },
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403983843
+      }
+    ],
+    "0.3 Create migration file `prisma/migrations/20260720000000_add_ranking_config_and_report_remark/migration.sql`": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403805801
+      },
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403989305
+      },
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784404068397
+      }
+    ],
+    "0.4 Run `prisma generate` to regenerate the Prisma client after schema changes": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403806011
+      },
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784404073102
+      }
+    ],
+    "1. Navigation shell — RoleNav and TopBar wiring": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403806346
+      }
+    ],
+    "2.1 Create `GET /api/assessments/home/teacher` route (`src/app/api/assessments/home/teacher/route.ts`)": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403806591
+      }
+    ],
+    "2.4 Create `TeacherHome` component (`src/components/assessment/TeacherHome.tsx`)": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403806837
+      }
+    ],
+    "2.5 Wire TeacherHome into `src/app/teacher/assessments/page.tsx` (or `src/app/teacher/page.tsx` redirect)": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403806985
+      }
+    ],
+    "3. Checkpoint — verify Teacher Home end-to-end": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403807134
+      }
+    ],
+    "4.1 Add a `DoneBar` component (`src/components/assessment/DoneBar.tsx`) that renders a fixed bottom bar with the **\"Done — View Class Summary\"** button": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403807279
+      }
+    ],
+    "4.2 Add `DoneBar` to `src/app/teacher/assessments/marksheet/page.tsx` and `src/app/principal/assessments/marksheet/page.tsx`": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403807619
+      }
+    ],
+    "5.1 Create `GET /api/assessments/home/summary` route (`src/app/api/assessments/home/summary/route.ts`)": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403807798
+      }
+    ],
+    "5.2 Create `HodHome` component (`src/components/assessment/HodHome.tsx`)": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403808088
+      }
+    ],
+    "5.3 Create `DirectorHome` component (`src/components/assessment/DirectorHome.tsx`)": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403808228
+      }
+    ],
+    "5.4 Create `UnifiedClassTable` component (`src/components/assessment/UnifiedClassTable.tsx`)": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403808439
+      }
+    ],
+    "5.7 Wire HodHome into a new `src/app/hod/` (or extend `src/app/principal/assessments/`) page, and DirectorHome into `src/app/principal/assessments/page.tsx`": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403808580
+      }
+    ],
+    "6.1 Create `ParentHome` component (`src/components/assessment/ParentHome.tsx`)": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403811960
+      }
+    ],
+    "6.2 Wire into `src/app/parent/` layout (create if needed) with nav: My Child, Reports only": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403812289
+      }
+    ],
+    "7.1 Create `GET /api/assessments/department/analytics` route (`src/app/api/assessments/department/analytics/route.ts`)": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403814157
+      }
+    ],
+    "7.6 Create `DeptAnalyticsPage` component (`src/components/assessment/DeptAnalyticsPage.tsx`)": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403814507
+      }
+    ],
+    "7.7 Implement `DeptMeanTrend` sub-chart — LineChart of dept mean points across terms": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403814849
+      }
+    ],
+    "7.8 Implement `DeptSubjectBar` sub-chart — horizontal BarChart of subjects side by side": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403815536
+      }
+    ],
+    "7.9 Implement `DeptVsSchoolLine` sub-chart — dept mean vs. school mean on same axes": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403815999
+      }
+    ],
+    "7.10 Implement `DeptHeatmap` sub-chart — class × subject heatmap scoped to dept subjects": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403817393
+      }
+    ],
+    "7.11 Wire `DeptAnalyticsPage` into principal nav (HOD and Director accessible pages)": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403817627
+      }
+    ],
+    "8. Checkpoint — verify Department Analytics end-to-end": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403817868
+      }
+    ],
+    "9.1 Create `src/lib/assessment/teacherRanking.ts`": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403818082
+      }
+    ],
+    "9.4 Create `GET /api/assessments/staff/ranking` route (`src/app/api/assessments/staff/ranking/route.ts`)": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403818257
+      }
+    ],
+    "9.7 Create `Top3Leaderboard` component (`src/components/assessment/Top3Leaderboard.tsx`)": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403818439
+      }
+    ],
+    "9.8 Create `StaffRankTable` component (`src/components/assessment/StaffRankTable.tsx`)": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403818767
+      }
+    ],
+    "9.9 Create `StaffPerformancePage` component (`src/components/assessment/StaffPerformancePage.tsx`)": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403819058
+      }
+    ],
+    "9.10 Wire StaffPerformancePage into nav": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403819331
+      }
+    ],
+    "10.1 Create `GET /api/assessments/report/remarks` route (`src/app/api/assessments/report/remarks/route.ts`)": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403820276
+      }
+    ],
+    "10.2 Create `PUT /api/assessments/report/remarks` route": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403820788
+      }
+    ],
+    "10.4 Create `ReportPage` component (`src/components/assessment/ReportPage.tsx`)": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403821237
+      }
+    ],
+    "10.6 Wire ReportPage into existing report-cards pages": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403821505
+      }
+    ],
+    "11. Checkpoint — verify Report Page and AI remarks end-to-end": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403821892
+      }
+    ],
+    "12.1 Audit all existing chart components (`DashboardCharts.tsx`, `CbeDashboardEnhanced.tsx`, and new dept analytics charts) to ensure they use `gradeColour()` / `levelColour()` utilities for all colour decisions — no ad-hoc colour strings": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403822105
+      }
+    ],
+    "12.3 Add tooltip handlers (Recharts `<Tooltip>` with custom content) to all dept analytics charts showing exact value and item label on hover/tap": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403822376
+      }
+    ],
+    "12.4 Add drill-down click handler to subject bars: click navigates to that subject's own trend/class breakdown in the main dashboard": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403822573
+      }
+    ],
+    "12.5 Ensure every chart component renders an empty-state message (not an empty SVG frame) when its data array has length 0": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403822877
+      }
+    ],
+    "13.1 Audit all new and extended pages for consistent empty/loading states matching the patterns in Requirements 11": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403823104
+      }
+    ],
+    "14.1 Verify `Sidebar` component's mobile collapse renders a 4-icon bottom nav at < 768 px; adjust if the existing implementation does not match the spec": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403823355
+      }
+    ],
+    "14.2 Verify `MarksheetGrid` swipeable card layout functions correctly at narrow viewports; adjust if needed": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403824060
+      }
+    ],
+    "14.3 Ensure `Top3Leaderboard` renders as a horizontal-scroll card on mobile": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403824679
+      }
+    ],
+    "15.1 Write integration tests asserting HTTP 403 for unauthenticated requests to all 6 new endpoints": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403825009
+      }
+    ],
+    "16.1 Create `GET /api/settings/ranking-config` route (`src/app/api/settings/ranking-config/route.ts`)": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403825229
+      }
+    ],
+    "16.2 Create `PUT /api/settings/ranking-config` route": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403825562
+      }
+    ],
+    "16.3 Restructure `src/app/principal/settings/page.tsx` as a SettingsHub": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403825729
+      }
+    ],
+    "16.4 Build `RankingConfigForm` component within the Settings Hub": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403825998
+      }
+    ],
+    "16.5 Add Settings Hub nav entry for Director/Principal roles": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403826192
+      }
+    ],
+    "17. Final checkpoint — full module smoke test": [
+      {
+        "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
+        "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
+        "timestamp": 1784403826331
+      }
+    ]
+  }
+}

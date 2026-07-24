@@ -1,0 +1,2616 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// One row per registered school. Created by the signup flow, along with the
+/// Principal's own User row, in a single transaction — this is the "school
+/// account" the rest of the system is scoped to.
+model School {
+  id                       String                    @id @default(cuid())
+  name                     String
+  /// Short URL-safe handle, e.g. "green-hill-academy" — reserved for a
+  /// future school-specific login URL; not required at login today (login is
+  /// by email, which is globally unique).
+  slug                     String                    @unique
+  address                  String?
+  phone                    String?
+  email                    String?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  aiTimetableConstraints   AiTimetableConstraint[]
+  attendances              Attendance[]
+  calendarEvents           CalendarEvent[]
+  departments              Department[]
+  classes                  SchoolClass[]
+  integrations             SchoolIntegration[]
+  staffRoles               StaffRole[]
+  students                 Student[]
+  subjects                 Subject[]
+  teachers                 Teacher[]
+  timetableConfig          TimetableConfig?
+  timetableSlots           TimetableSlot[]
+  users                    User[]
+  disciplineRecords        DisciplineRecord[]
+  achievements             Achievement[]
+  studentFiles             StudentFile[]
+  /// Assessment framework models
+  assessmentFrameworks     AssessmentFramework[]
+  assessmentPeriods        AssessmentPeriod[]
+  /// 8-4-4 hierarchy
+  papers                   Paper[]
+  /// CBE pathway weights
+  pathwayWeights           PathwayWeight[]
+  /// Ranking weight configuration (examination analytics)
+  rankingConfig            RankingConfig?
+  /// Report remarks (examination analytics)
+  reportRemarks            ReportRemark[]
+  /// Subject-expectation configuration
+  formSubjectExpectations  FormSubjectExpectation[]
+  /// CBC hierarchy
+  learningAreas            LearningArea[]
+  strands                  Strand[]
+  subStrands               SubStrand[]
+  /// CBE hierarchy
+  competencyUnits          CompetencyUnit[]
+  elements                 CompetencyElement[]
+  performanceCriteria      PerformanceCriterion[]
+  /// Assessment items & RBAC
+  assessmentItems          AssessmentItem[]
+  assessmentRoles          AssessmentRole[]
+  /// Library (v1 legacy)
+  librarySettings          LibrarySettings?
+  libraryBooks             LibraryBook[]
+  libraryCards             LibraryCard[]
+  libraryBorrows           LibraryBorrow[]
+  /// Library (v2 enterprise)
+  libraryCatalogues        LibraryCatalogue[]
+  libraryCopies            LibraryCopy[]
+  /// Library Stage 2
+  libraryPolicies          LibraryPolicy[]
+  libraryFineAudits        LibraryFineAudit[]
+  libraryFinePauses        LibraryFinePause[]
+  libraryReservations      LibraryReservation[]
+  libraryClassroomLoans    LibraryClassroomLoan[]
+  libraryCirculationEvents LibraryCirculationEvent[]
+  /// Messaging / Communication Centre
+  messages                 Message[]
+  messageLogs              MessageLog[]
+  recipientGroups          RecipientGroup[]
+  messageTemplates         MessageTemplate[]
+  messagingSettings        MessagingSettings?
+  /// Lifecycle management
+  recycledStaffIds         RecycledStaffId[]
+  auditLogs                AuditLog[]
+  permissionAuditLogs      PermissionAuditLog[]      @relation("PermAuditSchool")
+  /// Accommodation module
+  accommodationSettings    AccommodationSettings?
+  dormitories              Dormitory[]
+  cubicles                 Cubicle[]
+  beds                     Bed[]
+  sleepingPositions        SleepingPosition[]
+  allocationRecords        AllocationRecord[]
+  dormInspections          DormInspection[]
+  accommodationEvents      AccommodationEvent[]
+}
+
+/// One row per login. Role determines which dashboard the user lands on.
+/// schoolId scopes every user (including the Principal) to exactly one
+/// school — this is what makes "log in and land inside your own school's
+/// system" work.
+model User {
+  id                        String               @id @default(cuid())
+  email                     String               @unique
+  passwordHash              String
+  role                      Role
+  mustChangePassword        Boolean              @default(true)
+  isActive                  Boolean              @default(true)
+  createdAt                 DateTime             @default(now())
+  updatedAt                 DateTime             @updatedAt
+  schoolId                  String
+  /// Only meaningful when role = ADMIN_STAFF. Governs which modules this
+  /// login can see and manage (Staff Roles & Permissions). PRINCIPAL always
+  /// has full access regardless of this field; TEACHER keeps its existing
+  /// fixed capabilities (own class, own subjects, marks entry) unaffected by
+  /// the RBAC system so nothing about the teacher flow changes.
+  staffRoleId               String?
+  calendarEvents            CalendarEvent[]
+  sessions                  Session[]
+  student                   Student?
+  teacher                   Teacher?
+  school                    School               @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  staffRole                 StaffRole?           @relation(fields: [staffRoleId], references: [id])
+  disciplineRecordsRecorded DisciplineRecord[]
+  disciplineNotes           DisciplineNote[]
+  disciplineEvents          DisciplineEvent[]
+  studentFilesUploaded      StudentFile[]
+  achievementsRecorded      Achievement[]
+  sentMessages              Message[]
+  studentsArchived          Student[]            @relation("StudentArchivedBy")
+  staffArchived             Teacher[]            @relation("TeacherArchivedBy")
+  auditLogs                 AuditLog[]
+  /// Multi-role assignments (new; legacy single-role via staffRoleId is kept)
+  userStaffRoles            UserStaffRole[]
+  /// Permission audit log entries performed by this user
+  permissionAuditLogs       PermissionAuditLog[] @relation("PermissionAuditPerformedBy")
+  /// Permission audit log entries targeting this user
+  permissionAuditLogsTarget PermissionAuditLog[] @relation("PermissionAuditTarget")
+  /// Accommodation
+  accommodationAllocations  AllocationRecord[]   @relation("AccommodationAllocatedBy")
+  dormInspectionsPerformed  DormInspection[]
+  accommodationEvents       AccommodationEvent[]
+
+  @@index([role])
+  @@index([schoolId])
+  @@index([staffRoleId])
+}
+
+/// Opaque bearer token stored server-side (not a JWT) so sessions can be
+/// revoked instantly from the principal's Staff & Roles panel.
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Section 2A.2 — groups subjects under an administrative unit with a head.
+/// Name is unique per school, not globally — two schools can each have a
+/// "Sciences" department.
+model Department {
+  id            String    @id @default(cuid())
+  name          String
+  headTeacherId String?   @unique
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  schoolId      String
+  headTeacher   Teacher?  @relation("DepartmentHead", fields: [headTeacherId], references: [id])
+  school        School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  subjects      Subject[]
+  teachers      Teacher[] @relation("TeacherPrimaryDepartment")
+
+  @@unique([schoolId, name])
+  @@index([schoolId])
+}
+
+/// Section 2A.1 — the master subject list every downstream module reads from.
+/// Code is unique per school, not globally.
+model Subject {
+  id                  String                @id @default(cuid())
+  name                String
+  code                String
+  type                SubjectType           @default(CORE)
+  departmentId        String
+  /// Forms/year groups this subject applies to, e.g. [3, 4] for Form 3 & 4 only.
+  applicableForms     Int[]
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  schoolId            String
+  doubleLesson        Boolean               @default(false)
+  /// Inputs for the AI Timetable Generator (Section: AI Timetable Generator).
+  /// How many periods per week a class needs of this subject, whether those
+  /// periods should be scheduled as consecutive double lessons (e.g. Physics
+  /// practicals), and whether it needs a special room (Lab, Computer Lab,
+  /// ...) — free text so it can match whatever room names a school actually
+  /// uses, same spirit as TimetableSlot.room.
+  lessonsPerWeek      Int                   @default(5)
+  requiresSpecialRoom String?
+  classTeachers       ClassSubjectTeacher[]
+  studentElectives    StudentElective[]
+  /// Assessment framework back-relations
+  papers              Paper[]
+  assessmentItems     AssessmentItem[]
+  assessmentRoles     AssessmentRole[]
+  pathwayWeights      PathwayWeight[]
+  department          Department            @relation(fields: [departmentId], references: [id])
+  school              School                @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  teacherSubjects     TeacherSubject[]
+  timetableSlots      TimetableSlot[]
+
+  @@unique([schoolId, code])
+  @@index([departmentId])
+  @@index([schoolId])
+}
+
+/// Section 2B — staff registry. userId is optional so a teacher record can be
+/// pre-created before login credentials are issued. staffId is unique per
+/// school, not globally.
+model Teacher {
+  id                     String                  @id @default(cuid())
+  userId                 String?                 @unique
+  staffId                String
+  fullName               String
+  email                  String?
+  phone                  String?
+  primaryDepartmentId    String?
+  todEligible            Boolean                 @default(true)
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  schoolId               String
+  /// Lifecycle management: when a staff member leaves the institution
+  archivedAt             DateTime?
+  /// TRANSFER (generic departure)
+  archiveType            String?
+  /// Departure reason / notes
+  archiveReason          String?
+  /// User who performed the archive action
+  archivedById           String?
+  /// Employment period — snapshot taken at archive time
+  employmentStartDate    DateTime?
+  designationSnapshot    String?
+  departmentSnapshot     String?
+  attendancesRecorded    Attendance[]
+  subjectAssignments     ClassSubjectTeacher[]
+  departmentHeadOf       Department?             @relation("DepartmentHead")
+  /// Assessment framework back-relations
+  assessmentItemsEntered AssessmentItem[]
+  assessmentRoles        AssessmentRole[]
+  classTeacherOf         SchoolClass?            @relation("ClassTeacher")
+  primaryDepartment      Department?             @relation("TeacherPrimaryDepartment", fields: [primaryDepartmentId], references: [id])
+  school                 School                  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  user                   User?                   @relation(fields: [userId], references: [id])
+  archivedBy             User?                   @relation("TeacherArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
+  teacherSubjects        TeacherSubject[]
+  unavailability         TeacherUnavailability[]
+  timetableSlots         TimetableSlot[]
+  groupMemberships       GroupMember[]
+  /// Accommodation: dorms this teacher is the boarding master for
+  dormsBoardingMaster    Dormitory[]             @relation("DormBoardingMaster")
+
+  @@unique([schoolId, staffId])
+  @@index([primaryDepartmentId])
+  @@index([schoolId])
+  /// History module queries
+  @@index([schoolId, archivedAt])
+}
+
+/// Tracks staff IDs that have been freed by departing staff and can be
+/// recycled for new registrations. Unique per (schoolId, staffId) pair.
+model RecycledStaffId {
+  id        String   @id @default(cuid())
+  schoolId  String
+  staffId   String
+  createdAt DateTime @default(now())
+  school    School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, staffId])
+  @@index([schoolId, staffId])
+}
+
+/// Section: Staff Roles & Permissions (RBAC). A Principal-defined role such
+/// as "Accountant" or "Librarian" — a named bundle of module permissions
+/// that any number of ADMIN_STAFF logins can be assigned. Scoped per school,
+/// so each school curates its own set of roles. Deleting a role is blocked
+/// while any User still has it (see the API route) rather than silently
+/// leaving orphaned logins with no permissions.
+model StaffRole {
+  id          String           @id @default(cuid())
+  schoolId    String
+  name        String
+  description String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  permissions RolePermission[]
+  school      School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  /// Legacy single-role FK (kept for backward compatibility)
+  users       User[]
+  /// New multi-role join table
+  userRoles   UserStaffRole[]  @relation("StaffRoleUsers")
+
+  @@unique([schoolId, name])
+  @@index([schoolId])
+}
+
+/// One row per (role, module) pair. Granular action flags: canView is read-only
+/// access; canCreate/canEdit/canDelete/canApprove/canExport/canPrint/canManage/
+/// canConfigure/canAIAccess are additive capabilities on top of view. canManage
+/// is the legacy "full access" shorthand (implies all write actions). A module
+/// with no row at all for a role is treated as no access.
+model RolePermission {
+  staffRoleId  String
+  module       Module
+  canView      Boolean   @default(false)
+  canCreate    Boolean   @default(false)
+  canEdit      Boolean   @default(false)
+  canDelete    Boolean   @default(false)
+  canApprove   Boolean   @default(false)
+  canExport    Boolean   @default(false)
+  canPrint     Boolean   @default(false)
+  canManage    Boolean   @default(false)
+  canConfigure Boolean   @default(false)
+  canAIAccess  Boolean   @default(false)
+  staffRole    StaffRole @relation(fields: [staffRoleId], references: [id], onDelete: Cascade)
+
+  @@id([staffRoleId, module])
+}
+
+/// Many-to-many: a staff user can hold multiple StaffRoles simultaneously.
+/// Permissions from all assigned roles are merged (union) at runtime.
+/// The legacy User.staffRoleId is kept for backward compatibility — rows
+/// added here are the authoritative multi-role source.
+model UserStaffRole {
+  userId       String
+  staffRoleId  String
+  assignedAt   DateTime  @default(now())
+  assignedById String?
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  staffRole    StaffRole @relation("StaffRoleUsers", fields: [staffRoleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, staffRoleId])
+  @@index([userId])
+  @@index([staffRoleId])
+}
+
+/// Immutable audit log for every permission grant, revocation, or change.
+/// Never deleted — provides a complete history for compliance and security review.
+model PermissionAuditLog {
+  id            String   @id @default(cuid())
+  schoolId      String
+  /// The user who made the change (principal or delegated admin)
+  performedById String
+  /// The user whose permissions changed
+  targetUserId  String?
+  /// The StaffRole affected (if role-level change)
+  staffRoleId   String?
+  /// The module affected
+  module        Module?
+  /// What action was taken: ROLE_CREATED, ROLE_UPDATED, ROLE_DELETED,
+  /// PERMISSION_GRANTED, PERMISSION_REVOKED, ROLE_ASSIGNED, ROLE_UNASSIGNED
+  action        String
+  /// JSON snapshot of what changed { before: {...}, after: {...} }
+  changes       Json?
+  createdAt     DateTime @default(now())
+  school        School   @relation("PermAuditSchool", fields: [schoolId], references: [id], onDelete: Cascade)
+  performedBy   User     @relation("PermissionAuditPerformedBy", fields: [performedById], references: [id], onDelete: Cascade)
+  targetUser    User?    @relation("PermissionAuditTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([schoolId])
+  @@index([performedById])
+  @@index([targetUserId])
+  @@index([staffRoleId])
+  @@index([schoolId, createdAt])
+}
+
+/// One row per (school, provider) — e.g. this school's own Gemini API key.
+/// Every school brings its own credentials; nothing here is a shared
+/// Anthropic/Anthropic-hosted key. `encryptedValue` is AES-256-GCM
+/// ciphertext (see src/lib/crypto.ts), never the raw secret — even a full
+/// database dump doesn't hand out usable API keys without
+/// INTEGRATION_ENCRYPTION_KEY, which lives only in server env vars.
+/// `metadata` holds non-secret, provider-specific extras (e.g. an SMTP
+/// host/from-address, or a WhatsApp sender number) that don't need
+/// encrypting but do need to travel with the key.
+model SchoolIntegration {
+  id             String              @id @default(cuid())
+  schoolId       String
+  provider       IntegrationProvider
+  encryptedValue String
+  /// Last 4 characters of the plaintext key, shown in the UI so a Principal
+  /// can recognize which key is saved without ever re-displaying the full
+  /// value.
+  keyPreview     String
+  metadata       Json?
+  isActive       Boolean             @default(true)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  school         School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, provider])
+  @@index([schoolId])
+}
+
+/// Join table: which subjects a teacher is assigned to teach (2B.1).
+model TeacherSubject {
+  teacherId String
+  subjectId String
+  createdAt DateTime @default(now())
+  subject   Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  teacher   Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@id([teacherId, subjectId])
+}
+
+/// e.g. "Form 3 North". Name and classTeacherId are unique per school.
+model SchoolClass {
+  id              String                @id @default(cuid())
+  name            String
+  form            Int
+  stream          String?
+  classTeacherId  String?               @unique
+  /// Which curriculum framework students in this class are assessed under.
+  /// Set once at class creation; immutable after that. All students in the
+  /// class inherit this value — no per-student switching.
+  frameworkType   FrameworkType         @default(EIGHT_FOUR_FOUR)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  schoolId        String
+  attendances     Attendance[]
+  subjectTeachers ClassSubjectTeacher[]
+  classTeacher    Teacher?              @relation("ClassTeacher", fields: [classTeacherId], references: [id])
+  school          School                @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  students        Student[]
+  timetableSlots  TimetableSlot[]
+
+  @@unique([schoolId, name])
+  @@index([schoolId, form])
+}
+
+/// Section 2D — student registry. Admission number is the identifier
+/// referenced by results entry, marking dashboard, and parent linking (11B).
+/// Unique per school, not globally — two schools can both have admission
+/// number "001".
+model Student {
+  id                       String               @id @default(cuid())
+  userId                   String?              @unique
+  admissionNumber          String
+  fullName                 String
+  dateOfBirth              DateTime?
+  classId                  String
+  parentName               String?
+  parentContact            String?
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @updatedAt
+  schoolId                 String
+  /// Lifecycle management: when a student is removed from active list
+  archivedAt               DateTime?
+  /// TRANSFER, EXPULSION, or GRADUATION
+  archiveType              String?
+  /// Free-text reason for Transfer/Expulsion, stored here for quick access
+  archiveReason            String?
+  /// User who performed the archive action
+  archivedById             String?
+  attendances              Attendance[]
+  /// Assessment framework back-relations
+  assessmentItems          AssessmentItem[]
+  reportRemarks            ReportRemark[]
+  schoolClass              SchoolClass          @relation(fields: [classId], references: [id])
+  school                   School               @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  user                     User?                @relation(fields: [userId], references: [id])
+  archivedBy               User?                @relation("StudentArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
+  electives                StudentElective[]
+  disciplineRecords        DisciplineRecord[]
+  achievements             AchievementStudent[]
+  files                    StudentFile[]
+  libraryCard              LibraryCard?
+  groupMemberships         GroupMember[]
+  /// Accommodation back-relations
+  accommodationAllocations AllocationRecord[]
+  dormCaptainOf            Dormitory[]          @relation("DormCaptain")
+  accommodationEvents      AccommodationEvent[]
+
+  @@unique([schoolId, admissionNumber])
+  @@index([classId])
+  @@index([schoolId])
+  /// Supports full-name search: WHERE schoolId=? AND fullName ILIKE ?
+  @@index([schoolId, fullName])
+  /// Supports admission-number search and the max-admission-number query.
+  @@index([schoolId, admissionNumber])
+  /// History module queries
+  @@index([schoolId, archivedAt])
+}
+
+/// Section 4B — elective subject selections, distinct from core subjects
+/// (core subjects apply to a student automatically via Subject.applicableForms).
+model StudentElective {
+  studentId String
+  subjectId String
+  createdAt DateTime @default(now())
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject   Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@id([studentId, subjectId])
+}
+
+/// Section 2C — the weekly timetable grid. dayOfWeek: 0=Mon..4=Fri, period:
+/// 1-based lesson slot in the day. Two unique constraints do the heavy lifting:
+/// a class can't have two subjects in the same slot, and a teacher can't be
+/// double-booked across two classes in the same slot (2C.1). classId and
+/// teacherId are already school-scoped, so those constraints don't need
+/// schoolId added — but schoolId is kept here too for cheap "give me this
+/// school's whole timetable" queries without a join.
+model TimetableSlot {
+  id          String      @id @default(cuid())
+  classId     String
+  dayOfWeek   Int
+  period      Int
+  subjectId   String
+  teacherId   String
+  room        String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  schoolId    String
+  schoolClass SchoolClass @relation(fields: [classId], references: [id], onDelete: Cascade)
+  school      School      @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  subject     Subject     @relation(fields: [subjectId], references: [id])
+  teacher     Teacher     @relation(fields: [teacherId], references: [id])
+
+  @@unique([classId, dayOfWeek, period], name: "class_slot")
+  @@unique([teacherId, dayOfWeek, period], name: "teacher_slot")
+  @@index([schoolId])
+}
+
+/// Section: AI Timetable Generator. The school-day shape the generator (and
+/// eventually the manual grid too) schedules around — one row per school.
+/// Kept separate from School itself since it's config, not identity, and
+/// every field has a sane default so a school that never visits this screen
+/// still gets a working generator.
+model TimetableConfig {
+  schoolId                   String   @id
+  periodsPerDay              Int      @default(8)
+  /// A regular teaching period is inserted after this period number for a
+  /// short break, e.g. 2 means break falls between periods 2 and 3. Null =
+  /// no break.
+  breakAfterPeriod           Int?
+  lunchAfterPeriod           Int?
+  /// Reserves one afternoon slot per week for games/clubs across the whole
+  /// school — the generator never schedules a normal lesson there.
+  gamesDayOfWeek             Int?
+  gamesPeriod                Int?
+  maxLessonsPerTeacherPerDay Int      @default(6)
+  /// The school's actual timetable format — different schools start their
+  /// day at different times and run lessons/breaks/lunch for different
+  /// lengths. periodsPerDay + breakAfterPeriod/lunchAfterPeriod above stay
+  /// the scheduling unit the generator and grids work in (abstract period
+  /// numbers); these four fields describe what those periods mean in real
+  /// clock time so the school can define its own format once, here, and
+  /// have the AI (and every timetable view) follow it. "HH:MM", 24-hour.
+  dayStartTime               String   @default("08:00")
+  periodDurationMinutes      Int      @default(40)
+  breakDurationMinutes       Int      @default(15)
+  lunchDurationMinutes       Int      @default(45)
+  updatedAt                  DateTime @updatedAt
+  school                     School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+}
+
+/// Section: AI Timetable Generator / 2C — the standing teacher assignment
+/// for one (class, subject) pair, e.g. "Form 3 North's Mathematics teacher
+/// is Mr. Otieno." This is what makes a teacher "continue to be the teacher
+/// of that subject to that class until changed": once a row exists, the
+/// manual builder pre-fills and locks to this teacher and the AI generator
+/// always reuses it (never re-picks a different eligible teacher on its
+/// own), rather than re-deciding every time a lesson is added or the
+/// timetable is regenerated. A row is created the first time a teacher is
+/// picked for a (class, subject) — manually or by the generator — and only
+/// changes when the Principal explicitly changes it.
+model ClassSubjectTeacher {
+  classId     String
+  subjectId   String
+  teacherId   String
+  updatedAt   DateTime    @updatedAt
+  schoolClass SchoolClass @relation(fields: [classId], references: [id], onDelete: Cascade)
+  subject     Subject     @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  teacher     Teacher     @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@id([classId, subjectId])
+  @@index([teacherId])
+}
+
+/// Section: AI Timetable Generator — "teacher availability" input. A slot a
+/// specific teacher can't be scheduled in (e.g. they teach part-time and
+/// leave after period 5 on Fridays). Absence of a row means available.
+model TeacherUnavailability {
+  id        String  @id @default(cuid())
+  teacherId String
+  dayOfWeek Int
+  period    Int
+  teacher   Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, dayOfWeek, period])
+  @@index([teacherId])
+}
+
+/// Section: AI Timetable Generator — one row per natural-language
+/// instruction a Principal has given the AI chat (e.g. "Prioritize
+/// Mathematics in the morning"). `parsed` is Gemini's structured
+/// interpretation (see src/lib/ai/constraintParser.ts), which is what the
+/// generator actually reads; `instruction` is kept verbatim so the Principal
+/// can see the list of standing instructions they've given and remove ones
+/// that no longer apply. Persists across generations until removed — it's a
+/// standing preference, not a one-off generation option.
+model AiTimetableConstraint {
+  id          String   @id @default(cuid())
+  schoolId    String
+  instruction String
+  parsed      Json?
+  createdAt   DateTime @default(now())
+  school      School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@index([schoolId])
+}
+
+/// Section: School Calendar. One row per school-specific calendar entry —
+/// e.g. a mid-term break, a PTA meeting, or an exam sitting reminder. Kenya's
+/// national public holidays are NOT stored here; they're computed on the fly
+/// (see src/lib/kenyaHolidays.ts) and merged in by the calendar API so the
+/// list stays correct year to year without any seeding or upkeep. `date` is
+/// stored as a date-only value (midnight UTC of that calendar day) since
+/// events in this system are day-granular, not time-of-day granular.
+model CalendarEvent {
+  id          String           @id @default(cuid())
+  schoolId    String
+  title       String
+  description String?
+  date        DateTime
+  type        EventType        @default(EVENT)
+  /// Who can see this event: EVERYONE (all authenticated users), STAFF_ONLY
+  /// (teachers + ADMIN_STAFF + PRINCIPAL), or PARENTS_ONLY (parent portal).
+  audience    CalendarAudience @default(EVERYONE)
+  openingDate DateTime?
+  closingDate DateTime?
+  createdById String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  school      School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  createdBy   User?            @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([schoolId, date])
+  @@index([schoolId, audience])
+}
+
+/// Section: Attendance. One row per student per class per day — the
+/// (studentId, classId, date) unique constraint is what makes taking
+/// attendance twice for the same day an upsert (edit/reopen) instead of a
+/// duplicate row, and is also what "one record per student per day" (Step 4)
+/// means concretely. classId is kept alongside studentId (rather than
+/// derived solely from Student.classId) so a student's attendance history
+/// stays correctly attributed to the class they were actually in on that
+/// day, even if they change class/stream later in the year.
+model Attendance {
+  id           String           @id @default(cuid())
+  schoolId     String
+  studentId    String
+  classId      String
+  date         DateTime
+  status       AttendanceStatus @default(PRESENT)
+  recordedById String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  school       School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student      Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  schoolClass  SchoolClass      @relation(fields: [classId], references: [id], onDelete: Cascade)
+  recordedBy   Teacher?         @relation(fields: [recordedById], references: [id], onDelete: SetNull)
+
+  @@unique([studentId, classId, date])
+  @@index([schoolId, date])
+  @@index([classId, date])
+  /// Supports student attendance-history query: WHERE studentId=? ORDER BY date DESC.
+  @@index([studentId, date])
+}
+
+/// Records Module — one discipline case per row. Notes, events, and files
+/// hang off this. classId snapshots the student's class at the time of the
+/// offence (same rationale as Attendance.classId).
+model DisciplineRecord {
+  id            String            @id @default(cuid())
+  schoolId      String
+  studentId     String
+  classId       String?
+  offence       String
+  description   String?
+  actionTaken   String?
+  resolution    String?
+  dateOfOffence DateTime
+  status        DisciplineStatus  @default(OPEN)
+  notes         String?
+  aiSummary     String?
+  recordedById  String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  school        School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student       Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  recordedBy    User?             @relation(fields: [recordedById], references: [id], onDelete: SetNull)
+  caseNotes     DisciplineNote[]
+  events        DisciplineEvent[]
+  files         StudentFile[]
+
+  @@index([schoolId, dateOfOffence])
+  @@index([studentId, dateOfOffence])
+  /// Supports student-scoped discipline record listing.
+  @@index([schoolId, studentId])
+}
+
+/// A dated note added to a discipline case by staff.
+model DisciplineNote {
+  id                 String           @id @default(cuid())
+  disciplineRecordId String
+  body               String
+  createdById        String?
+  createdAt          DateTime         @default(now())
+  disciplineRecord   DisciplineRecord @relation(fields: [disciplineRecordId], references: [id], onDelete: Cascade)
+  createdBy          User?            @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([disciplineRecordId])
+}
+
+/// Case history / timeline entry — written automatically on create, status
+/// change, note added, file attached, etc.
+model DisciplineEvent {
+  id                 String           @id @default(cuid())
+  disciplineRecordId String
+  type               String
+  detail             String
+  createdById        String?
+  createdAt          DateTime         @default(now())
+  disciplineRecord   DisciplineRecord @relation(fields: [disciplineRecordId], references: [id], onDelete: Cascade)
+  createdBy          User?            @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([disciplineRecordId, createdAt])
+}
+
+/// File attached to a student (and optionally to a discipline case). Bytes
+/// live in the DB — no external object store is configured for this system.
+/// sha256 is unique per student to prevent duplicate uploads.
+model StudentFile {
+  id                 String            @id @default(cuid())
+  schoolId           String
+  studentId          String
+  disciplineRecordId String?
+  fileName           String
+  mimeType           String
+  size               Int
+  sha256             String
+  data               Bytes
+  uploadedById       String?
+  createdAt          DateTime          @default(now())
+  school             School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student            Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  disciplineRecord   DisciplineRecord? @relation(fields: [disciplineRecordId], references: [id], onDelete: SetNull)
+  uploadedBy         User?             @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@unique([studentId, sha256])
+  @@index([schoolId])
+  @@index([studentId])
+  @@index([disciplineRecordId])
+}
+
+/// One achievement record, linkable to multiple students via
+/// AchievementStudent — editing the record updates it for all linked
+/// students at once.
+model Achievement {
+  id              String               @id @default(cuid())
+  schoolId        String
+  title           String
+  category        AchievementCategory  @default(OTHER)
+  description     String?
+  achievementDate DateTime
+  awardLevel      String?
+  aiSummary       String?
+  recordedById    String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  school          School               @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  recordedBy      User?                @relation(fields: [recordedById], references: [id], onDelete: SetNull)
+  students        AchievementStudent[]
+
+  @@index([schoolId, achievementDate])
+}
+
+/// Join table: which students share an achievement.
+model AchievementStudent {
+  achievementId String
+  studentId     String
+  createdAt     DateTime    @default(now())
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  student       Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([achievementId, studentId])
+  @@index([studentId])
+}
+
+// =============================================================================
+// Library Management System (v2 — Enterprise Grade)
+// =============================================================================
+//
+// Design decisions:
+//
+//  1. LibrarySettings is expanded with identification method config,
+//     eligible-student threshold, card expiry policy, and QR/barcode flags.
+//
+//  2. LibraryCatalogue is the shared "book record" (title + edition + form).
+//     Multiple physical copies share one catalogue row, preventing duplicate
+//     catalogue entries for the same edition.
+//
+//  3. LibraryCopy is the physical unit — every copy gets its own accession
+//     number, QR code, barcode, condition history, and lifecycle state.
+//     Copies are never permanently deleted; they transition to ARCHIVED or LOST.
+//
+//  4. LibraryCard is expanded with status (ACTIVE/SUSPENDED/ALUMNI/TRANSFERRED),
+//     card number, expiry date, and photo URL so the card can be rendered as
+//     a proper digital ID.
+//
+//  5. LibraryBorrow gains a copyId FK (pointing to the specific physical copy
+//     issued) and a renewalCount to support renewals.
+//
+//  6. The legacy LibraryBook model is retained untouched for backward compat
+//     with existing API routes and sync engine during migration.
+//
+// =============================================================================
+
+/// Per-school library configuration — one row per school.
+model LibrarySettings {
+  schoolId             String             @id
+  /// Maximum number of books a student may borrow at once.
+  maxBooksPerStudent   Int                @default(3)
+  /// Maximum number of days a student can keep a borrowed book.
+  maxBorrowDays        Int                @default(14)
+  /// Fine charged per day the book is overdue (in school currency units).
+  finePerDay           Float              @default(5.0)
+  /// Maximum renewals allowed per borrow.
+  maxRenewals          Int                @default(1)
+  /// How the librarian identifies a student or book during circulation.
+  /// "MANUAL" = type admission number/book number; "QR_CAMERA" = device camera;
+  /// "QR_HARDWARE" = USB/Bluetooth scanner auto-detected.
+  identificationMethod LibraryIdentMethod @default(MANUAL)
+  /// Whether barcode scanning is enabled in addition to QR codes.
+  barcodeEnabled       Boolean            @default(false)
+  /// When set, only students enrolled in forms >= this value are eligible.
+  /// NULL = all enrolled students are eligible.
+  eligibleFromForm     Int?
+  /// Number of days a library card is valid for. NULL = no expiry.
+  cardValidityDays     Int?
+  /// Minimum overdue days before a student is flagged in reports.
+  overdueAlertDays     Int                @default(7)
+  updatedAt            DateTime           @updatedAt
+  school               School             @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+}
+
+/// Shared catalogue record — one row per unique (title, edition, form/class).
+/// Multiple physical copies share this record.
+model LibraryCatalogue {
+  id                String                    @id @default(cuid())
+  schoolId          String
+  /// Book title
+  title             String
+  /// Book number — school-assigned identifier, e.g. "MAT-001"
+  bookNumber        String?
+  /// Subject this book covers, e.g. "Mathematics"
+  subject           String?
+  /// Form/class level, e.g. 3 for Form 3
+  form              Int?
+  author            String?
+  publisher         String?
+  /// Edition number, e.g. "3rd Edition"
+  edition           String?
+  isbn              String?
+  category          LibraryCategory           @default(TEXTBOOK)
+  /// Physical location label, e.g. "A", "Science"
+  shelf             String?
+  /// Row within shelf, e.g. "Row 2"
+  shelfRow          String?
+  language          String                    @default("English")
+  publishYear       Int?
+  /// Purchase date of this catalogue entry (latest acquisition)
+  purchaseDate      DateTime?
+  /// Cost per copy in school currency
+  costPerCopy       Float?
+  /// Total copies owned (maintained as a computed count via application layer)
+  totalCopies       Int                       @default(0)
+  /// Whether this catalogue record is archived (no new copies can be added)
+  archivedAt        DateTime?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  school            School                    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  copies            LibraryCopy[]
+  reservations      LibraryReservation[]
+  classroomLoans    LibraryClassroomLoan[]
+  circulationEvents LibraryCirculationEvent[]
+
+  @@unique([schoolId, bookNumber], name: "school_bookNumber")
+  @@index([schoolId])
+  @@index([schoolId, subject])
+  @@index([schoolId, form])
+  @@index([schoolId, category])
+  @@index([schoolId, shelf])
+  @@index([schoolId, title])
+}
+
+/// One physical copy of a catalogue entry. Tracked from acquisition to retirement.
+model LibraryCopy {
+  id              String               @id @default(cuid())
+  schoolId        String
+  catalogueId     String
+  /// Unique accession number assigned when the copy is registered, e.g. "ACC-00145"
+  accessionNumber String
+  /// QR code payload — typically the accession number or a URL
+  qrCode          String?              @unique
+  /// Barcode value (if barcodeEnabled)
+  barcode         String?
+  condition       LibraryCopyCondition @default(GOOD)
+  /// Lifecycle state of this physical copy
+  status          LibraryCopyStatus    @default(AVAILABLE)
+  /// When this copy was acquired
+  acquisitionDate DateTime?
+  /// Cost of this specific copy
+  cost            Float?
+  /// When this copy was archived/removed from circulation
+  archivedAt      DateTime?
+  /// Reason for archiving (LOST, DAMAGED_BEYOND_REPAIR, DEACCESSION, etc.)
+  archiveReason   String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  school          School               @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  catalogue       LibraryCatalogue     @relation(fields: [catalogueId], references: [id], onDelete: Cascade)
+  borrows         LibraryBorrow[]
+
+  @@unique([schoolId, accessionNumber], name: "school_accessionNumber")
+  @@index([schoolId])
+  @@index([catalogueId])
+  @@index([schoolId, status])
+}
+
+/// Master catalogue of books — legacy model kept for backward compatibility.
+/// New code should use LibraryCatalogue + LibraryCopy instead.
+model LibraryBook {
+  id            String          @id @default(cuid())
+  schoolId      String
+  title         String
+  author        String?
+  isbn          String?
+  publisher     String?
+  /// Year of publication, e.g. 2018
+  publishYear   Int?
+  /// How many physical copies the school owns
+  totalCopies   Int             @default(1)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  school        School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  borrowRecords LibraryBorrow[]
+
+  @@unique([schoolId, isbn], name: "school_isbn")
+  @@index([schoolId])
+}
+
+/// A student's digital library card — one row per student, auto-created when
+/// the student is enrolled (or on first interaction). Expanded with status,
+/// card number, and expiry for proper digital ID rendering.
+model LibraryCard {
+  id                 String            @id @default(cuid())
+  schoolId           String
+  studentId          String            @unique
+  /// Unique human-readable card number, e.g. "LIB-2024-00042"
+  cardNumber         String?
+  /// Card status — automatically set by lifecycle events
+  status             LibraryCardStatus @default(ACTIVE)
+  /// When non-null, card is suspended with this reason
+  suspensionReason   String?
+  /// Card expiry date — derived from LibrarySettings.cardValidityDays at issue time
+  expiresAt          DateTime?
+  /// Accumulated unpaid fines in school currency units.
+  fineBalance        Float             @default(0)
+  /// Total fines ever paid — used for the principal's paid-fines widget.
+  totalFinesPaid     Float             @default(0)
+  /// Count of books currently borrowed (cached for performance)
+  currentBorrowCount Int               @default(0)
+  /// Total books ever borrowed
+  totalBorrowCount   Int               @default(0)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  school             School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student            Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  borrows            LibraryBorrow[]
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+}
+
+/// One borrow event: a student checked out one copy of one book.
+/// returnedAt is null while the book is still out.
+model LibraryBorrow {
+  id              String       @id @default(cuid())
+  schoolId        String
+  cardId          String
+  /// Legacy FK — points to LibraryBook (used by old borrow routes)
+  bookId          String?
+  /// New FK — points to the specific LibraryCopy issued (preferred)
+  copyId          String?
+  borrowedAt      DateTime     @default(now())
+  dueAt           DateTime
+  /// Set when the book is physically returned.
+  returnedAt      DateTime?
+  /// When non-null, fine accrual has been manually stopped by the librarian.
+  fineStoppedAt   DateTime?
+  /// Final fine charged for this borrow (computed on return / fine-stop).
+  fineAmount      Float        @default(0)
+  /// Number of times this borrow has been renewed
+  renewalCount    Int          @default(0)
+  /// Notes added by librarian at return or during the borrow period
+  notes           String?
+  /// Condition of the book on return: EXCELLENT | GOOD | FAIR | DAMAGED | LOST
+  returnCondition String?
+  /// Return type: NORMAL | DAMAGED | LOST | REPLACEMENT_RECEIVED
+  returnType      String?
+  /// Whether this borrow was processed with a manual override
+  isOverride      Boolean      @default(false)
+  /// Reason for override (required when isOverride = true)
+  overrideReason  String?
+  /// User who authorized the override
+  overrideById    String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  school          School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  card            LibraryCard  @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  book            LibraryBook? @relation(fields: [bookId], references: [id], onDelete: SetNull)
+  copy            LibraryCopy? @relation(fields: [copyId], references: [id], onDelete: SetNull)
+
+  @@index([schoolId])
+  @@index([cardId])
+  @@index([bookId])
+}
+
+// =============================================================================
+// Library Stage 2 — Policies, Reservations, Fine Audit, Circulation Events
+// =============================================================================
+
+/// Configurable per-patron-type circulation policy. Each school can define
+/// different rules for STUDENT, TEACHER, BOARDING, DAY_SCHOLAR, JUNIOR, SENIOR.
+/// A single DEFAULT row covers all patron types unless overridden.
+model LibraryPolicy {
+  id                  String            @id @default(cuid())
+  schoolId            String
+  /// Patron category this policy applies to. DEFAULT covers all.
+  patronType          LibraryPatronType @default(DEFAULT)
+  /// Human label, e.g. "Boarding Students"
+  label               String?
+  /// Max books allowed out simultaneously
+  maxBooksAllowed     Int               @default(3)
+  /// Default borrow period in days
+  borrowDays          Int               @default(14)
+  /// Grace period (days) before fines start accruing
+  gracePeriodDays     Int               @default(0)
+  /// Daily fine rate (school currency)
+  finePerDay          Float             @default(5.0)
+  /// Count weekends toward overdue calculation
+  countWeekends       Boolean           @default(true)
+  /// Count public holidays toward overdue
+  countHolidays       Boolean           @default(false)
+  /// Max renewals per borrow
+  maxRenewals         Int               @default(1)
+  /// Fine threshold (KES) above which borrowing is blocked; 0 = any fine blocks
+  fineBlockThreshold  Float             @default(0)
+  /// Replacement cost multiplier when book is declared lost (× costPerCopy)
+  lostBookMultiplier  Float             @default(1.0)
+  /// Fixed replacement fee when lost book cost is unknown
+  lostBookFixedFee    Float             @default(500)
+  /// Fine rate for damaged books (% of costPerCopy)
+  damagedBookFineRate Float             @default(0.3)
+  /// Whether reservations are allowed for this patron type
+  reservationsAllowed Boolean           @default(true)
+  isActive            Boolean           @default(true)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  school              School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, patronType])
+  @@index([schoolId])
+}
+
+/// Permanent audit record for every fine adjustment, clearance, or override.
+/// Never deleted — immutable history.
+model LibraryFineAudit {
+  id            String   @id @default(cuid())
+  schoolId      String
+  cardId        String
+  borrowId      String?
+  /// CHARGE | PAYMENT | CLEAR | OVERRIDE | PAUSE_APPLIED | PAUSE_REMOVED
+  eventType     String
+  /// Amount affected (positive = charge, negative = credit)
+  amount        Float    @default(0)
+  /// Balance after this event
+  balanceAfter  Float    @default(0)
+  /// Mandatory reason for CLEAR or OVERRIDE actions
+  reason        String?
+  /// User who performed the action
+  performedById String?
+  createdAt     DateTime @default(now())
+  school        School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@index([schoolId])
+  @@index([cardId])
+  @@index([borrowId])
+}
+
+/// A period during which fine accumulation is paused school-wide, or for
+/// individual students / exam periods / holidays / events.
+model LibraryFinePause {
+  id          String    @id @default(cuid())
+  schoolId    String
+  /// SCHOOL_WIDE | STUDENT | EXAM_PERIOD | HOLIDAY | SPECIAL_EVENT
+  scope       String    @default("SCHOOL_WIDE")
+  /// Only set when scope = STUDENT
+  studentId   String?
+  label       String
+  reason      String?
+  startDate   DateTime
+  endDate     DateTime?
+  /// Whether this pause is currently active
+  isActive    Boolean   @default(true)
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  school      School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@index([schoolId])
+  @@index([schoolId, isActive])
+}
+
+/// A reservation request: a patron wants a specific catalogue entry.
+/// When a copy becomes available it is automatically allocated here.
+model LibraryReservation {
+  id                 String                   @id @default(cuid())
+  schoolId           String
+  catalogueId        String
+  /// TYPE: INDIVIDUAL | CLASSROOM | DEPARTMENT | WAITLIST
+  reservationType    LibraryReservationType   @default(INDIVIDUAL)
+  /// Student patron (for INDIVIDUAL + WAITLIST)
+  studentId          String?
+  /// Teacher patron (for CLASSROOM reservations)
+  teacherId          String?
+  /// Department name (for DEPARTMENT reservations)
+  departmentName     String?
+  /// For classroom: expected return date (may be after academic year)
+  expectedReturnDate DateTime?
+  /// For classroom: max copies reserved
+  quantityRequested  Int                      @default(1)
+  /// Notes from teacher/librarian
+  notes              String?
+  /// Status: PENDING | ACTIVE | FULFILLED | CANCELLED | EXPIRED
+  status             LibraryReservationStatus @default(PENDING)
+  /// Which specific copy was allocated (set when status → ACTIVE)
+  allocatedCopyId    String?
+  /// When the reservation was fulfilled / copy collected
+  fulfilledAt        DateTime?
+  /// When the reservation expires (auto-calculated from settings)
+  expiresAt          DateTime?
+  /// Position in waitlist queue (1-indexed)
+  queuePosition      Int?
+  createdById        String?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  school             School                   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  catalogue          LibraryCatalogue         @relation(fields: [catalogueId], references: [id], onDelete: Cascade)
+
+  @@index([schoolId])
+  @@index([catalogueId])
+  @@index([studentId])
+  @@index([schoolId, status])
+}
+
+/// A classroom loan — a teacher takes copies for class use. Individual copy
+/// assignments (which student has which copy) can be tracked via notes or
+/// a separate future model. Returns are teacher-driven and may span terms.
+model LibraryClassroomLoan {
+  id                 String           @id @default(cuid())
+  schoolId           String
+  catalogueId        String
+  teacherId          String
+  classId            String?
+  copiesCount        Int              @default(1)
+  borrowedAt         DateTime         @default(now())
+  /// Teacher-specified return date
+  expectedReturnDate DateTime?
+  returnedAt         DateTime?
+  notes              String?
+  createdById        String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  school             School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  catalogue          LibraryCatalogue @relation(fields: [catalogueId], references: [id], onDelete: Cascade)
+
+  @@index([schoolId])
+  @@index([catalogueId])
+  @@index([teacherId])
+}
+
+/// Immutable event log for every circulation action on a physical copy.
+/// Provides lifetime intelligence — every borrower, every condition change,
+/// every reservation, every fine event — for analytics and audit.
+model LibraryCirculationEvent {
+  id            String            @id @default(cuid())
+  schoolId      String
+  copyId        String?
+  catalogueId   String?
+  borrowId      String?
+  reservationId String?
+  /// BORROWED | RETURNED | RENEWED | RESERVED | RESERVATION_CANCELLED |
+  /// CONDITION_CHANGED | LOST_REPORTED | REPLACEMENT_RECEIVED |
+  /// FINE_CHARGED | FINE_CLEARED | FINE_PAUSED | ARCHIVED
+  eventType     String
+  /// Snapshot of relevant data at event time (JSON)
+  payload       Json?
+  performedById String?
+  studentId     String?
+  teacherId     String?
+  createdAt     DateTime          @default(now())
+  school        School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  catalogue     LibraryCatalogue? @relation(fields: [catalogueId], references: [id], onDelete: SetNull)
+
+  @@index([schoolId])
+  @@index([copyId])
+  @@index([catalogueId])
+  @@index([studentId])
+  @@index([schoolId, eventType])
+}
+
+// =============================================================================
+// Library Stage 2 enums
+// =============================================================================
+
+enum LibraryPatronType {
+  DEFAULT
+  STUDENT
+  TEACHER
+  BOARDING
+  DAY_SCHOLAR
+  JUNIOR
+  SENIOR
+}
+
+enum LibraryReservationType {
+  INDIVIDUAL
+  CLASSROOM
+  DEPARTMENT
+  WAITLIST
+}
+
+enum LibraryReservationStatus {
+  PENDING
+  ACTIVE
+  FULFILLED
+  CANCELLED
+  EXPIRED
+}
+
+// =============================================================================
+// Library enums
+// =============================================================================
+
+enum LibraryIdentMethod {
+  /// Librarian types the admission number or book number manually
+  MANUAL
+  /// Device camera scans QR codes
+  QR_CAMERA
+  /// USB/Bluetooth hardware scanner auto-feeds scans
+  QR_HARDWARE
+}
+
+enum LibraryCardStatus {
+  /// Card is valid and student may borrow
+  ACTIVE
+  /// Card is temporarily blocked (e.g. unpaid fines, disciplinary hold)
+  SUSPENDED
+  /// Student has graduated — card is read-only history
+  ALUMNI
+  /// Student has transferred — card is read-only history
+  TRANSFERRED
+}
+
+enum LibraryCategory {
+  TEXTBOOK
+  REFERENCE
+  FICTION
+  NON_FICTION
+  PERIODICAL
+  DICTIONARY
+  ATLAS
+  NOVEL
+  SCIENCE
+  MATHEMATICS
+  HUMANITIES
+  LANGUAGES
+  OTHER
+}
+
+enum LibraryCopyCondition {
+  /// New or like-new
+  EXCELLENT
+  /// Minor wear, fully usable
+  GOOD
+  /// Noticeable wear but still usable
+  FAIR
+  /// Significant damage, barely usable
+  DAMAGED
+  /// Reported lost
+  LOST
+}
+
+enum LibraryCopyStatus {
+  /// On the shelf, available to borrow
+  AVAILABLE
+  /// Currently borrowed by a student
+  BORROWED
+  /// Reserved for a student
+  RESERVED
+  /// Being repaired / rebound
+  UNDER_REPAIR
+  /// Permanently removed from circulation (lost, discarded, donated)
+  ARCHIVED
+}
+
+enum DisciplineStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  ESCALATED
+}
+
+enum AchievementCategory {
+  SPORTS
+  LEADERSHIP
+  MUSIC_FESTIVAL
+  ACADEMICS
+  INNOVATION
+  OTHER
+}
+
+enum Role {
+  PRINCIPAL
+  TEACHER
+  STUDENT
+  PARENT
+  WATCHMAN
+  MARKER
+  ADMIN_STAFF
+}
+
+enum SubjectType {
+  CORE
+  ELECTIVE
+}
+
+/// Section: Staff Roles & Permissions (RBAC). Every screen/API surface a
+/// non-Principal staff member could touch is one of these. Kept as an enum
+/// (not free-text) so a typo in a permission row can never silently grant or
+/// block access to something that doesn't exist.
+enum Module {
+  DEPARTMENTS
+  SUBJECTS
+  STAFF
+  STAFF_ROLES
+  CLASSES
+  STUDENTS
+  TIMETABLE
+  EXAM_PERIODS
+  RESULTS
+  TOD
+  COMMUNICATION
+  CALENDAR
+  AI_TOOLS
+  REPORTS
+  RECORDS
+  RECORDS_DISCIPLINE
+  RECORDS_ACHIEVEMENTS
+  ANALYTICS
+  /// Multi-framework assessment: framework config, sitting periods, and
+  /// item entry. Split from the old EXAM_PERIODS / RESULTS pair so scoped
+  /// roles (e.g. CBC class teacher, CBE assessor) can be granted
+  /// independently of the legacy modules.
+  ASSESSMENTS
+  /// Assessment framework hierarchy management: learning areas, strands,
+  /// papers, competency units. Typically HOD / Academic Deputy territory.
+  ASSESSMENT_FRAMEWORK
+  /// Library catalogue, student library cards, borrowing, and fines.
+  LIBRARY
+  /// Lifecycle history: graduated, transferred, and expelled students; transferred staff.
+  HISTORY
+  /// Accommodation module: dormitories, cubicles, beds, and student boarding allocations.
+  ACCOMMODATION
+  /// Attendance module: take and review daily class attendance. Principals
+  /// always have this. Granting it to a staff role lets any admin-staff member
+  /// take or review attendance across all classes.
+  ATTENDANCE
+}
+
+/// Every third-party service a school can bring its own credentials for.
+/// Deliberately an enum (not free text) — the settings screen, the
+/// encryption layer, and whatever service code eventually calls Gemini/SMS/
+/// etc. all key off the same fixed list, so a typo can't silently create an
+/// unused row or fail to find a configured one.
+enum IntegrationProvider {
+  GEMINI
+  GOOGLE_CALENDAR
+  SMS
+  WHATSAPP
+  EMAIL
+}
+
+/// Section: School Calendar. HOLIDAY here is a school-declared holiday
+/// (e.g. a local closure), distinct from the computed Kenya public holidays
+/// the calendar API merges in separately.
+enum EventType {
+  HOLIDAY
+  EXAM
+  MEETING
+  EVENT
+  OTHER
+}
+
+/// Controls which user groups can see a calendar event.
+enum CalendarAudience {
+  EVERYONE
+  STAFF_ONLY
+  PARENTS_ONLY
+}
+
+/// Section: Attendance. Two states only — attendance is taken with a
+/// checkbox (checked = Present, unchecked = Absent). LATE/EXCUSED were
+/// removed; the migration mapped LATE→PRESENT and EXCUSED→ABSENT.
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+}
+
+// ---------------------------------------------------------------------------
+// Pathway weight configuration (Senior CBE)
+// ---------------------------------------------------------------------------
+// Stores the SBA/exam weighting split and maximum marks for each subject
+// within a Senior CBE framework. Used by CbePathwayGrid to compute the
+// weighted combined score. Unique per (framework, subject).
+
+/// Configures the SBA-to-exam weighting for one subject in a Senior CBE
+/// framework. If no row exists, the system defaults to 60/40 with maxMarks
+/// of 100 for both components.
+model PathwayWeight {
+  id           String              @id @default(cuid())
+  schoolId     String
+  frameworkId  String
+  subjectId    String
+  /// Fraction of the final score from school-based assessment, e.g. 0.6.
+  /// sbaWeight + examWeight must equal 1.0 (enforced by DB CHECK).
+  sbaWeight    Float               @default(0.6)
+  examWeight   Float               @default(0.4)
+  sbaMaxMarks  Float               @default(100)
+  examMaxMarks Float               @default(100)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  school       School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  framework    AssessmentFramework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  subject      Subject             @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([frameworkId, subjectId])
+  @@index([schoolId])
+}
+
+// =============================================================================
+// Subject-expectation configuration — how many subjects each form is expected
+// to have enrolled (used by the analytics / reports layer to flag shortfalls).
+// =============================================================================
+
+/// Per-(school, form) configuration: how many subjects students in that form
+/// are expected to be taking. One row per form level per school. Created/
+/// updated via PUT /api/subject-expectations; defaults to 0 when absent.
+model FormSubjectExpectation {
+  id            String   @id @default(cuid())
+  schoolId      String
+  form          Int
+  expectedCount Int      @default(0)
+  updatedAt     DateTime @updatedAt
+  school        School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, form], name: "schoolId_form")
+  @@index([schoolId])
+}
+
+// =============================================================================
+// ASSESSMENT FRAMEWORK — multi-framework assessment layer
+// =============================================================================
+//
+// Design decisions:
+//
+//  1. FrameworkType is an enum, not free text, so downstream code can branch
+//     on it safely without string matching.
+//
+//  2. Each framework type gets its own hierarchy tables rather than a single
+//     self-referential "node" table. Self-referential trees are flexible but
+//     make queries and constraints messy; fixed-depth tables let the DB
+//     enforce "a SubStrand must have a Strand, a Strand must have a
+//     LearningArea" without application-layer guards.
+//
+//  3. AssessmentItem is the single polymorphic record table. The three result
+//     types (numeric / performance level / competency) are stored as three
+//     nullable columns with a discriminator — exactly one is non-null per row.
+//     A CHECK constraint in the migration enforces this. Prisma doesn't
+//     generate CHECK constraints from the schema, so the migration SQL adds
+//     them manually.
+//
+//  4. AssessmentRole is a scoped-RBAC join table: it grants a teacher a
+//     specific role (e.g. SUBJECT_TEACHER, CLASS_TEACHER, HOD) for a
+//     specific scope node (learningAreaId OR competencyUnitId OR subjectId)
+//     within one school. This is intentionally separate from the existing
+//     StaffRole/RolePermission system, which is module-level; assessment
+//     roles are item-level.
+//
+//  5. AssessmentPeriod replaces ExamPeriod. It adds a frameworkId FK so
+//     different frameworks can run concurrent sittings without collision.
+//
+// =============================================================================
+
+/// Which curriculum framework a school (or a cohort within a school) uses.
+enum FrameworkType {
+  /// Kenya 8-4-4: numeric marks, KCSE grade bands, subject → paper structure.
+  EIGHT_FOUR_FOUR
+  /// CBC (Competency Based Curriculum): performance levels EE/ME/AE/BE,
+  /// learning area → strand → sub-strand hierarchy.
+  CBC
+  /// CBE (Competency Based Education / TVET): competent / not-yet-competent,
+  /// competency unit → element → performance criterion hierarchy.
+  CBE
+}
+
+/// What kind of result payload an AssessmentItem carries.
+/// Exactly one of the three nullable result columns on AssessmentItem is
+/// populated — this discriminator makes that intent explicit and lets the
+/// application branch cleanly.
+enum AssessmentResultKind {
+  /// A raw numeric mark (8-4-4). Stored in AssessmentItem.numericScore.
+  NUMERIC
+  /// CBC performance level: EE / ME / AE / BE.
+  PERFORMANCE_LEVEL
+  /// CBE competency status: COMPETENT or NOT_YET_COMPETENT.
+  COMPETENCY_STATUS
+}
+
+/// CBC performance level rubric (KICD 2019 CBC framework).
+enum PerformanceLevel {
+  /// Exceeds Expectation
+  EE
+  /// Meets Expectation
+  ME
+  /// Approaches Expectation
+  AE
+  /// Below Expectation
+  BE
+}
+
+/// CBE competency outcome — binary per performance criterion.
+enum CompetencyStatus {
+  COMPETENT
+  NOT_YET_COMPETENT
+}
+
+/// One row per curriculum framework a school operates. Most schools will
+/// have exactly one, but a school running both 8-4-4 (upper secondary) and
+/// CBC (junior secondary) concurrently gets two rows. Scoped per school.
+model AssessmentFramework {
+  id              String             @id @default(cuid())
+  schoolId        String
+  type            FrameworkType
+  /// Human-readable label, e.g. "KCSE 2026" or "CBC Grade 7".
+  label           String
+  /// Academic year this framework configuration applies to, e.g. "2026".
+  academicYear    String
+  /// Whether this is the active/default framework for new assessments.
+  isActive        Boolean            @default(true)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  school          School             @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  periods         AssessmentPeriod[]
+  /// Framework-specific hierarchy back-relations
+  papers          Paper[]
+  learningAreas   LearningArea[]
+  competencyUnits CompetencyUnit[]
+  items           AssessmentItem[]
+  roles           AssessmentRole[]
+  pathwayWeights  PathwayWeight[]
+
+  @@unique([schoolId, type, academicYear])
+  @@index([schoolId])
+}
+
+/// A named assessment sitting scoped to one framework — replaces ExamPeriod.
+/// Weight and maxMarks carry the same semantics as before but are now
+/// framework-aware (CBC periods don't need maxMarks; CBE doesn't need
+/// weight — both are nullable/defaulted so they can be ignored).
+model AssessmentPeriod {
+  id            String              @id @default(cuid())
+  schoolId      String
+  frameworkId   String
+  name          String
+  academicYear  String
+  term          Int? /// 1, 2, or 3 for Kenyan terms
+  /// Relative weight when combining periods (8-4-4 use case).
+  weight        Float               @default(1)
+  /// What numeric marks are out of (8-4-4 use case).
+  maxMarks      Float?
+  isCurrent     Boolean             @default(false)
+  /// When marks entry opens (optional — informational only).
+  openingDate   DateTime?
+  /// Deadline for marks submission — shown as a countdown in teacher dashboards.
+  closingDate   DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  school        School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  framework     AssessmentFramework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  items         AssessmentItem[]
+  reportRemarks ReportRemark[]
+
+  @@unique([schoolId, frameworkId, name, academicYear])
+  @@index([schoolId, frameworkId])
+  /// Supports isCurrent=true lookup used by teacher home and sync pull.
+  @@index([schoolId, isCurrent])
+}
+
+// ---------------------------------------------------------------------------
+// 8-4-4 hierarchy: Subject → Paper
+// ---------------------------------------------------------------------------
+// The Subject model already exists (it is the subject list). Papers are the
+// distinct marking units within a subject, e.g. Mathematics Paper 1 / Paper 2,
+// English Paper 1 (Comprehension) / Paper 2 (Composition). A subject with no
+// papers is assessed as a single unit (the subject itself acts as its own
+// paper for results-entry purposes).
+
+/// One paper within an 8-4-4 subject, e.g. "Mathematics Paper 1".
+/// Scoped to both school and framework so the same subject can have
+/// different paper splits across KCSE years if the syllabus changes.
+model Paper {
+  id          String              @id @default(cuid())
+  schoolId    String
+  frameworkId String
+  subjectId   String
+  name        String /// e.g. "Paper 1", "Paper 2 (Essay)"
+  code        String? /// optional short code, e.g. "MAT1"
+  /// Maximum marks for this paper. Overrides AssessmentPeriod.maxMarks for
+  /// papers where the split is uneven (e.g. 40/60).
+  maxMarks    Float               @default(100)
+  /// Display order within the subject.
+  sortOrder   Int                 @default(0)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  school      School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  framework   AssessmentFramework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  subject     Subject             @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  items       AssessmentItem[]
+
+  @@unique([frameworkId, subjectId, name])
+  @@index([schoolId, frameworkId])
+  @@index([subjectId])
+  /// Supports marksheet/report-card paper lookup: WHERE frameworkId=? AND subjectId=?
+  @@index([frameworkId, subjectId])
+}
+
+// ---------------------------------------------------------------------------
+// CBC hierarchy: LearningArea → Strand → SubStrand
+// ---------------------------------------------------------------------------
+// Each level is scoped to (school, framework) so a school can customise
+// names/codes without affecting other schools. The three-level hierarchy is
+// fixed-depth by design (see design notes above).
+
+/// Top-level CBC curriculum unit, e.g. "Mathematics", "English",
+/// "Integrated Science". Analogous to a Subject in 8-4-4.
+model LearningArea {
+  id               String              @id @default(cuid())
+  schoolId         String
+  frameworkId      String
+  name             String /// e.g. "Mathematics"
+  code             String? /// e.g. "MATH"
+  /// Grade levels this learning area applies to, e.g. [4, 5, 6, 7, 8, 9].
+  applicableGrades Int[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  school           School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  framework        AssessmentFramework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  strands          Strand[]
+  items            AssessmentItem[]
+  roles            AssessmentRole[]
+
+  @@unique([frameworkId, name])
+  @@index([schoolId, frameworkId])
+}
+
+/// Second level: a thematic grouping within a Learning Area,
+/// e.g. "Numbers" within Mathematics.
+model Strand {
+  id             String           @id @default(cuid())
+  schoolId       String
+  learningAreaId String
+  name           String /// e.g. "Numbers"
+  code           String?
+  sortOrder      Int              @default(0)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  school         School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  learningArea   LearningArea     @relation(fields: [learningAreaId], references: [id], onDelete: Cascade)
+  subStrands     SubStrand[]
+  items          AssessmentItem[]
+
+  @@unique([learningAreaId, name])
+  @@index([schoolId])
+  @@index([learningAreaId])
+}
+
+/// Third (leaf) level: the granular CBC assessment unit,
+/// e.g. "Whole Numbers" within the Numbers strand of Mathematics.
+model SubStrand {
+  id        String           @id @default(cuid())
+  schoolId  String
+  strandId  String
+  name      String /// e.g. "Whole Numbers"
+  code      String?
+  sortOrder Int              @default(0)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  school    School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  strand    Strand           @relation(fields: [strandId], references: [id], onDelete: Cascade)
+  items     AssessmentItem[]
+
+  @@unique([strandId, name])
+  @@index([schoolId])
+  @@index([strandId])
+}
+
+// ---------------------------------------------------------------------------
+// CBE hierarchy: CompetencyUnit → CompetencyElement → PerformanceCriterion
+// ---------------------------------------------------------------------------
+// KNQA / TVET CBE structure. CompetencyUnit is the top-level qualification
+// component (e.g. "Operate a Computer"); Elements break it into observable
+// skills; PerformanceCriteria are the leaf-level evidence descriptors.
+
+/// A named, assessable block of work-related competency, e.g.
+/// "Operate a Computer" or "Apply Food Safety Practices".
+model CompetencyUnit {
+  id          String              @id @default(cuid())
+  schoolId    String
+  frameworkId String
+  name        String
+  code        String? /// KNQA unit code if applicable
+  /// Credit value of this unit (KNQA credit framework).
+  credits     Int?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  school      School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  framework   AssessmentFramework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  elements    CompetencyElement[]
+  items       AssessmentItem[]
+  roles       AssessmentRole[]
+
+  @@unique([frameworkId, name])
+  @@index([schoolId, frameworkId])
+}
+
+/// Observable sub-skill within a CompetencyUnit, e.g. "Use input devices"
+/// within "Operate a Computer".
+model CompetencyElement {
+  id               String                 @id @default(cuid())
+  schoolId         String
+  competencyUnitId String
+  name             String
+  code             String?
+  sortOrder        Int                    @default(0)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  school           School                 @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  competencyUnit   CompetencyUnit         @relation(fields: [competencyUnitId], references: [id], onDelete: Cascade)
+  criteria         PerformanceCriterion[]
+  items            AssessmentItem[]
+
+  @@unique([competencyUnitId, name])
+  @@index([schoolId])
+  @@index([competencyUnitId])
+}
+
+/// Leaf-level evidence statement, e.g. "Demonstrates correct keyboard
+/// technique without looking at keys". Assessed as COMPETENT / NOT_YET.
+model PerformanceCriterion {
+  id        String            @id @default(cuid())
+  schoolId  String
+  elementId String
+  name      String
+  code      String?
+  sortOrder Int               @default(0)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  school    School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  element   CompetencyElement @relation(fields: [elementId], references: [id], onDelete: Cascade)
+  items     AssessmentItem[]
+
+  @@unique([elementId, name])
+  @@index([schoolId])
+  @@index([elementId])
+}
+
+// ---------------------------------------------------------------------------
+// AssessmentItem — the polymorphic result record
+// ---------------------------------------------------------------------------
+// One row = one student's result for one granular assessment node in one
+// period. The result payload is polymorphic:
+//
+//   8-4-4   → numericScore      (Float, 0–maxMarks)
+//   CBC     → performanceLevel  (EE/ME/AE/BE)
+//   CBE     → competencyStatus  (COMPETENT/NOT_YET_COMPETENT)
+//
+// Exactly one of the three nullable result columns is populated. A DB-level
+// CHECK constraint (see migration) enforces this. The `resultKind`
+// discriminator makes the active column explicit at query time.
+//
+// Scope columns: subjectId / paperId / learningAreaId / strandId /
+// subStrandId / competencyUnitId / elementId / criterionId are ALL nullable;
+// exactly the right subset is populated depending on the framework and the
+// granularity of the assessment node being recorded.
+
+model AssessmentItem {
+  id          String  @id @default(cuid())
+  schoolId    String
+  frameworkId String
+  periodId    String
+  studentId   String
+  enteredById String? /// Teacher who entered this item
+
+  /// ---- discriminator -------------------------------------------------
+  resultKind AssessmentResultKind
+
+  /// ---- result payload (exactly one non-null per row) ----------------
+  numericScore     Float? /// 8-4-4
+  performanceLevel PerformanceLevel? /// CBC
+  competencyStatus CompetencyStatus? /// CBE
+
+  /// ---- 8-4-4 scope --------------------------------------------------
+  subjectId String? /// Subject (when not using papers)
+  paperId   String? /// Paper within a subject
+
+  /// ---- CBC scope -----------------------------------------------------
+  learningAreaId String?
+  strandId       String?
+  subStrandId    String?
+
+  /// ---- CBE scope -----------------------------------------------------
+  competencyUnitId String?
+  elementId        String?
+  criterionId      String?
+
+  /// ---- metadata -------------------------------------------------------
+  /// Free-text assessor comment on this specific item.
+  comment   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// ---- relations ------------------------------------------------------
+  school         School                @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  framework      AssessmentFramework   @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  period         AssessmentPeriod      @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  student        Student               @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  enteredBy      Teacher?              @relation(fields: [enteredById], references: [id], onDelete: SetNull)
+  subject        Subject?              @relation(fields: [subjectId], references: [id])
+  paper          Paper?                @relation(fields: [paperId], references: [id])
+  learningArea   LearningArea?         @relation(fields: [learningAreaId], references: [id])
+  strand         Strand?               @relation(fields: [strandId], references: [id])
+  subStrand      SubStrand?            @relation(fields: [subStrandId], references: [id])
+  competencyUnit CompetencyUnit?       @relation(fields: [competencyUnitId], references: [id])
+  element        CompetencyElement?    @relation(fields: [elementId], references: [id])
+  criterion      PerformanceCriterion? @relation(fields: [criterionId], references: [id])
+
+  /// Natural uniqueness: one result per (student, period, scope node).
+  /// The compound unique is on the most granular scope columns; the
+  /// CHECK constraint in the migration ensures only one scope path is set.
+  @@unique([studentId, periodId, paperId], name: "item_paper")
+  @@unique([studentId, periodId, subStrandId], name: "item_substrand")
+  @@unique([studentId, periodId, criterionId], name: "item_criterion")
+  /// Fallback unique for subject-level (no paper) 8-4-4 items.
+  @@unique([studentId, periodId, subjectId, paperId], name: "item_subject_paper")
+  @@index([schoolId, frameworkId, periodId])
+  @@index([studentId])
+  @@index([enteredById])
+  @@index([learningAreaId, periodId])
+  @@index([competencyUnitId, periodId])
+  /// Covering index for every dashboard/marksheet query: periodId + studentId IN [...] + resultKind filter.
+  @@index([periodId, studentId, resultKind])
+  /// Supports department analytics: subjectId IN [...] AND periodId filter.
+  @@index([subjectId, periodId])
+}
+
+// ---------------------------------------------------------------------------
+// Assessment RBAC — scoped assessment roles
+// ---------------------------------------------------------------------------
+// This is a parallel RBAC layer alongside the existing StaffRole/Module
+// system. It grants a teacher a specific assessment *role* (e.g.
+// SUBJECT_TEACHER, HOD, EXAM_OFFICER) for a specific *scope node* within
+// one framework. Scope nodes are mutually exclusive per row:
+//
+//   Subject-level (8-4-4): subjectId populated
+//   Learning-area (CBC)  : learningAreaId populated
+//   Unit (CBE)           : competencyUnitId populated
+//   School-wide          : all scope FKs null (role applies to whole school)
+//
+// A DB CHECK constraint in the migration enforces that at most one scope
+// column is non-null per row.
+
+/// The named roles a teacher can hold within an assessment framework.
+/// These express *what they can do in this scope*, not module-level access.
+enum AssessmentRoleType {
+  /// Enters results for their assigned subjects / learning areas / units.
+  SUBJECT_TEACHER
+  /// Enters and reviews results for their own class across all areas.
+  CLASS_TEACHER
+  /// Head of Department — can view, moderate, and approve results in scope.
+  HOD
+  /// Exam Officer / Academic Deputy — school-wide moderation, can publish.
+  EXAM_OFFICER
+  /// Director / Principal / Academic Secretary — read-only full access.
+  DIRECTOR
+  /// Parent — read-only view of results for their linked child only.
+  PARENT_VIEWER
+}
+
+/// Grants a teacher an AssessmentRoleType within a specific scope inside one
+/// framework. Delete-cascade on teacher and framework; scope FKs are
+/// set-null (if a learning area is deleted the role row loses its scope but
+/// stays as a school-wide grant rather than disappearing silently).
+model AssessmentRole {
+  id          String             @id @default(cuid())
+  schoolId    String
+  frameworkId String
+  teacherId   String
+  role        AssessmentRoleType
+
+  /// ---- scope (at most one non-null — enforced by DB CHECK) ----------
+  subjectId        String? /// 8-4-4 subject scope
+  learningAreaId   String? /// CBC learning area scope
+  competencyUnitId String? /// CBE unit scope
+
+  createdAt DateTime @default(now())
+
+  school         School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  framework      AssessmentFramework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  teacher        Teacher             @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  subject        Subject?            @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  learningArea   LearningArea?       @relation(fields: [learningAreaId], references: [id], onDelete: SetNull)
+  competencyUnit CompetencyUnit?     @relation(fields: [competencyUnitId], references: [id], onDelete: SetNull)
+
+  /// A teacher can only hold each role once per (framework, scope node).
+  @@unique([frameworkId, teacherId, role, subjectId, learningAreaId, competencyUnitId])
+  @@index([schoolId, frameworkId])
+  @@index([teacherId])
+}
+
+// =============================================================================
+// Examination Analytics — teacher ranking configuration
+// =============================================================================
+
+/// Per-school ranking weight configuration for the teacher composite score.
+/// One row per school. Created on first PUT /api/settings/ranking-config call.
+/// If no row exists, the service defaults to 0.4 / 0.3 / 0.3 in code.
+model RankingConfig {
+  schoolId          String   @id
+  /// Weight for the improvement-over-previous-period component (0.0–1.0).
+  improvementWeight Float    @default(0.4)
+  /// Weight for the marks-entry completion component (0.0–1.0).
+  completionWeight  Float    @default(0.3)
+  /// Weight for the absolute class mean points component (0.0–1.0).
+  absoluteWeight    Float    @default(0.3)
+  /// Class mean grade points below which a class is flagged in the dashboard.
+  /// Null means no flagging. Stored as a raw grade-points value (e.g. 5.0).
+  meanFlagThreshold Float?
+  updatedAt         DateTime @updatedAt
+  school            School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+}
+
+// =============================================================================
+// Examination Analytics — per-student report remarks
+// =============================================================================
+
+/// One row per (school, period, student) — stores the AI-drafted remark and
+/// any teacher-edited override. Created on first GET (AI draft generated)
+/// or first PUT (manual save). Cascade-deletes with the school.
+model ReportRemark {
+  id            String           @id @default(cuid())
+  schoolId      String
+  periodId      String
+  studentId     String
+  /// AI-generated draft text. May be null if AI service was unavailable.
+  draftRemark   String?
+  /// Teacher-edited text. If non-null, this is used in the PDF/preview
+  /// instead of draftRemark.
+  editedRemark  String?
+  isAiGenerated Boolean          @default(true)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  school        School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  period        AssessmentPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  student       Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, periodId, studentId])
+  @@index([schoolId, periodId])
+  /// Supports single-student report-remark lookup.
+  @@index([periodId, studentId])
+}
+
+// =============================================================================
+// Messaging / Communication Centre
+// =============================================================================
+
+enum MessageChannel {
+  SMS
+  WHATSAPP
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+  CANCELLED
+}
+
+/// A school-defined, named collection of recipients (e.g. "Board of Management").
+/// Not hardcoded — created and managed entirely by authorised users.
+model RecipientGroup {
+  id            String                  @id @default(cuid())
+  schoolId      String
+  name          String
+  description   String?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+  school        School                  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  members       GroupMember[]
+  messageGroups MessageRecipientGroup[]
+
+  @@unique([schoolId, name])
+  @@index([schoolId])
+}
+
+/// One member of a RecipientGroup. Either a system person (teacherId or
+/// studentId) OR an external contact (name + phone) — never both.
+model GroupMember {
+  id        String         @id @default(cuid())
+  groupId   String
+  /// System-linked teacher/admin staff member (optional)
+  teacherId String?
+  /// System-linked student — parent contact used as phone (optional)
+  studentId String?
+  /// External contact not in the system (optional)
+  extName   String?
+  extPhone  String?
+  group     RecipientGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  teacher   Teacher?       @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  student   Student?       @relation(fields: [studentId], references: [id], onDelete: SetNull)
+
+  @@index([groupId])
+  @@index([teacherId])
+  @@index([studentId])
+}
+
+/// A reusable named message body with optional placeholder tokens.
+model MessageTemplate {
+  id        String   @id @default(cuid())
+  schoolId  String
+  name      String
+  category  String?
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  school    School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, name])
+  @@index([schoolId])
+}
+
+/// One outbound communication event. recipientDescriptor is a JSON blob
+/// describing who was addressed. Actual phone numbers are resolved at send
+/// time and stored in MessageLog, never here.
+model Message {
+  id                  String                  @id @default(cuid())
+  schoolId            String
+  senderUserId        String
+  channel             MessageChannel
+  body                String
+  /// JSON array of RecipientDescriptor objects — see src/lib/messaging/resolve.ts
+  recipientDescriptor Json
+  /// Human-readable summary stored for the history list
+  recipientSummary    String
+  attachmentUrl       String?
+  attachmentName      String?
+  /// Null = send immediately. Non-null = scheduled for this time.
+  scheduledAt         DateTime?
+  status              MessageStatus           @default(PENDING)
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  school              School                  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  sender              User                    @relation(fields: [senderUserId], references: [id])
+  logs                MessageLog[]
+  messageGroups       MessageRecipientGroup[]
+
+  @@index([schoolId])
+  @@index([schoolId, createdAt(sort: Desc)])
+  @@index([schoolId, status])
+  @@index([senderUserId])
+}
+
+/// One row per resolved recipient per message. Tracks delivery at the
+/// individual phone-number level.
+model MessageLog {
+  id             String         @id @default(cuid())
+  messageId      String
+  schoolId       String
+  channel        MessageChannel
+  /// The phone number actually dialled for this log entry.
+  phone          String
+  recipientLabel String
+  status         MessageStatus  @default(PENDING)
+  providerMsgId  String?
+  errorDetail    String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  message        Message        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  school         School         @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@index([schoolId])
+  @@index([schoolId, status])
+}
+
+/// Join table linking a Message to the RecipientGroups it was addressed to.
+model MessageRecipientGroup {
+  messageId String
+  groupId   String
+  message   Message        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  group     RecipientGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, groupId])
+}
+
+/// Per-school messaging configuration — one row per school, upserted on first save.
+model MessagingSettings {
+  schoolId       String   @id
+  resultsClosing String   @default("Thank you for your continued support.")
+  batchSize      Int      @default(50)
+  updatedAt      DateTime @updatedAt
+  school         School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+}
+
+// =============================================================================
+// Lifecycle Management — Audit Log
+// =============================================================================
+
+/// Immutable audit trail for lifecycle actions: student/staff archival,
+/// expulsions, transfers, and graduations. Every action writes one row here
+/// so administrators can always determine who acted, when, and why.
+model AuditLog {
+  id            String   @id @default(cuid())
+  schoolId      String
+  /// The type of action performed, e.g. "STUDENT_ARCHIVED", "STAFF_ARCHIVED"
+  action        String
+  /// JSON payload with entity info, e.g. { studentId, admissionNumber, name, archiveType, reason }
+  detail        Json
+  performedById String?
+  performedAt   DateTime @default(now())
+  school        School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  performedBy   User?    @relation(fields: [performedById], references: [id], onDelete: SetNull)
+
+  @@index([schoolId, performedAt])
+  @@index([schoolId, action])
+}
+
+// =============================================================================
+// Accommodation Management Module
+// =============================================================================
+//
+// Design decisions:
+//
+//  1. School-level boarding type (DAY_ONLY, BOARDING_ONLY, DAY_AND_BOARDING)
+//     and gender policy (BOYS_ONLY, GIRLS_ONLY, MIXED) are stored on
+//     AccommodationSettings so the module UI can self-configure without asking
+//     the user to repeat what they told School Registration.
+//
+//  2. Dormitory is the primary entity. It can be OPEN_HALL (beds sit directly
+//     inside the dorm) or CUBICLE_BASED (students first grouped into
+//     Cubicle rows, then beds inside each cubicle).
+//
+//  3. SleepingPosition is the atomic unit of capacity. A single Bed may
+//     produce 1 position (single), 2 positions (DOUBLE_DECKER — UPPER / LOWER),
+//     or N positions (CUSTOM). Capacity is always derived from the count of
+//     SleepingPosition rows, never from assumptions.
+//
+//  4. AllocationRecord ties one Student to one SleepingPosition.
+//     A student can have at most one active allocation (CURRENT status).
+//     Historical moves are captured in AllocationHistory for the audit trail.
+//
+//  5. DormPolicy / CubiclePolicy handle form-restriction vs mixed: RESTRICTED
+//     means only the listed classes may be allocated there; MIXED means all
+//     permitted classes.
+//
+// =============================================================================
+
+/// Boarding type of the school — set once in School Settings / Registration.
+/// Controls whether the Accommodation module is active and which UI options appear.
+enum BoardingType {
+  DAY_ONLY
+  BOARDING_ONLY
+  DAY_AND_BOARDING
+}
+
+/// Gender policy of the school/dorm.
+enum GenderPolicy {
+  BOYS_ONLY
+  GIRLS_ONLY
+  MIXED
+}
+
+/// Physical layout of a dormitory.
+enum DormStructure {
+  /// Beds placed directly inside the dorm — no subdivisions.
+  OPEN_HALL
+  /// Students first assigned to a Cubicle (room/bay), then to a Bed within it.
+  CUBICLE_BASED
+}
+
+/// How students are allocated to a dorm or cubicle.
+enum AllocationPolicy {
+  /// Only students from the listed permitted forms/classes may be allocated.
+  RESTRICTED_BY_FORM
+  /// Students from any permitted form may be mixed together.
+  MIXED_FORMS
+}
+
+/// The physical type of a bed, which determines how many sleeping positions it creates.
+enum BedType {
+  SINGLE
+  DOUBLE_DECKER
+  CUSTOM
+}
+
+/// The vertical position on a double-decker bed (null for SINGLE / CUSTOM beds).
+enum BedPosition {
+  UPPER
+  LOWER
+}
+
+/// Operational status of a dormitory.
+enum DormStatus {
+  ACTIVE
+  UNDER_MAINTENANCE
+  CLOSED
+}
+
+/// Allocation status of one sleeping position assignment.
+enum AllocationStatus {
+  CURRENT
+  VACATED
+  TRANSFERRED
+}
+
+// =============================================================================
+// =============================================================================
+// Accommodation Settings — module-wide school preferences (one row per school)
+// =============================================================================
+
+/// Per-school accommodation module configuration.
+/// Created / updated via PUT /api/accommodation/settings.
+model AccommodationSettings {
+  schoolId                String           @id
+  /// Whether boarding is enabled for this school (controls module visibility).
+  boardingType            BoardingType     @default(DAY_AND_BOARDING)
+  /// School-wide gender admission policy (guides dorm gender dropdown defaults).
+  schoolGenderPolicy      GenderPolicy     @default(MIXED)
+  /// Allow dorm captains to be assigned.
+  enableDormCaptains      Boolean          @default(true)
+  /// Allow student transfers between dorms.
+  enableTransfers         Boolean          @default(true)
+  /// Default allocation policy applied to newly created dorms.
+  defaultAllocationPolicy AllocationPolicy @default(MIXED_FORMS)
+  /// Percentage occupancy that triggers an "almost full" warning (e.g. 90).
+  occupancyWarningPct     Int              @default(90)
+  /// Whether bed-level tracking is enabled globally.
+  bedTrackingEnabled      Boolean          @default(true)
+  /// Show analytics widgets on the accommodation dashboard.
+  analyticsEnabled        Boolean          @default(true)
+  /// Send notification when a student is allocated / transferred.
+  notifyOnAllocation      Boolean          @default(false)
+  updatedAt               DateTime         @updatedAt
+  school                  School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+}
+
+// =============================================================================
+// Dormitory Inspection Models
+// =============================================================================
+
+enum InspectionStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum InspectionRating {
+  EXCELLENT
+  GOOD
+  SATISFACTORY
+  NEEDS_IMPROVEMENT
+  POOR
+}
+
+model DormInspection {
+  id                 String            @id @default(cuid())
+  schoolId           String
+  dormId             String
+  inspectionDate     DateTime
+  inspectedById      String?
+  status             InspectionStatus  @default(SCHEDULED)
+  overallRating      InspectionRating?
+  overallScore       Float?
+  notes              String?
+  recommendations    String?
+  nextInspectionDate DateTime?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  school      School               @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  dorm        Dormitory            @relation(fields: [dormId], references: [id], onDelete: Cascade)
+  inspectedBy User?                @relation(fields: [inspectedById], references: [id], onDelete: SetNull)
+  items       DormInspectionItem[]
+
+  @@index([schoolId])
+  @@index([dormId])
+  @@index([schoolId, inspectionDate])
+}
+
+model DormInspectionItem {
+  id           String           @id @default(cuid())
+  inspectionId String
+  category     String
+  item         String
+  rating       InspectionRating
+  score        Float?
+  notes        String?
+  createdAt    DateTime         @default(now())
+
+  inspection DormInspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+
+  @@index([inspectionId])
+}
+
+// =============================================================================
+// Accommodation Event Log (immutable audit trail)
+// =============================================================================
+
+enum AccomEventType {
+  ALLOCATED
+  TRANSFERRED
+  VACATED
+  REMOVED
+  MAINTENANCE_CLOSED
+  MAINTENANCE_REOPENED
+  EMERGENCY_RELOCATION
+  RESERVED
+  RESERVATION_RELEASED
+  RENOVATION_STARTED
+  RENOVATION_COMPLETED
+  REASSIGNED
+  STATUS_CHANGED
+}
+
+model AccommodationEvent {
+  id             String         @id @default(cuid())
+  schoolId       String
+  dormId         String?
+  studentId      String?
+  eventType      AccomEventType
+  performedById  String?
+  fromDormId     String?
+  toDormId       String?
+  fromCubicleId  String?
+  toCubicleId    String?
+  fromPositionId String?
+  toPositionId   String?
+  reason         String?
+  notes          String?
+  metadata       Json?
+  createdAt      DateTime       @default(now())
+
+  school      School     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  dorm        Dormitory? @relation(fields: [dormId], references: [id], onDelete: SetNull)
+  student     Student?   @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  performedBy User?      @relation(fields: [performedById], references: [id], onDelete: SetNull)
+
+  @@index([schoolId])
+  @@index([dormId])
+  @@index([studentId])
+  @@index([schoolId, createdAt])
+  @@index([schoolId, eventType])
+}
+
+// =============================================================================
+// Dormitory
+// =============================================================================
+
+/// One registered dormitory (boarding house).
+model Dormitory {
+  id                    String           @id @default(cuid())
+  schoolId              String
+  /// Human-readable name, e.g. "Simba House" or "Girls Block A".
+  name                  String
+  /// Gender of students housed here.
+  genderPolicy          GenderPolicy     @default(MIXED)
+  /// OPEN_HALL or CUBICLE_BASED.
+  structure             DormStructure    @default(OPEN_HALL)
+  /// Operational status.
+  status                DormStatus       @default(ACTIVE)
+  /// Total physical capacity (sleeping positions) — derived from Beds, but
+  /// stored here as a cached/override value for fast dashboard queries.
+  /// Recomputed whenever beds are added/removed.
+  totalCapacity         Int              @default(0)
+  /// Student allocation policy for the dorm as a whole.
+  allocationPolicy      AllocationPolicy @default(MIXED_FORMS)
+  /// For CUBICLE_BASED dorms: do cubicles inherit the dorm policy?
+  cubiclesInheritPolicy Boolean          @default(true)
+  /// Optional description / notes.
+  description           String?
+  /// The teacher (boarding master/matron) responsible for this dorm.
+  boardingMasterId      String?
+  /// Student dorm captain (student ID).
+  dormCaptainId         String?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  school         School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  boardingMaster Teacher? @relation("DormBoardingMaster", fields: [boardingMasterId], references: [id], onDelete: SetNull)
+  dormCaptain    Student? @relation("DormCaptain", fields: [dormCaptainId], references: [id], onDelete: SetNull)
+
+  cubicles          Cubicle[]
+  beds              Bed[]
+  permittedForms    DormPermittedForm[]
+  allocations       AllocationRecord[]
+  sleepingPositions SleepingPosition[]
+  inspections       DormInspection[]
+  events            AccommodationEvent[]
+
+  @@unique([schoolId, name])
+  @@index([schoolId])
+  @@index([schoolId, status])
+}
+
+/// Permitted form/class levels for a dormitory (when allocationPolicy = RESTRICTED_BY_FORM).
+/// Stores the form number (1, 2, 3, 4 …) not a specific class row, so the
+/// restriction applies to all classes in that form year.
+model DormPermittedForm {
+  dormId String
+  form   Int
+  dorm   Dormitory @relation(fields: [dormId], references: [id], onDelete: Cascade)
+
+  @@id([dormId, form])
+  @@index([dormId])
+}
+
+// =============================================================================
+// Cubicle — subdivision within a CUBICLE_BASED dorm
+// =============================================================================
+
+/// A room, bay, or cubicle within a CUBICLE_BASED dormitory.
+model Cubicle {
+  id               String            @id @default(cuid())
+  dormId           String
+  schoolId         String
+  /// e.g. "A", "Room 1", "Bay 3"
+  name             String
+  /// Maximum number of sleeping positions in this cubicle (informational cap).
+  capacity         Int               @default(4)
+  /// Whether this cubicle has its own allocation policy (when cubiclesInheritPolicy = false).
+  allocationPolicy AllocationPolicy? /// null = inherits from dorm
+  description      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  dorm              Dormitory              @relation(fields: [dormId], references: [id], onDelete: Cascade)
+  school            School?                @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  beds              Bed[]
+  permittedForms    CubiclePermittedForm[]
+  sleepingPositions SleepingPosition[]
+  allocations       AllocationRecord[]
+
+  @@unique([dormId, name])
+  @@index([dormId])
+  @@index([schoolId])
+}
+
+/// Permitted form levels for a specific cubicle (when it has its own policy).
+model CubiclePermittedForm {
+  cubicleId String
+  form      Int
+  cubicle   Cubicle @relation(fields: [cubicleId], references: [id], onDelete: Cascade)
+
+  @@id([cubicleId, form])
+  @@index([cubicleId])
+}
+
+// =============================================================================
+// Bed & SleepingPosition
+// =============================================================================
+
+/// A physical bed in a dormitory (or cubicle). One bed creates 1-N
+/// SleepingPosition rows depending on its type.
+model Bed {
+  id              String   @id @default(cuid())
+  schoolId        String
+  dormId          String
+  cubicleId       String? /// null for OPEN_HALL beds
+  /// Human label, e.g. "Bed 1", "Bunk A"
+  label           String
+  bedType         BedType  @default(SINGLE)
+  /// For CUSTOM beds: number of sleeping positions to generate. Ignored for SINGLE/DOUBLE_DECKER.
+  customOccupancy Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  school      School             @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  dorm        Dormitory          @relation(fields: [dormId], references: [id], onDelete: Cascade)
+  cubicle     Cubicle?           @relation(fields: [cubicleId], references: [id], onDelete: SetNull)
+  positions   SleepingPosition[]
+  allocations AllocationRecord[]
+
+  @@unique([dormId, label])
+  @@index([dormId])
+  @@index([cubicleId])
+  @@index([schoolId])
+}
+
+/// One atomic sleeping space. For a SINGLE bed there is exactly one position.
+/// For DOUBLE_DECKER there are two (UPPER + LOWER). For CUSTOM there are N.
+/// This is the unit that is allocated to a student.
+model SleepingPosition {
+  id          String       @id @default(cuid())
+  schoolId    String
+  bedId       String
+  dormId      String
+  cubicleId   String?
+  /// Positional label: null for SINGLE, UPPER/LOWER for DOUBLE_DECKER,
+  /// e.g. "1"/"2"/"3" (stored as label) for CUSTOM.
+  position    BedPosition?
+  /// For CUSTOM positions: human label e.g. "Space 1".
+  customLabel String?
+  /// Whether this position is currently occupied (derived from AllocationRecord, cached).
+  isOccupied  Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+
+  school      School             @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  bed         Bed                @relation(fields: [bedId], references: [id], onDelete: Cascade)
+  dorm        Dormitory?         @relation(fields: [dormId], references: [id], onDelete: Cascade)
+  cubicle     Cubicle?           @relation(fields: [cubicleId], references: [id], onDelete: SetNull)
+  allocations AllocationRecord[]
+
+  @@index([dormId])
+  @@index([schoolId])
+}
+
+// =============================================================================
+// AllocationRecord — student ↔ sleeping position assignment
+// =============================================================================
+
+/// One active or historical allocation of a student to a sleeping position.
+/// Only one row per student should have status = CURRENT at any time.
+model AllocationRecord {
+  id                 String           @id @default(cuid())
+  schoolId           String
+  studentId          String
+  dormId             String
+  cubicleId          String?
+  bedId              String?
+  sleepingPositionId String?
+  allocationDate     DateTime         @default(now())
+  vacatedDate        DateTime?
+  status             AllocationStatus @default(CURRENT)
+  /// Free-text note (e.g. "Transferred due to disciplinary action").
+  notes              String?
+  allocatedById      String? /// User who performed the allocation
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  school           School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student          Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  dorm             Dormitory         @relation(fields: [dormId], references: [id], onDelete: Cascade)
+  cubicle          Cubicle?          @relation(fields: [cubicleId], references: [id], onDelete: SetNull)
+  bed              Bed?              @relation(fields: [bedId], references: [id], onDelete: SetNull)
+  sleepingPosition SleepingPosition? @relation(fields: [sleepingPositionId], references: [id], onDelete: SetNull)
+  allocatedBy      User?             @relation("AccommodationAllocatedBy", fields: [allocatedById], references: [id], onDelete: SetNull)
+
+  @@index([schoolId])
+  @@index([studentId])
+  @@index([dormId])
+  /// Fast lookup for a student's current allocation.
+  @@index([studentId, status])
+  @@index([schoolId, status])
+}

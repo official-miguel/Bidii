@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bidii — Offline</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #F7F5EF;
+      color: #1a1a1a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 1.5rem;
+    }
+    .card {
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      padding: 2.5rem 2rem;
+      max-width: 380px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    }
+    .logo {
+      display: inline-flex;
+      height: 52px;
+      width: 52px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      background: #1E3A8A;
+      color: #F59E0B;
+      font-size: 1.35rem;
+      font-weight: 700;
+      margin-bottom: 1.5rem;
+      letter-spacing: -.5px;
+    }
+    h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #1E3A8A;
+      margin-bottom: 0.625rem;
+    }
+    p {
+      font-size: 0.875rem;
+      color: #6b7280;
+      line-height: 1.65;
+      margin-bottom: 1.75rem;
+    }
+    button {
+      background: #1E3A8A;
+      color: #ffffff;
+      border: none;
+      border-radius: 8px;
+      padding: 0.75rem 1.5rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      width: 100%;
+      transition: background .15s;
+    }
+    button:hover { background: #1e40af; }
+    button:active { background: #1d3a8a; }
+    .hint {
+      margin-top: 1rem;
+      font-size: 0.75rem;
+      color: #9ca3af;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">B</div>
+    <h1>You're offline</h1>
+    <p>
+      Bidii can't reach the server right now.
+      Your changes are saved locally and will sync automatically when you reconnect.
+    </p>
+    <button onclick="window.location.reload()">Try again</button>
+    <p class="hint">If this persists, check your internet connection.</p>
+  </div>
+</body>
+</html>

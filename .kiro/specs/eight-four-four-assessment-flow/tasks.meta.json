@@ -1,0 +1,173 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1. Create grading utility — `src/lib/assessment/grading844.ts`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385227111
+      }
+    ],
+    "2. Create assessment auth utility — `src/lib/assessment/auth844.ts`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385227344
+      }
+    ],
+    "3. API — periods endpoint — `src/app/api/assessments/periods/route.ts`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385227577
+      }
+    ],
+    "4. API — marksheet GET endpoint — `src/app/api/assessments/marksheet/route.ts`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385227894
+      }
+    ],
+    "5. API — marksheet item PUT endpoint — `src/app/api/assessments/marksheet/item/route.ts`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385228282
+      }
+    ],
+    "6. API — marksheet batch POST endpoint — `src/app/api/assessments/marksheet/batch/route.ts`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385228446
+      }
+    ],
+    "7. API — dashboard endpoint — `src/app/api/assessments/dashboard/route.ts`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385228759
+      }
+    ],
+    "8.1 Single student — `src/app/api/assessments/report-card/route.ts`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385228926
+      }
+    ],
+    "8.2 Class-wide — `src/app/api/assessments/report-card/class/route.ts`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385229064
+      }
+    ],
+    "9. MarksheetGrid component — `src/components/assessment/MarksheetGrid.tsx`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385229210
+      }
+    ],
+    "10.1 DashboardCharts component — `src/components/assessment/DashboardCharts.tsx`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385229403
+      }
+    ],
+    "10.2 Principal dashboard page — `src/app/principal/assessments/dashboard/page.tsx`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385229643
+      }
+    ],
+    "11.1 ReportCard component — `src/components/assessment/ReportCard.tsx`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385229772
+      }
+    ],
+    "11.2 Print route — `src/app/assessments/report-card/print/page.tsx`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385229898
+      }
+    ],
+    "12.1 Layout and redirect — `src/app/principal/assessments/layout.tsx` + `page.tsx`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385230042
+      }
+    ],
+    "12.2 Periods page — `src/app/principal/assessments/periods/page.tsx`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385230183
+      }
+    ],
+    "12.3 Marksheet page — `src/app/principal/assessments/marksheet/page.tsx`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385230325
+      }
+    ],
+    "12.4 Report cards page — `src/app/principal/assessments/report-cards/page.tsx`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385230472
+      }
+    ],
+    "12.5 Add nav items to principal sidebar — `src/app/principal/layout.tsx`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385230622
+      }
+    ],
+    "13.1 Teacher assessments layout — `src/app/teacher/assessments/layout.tsx`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385230771
+      }
+    ],
+    "13.2 Teacher marksheet page — `src/app/teacher/assessments/marksheet/page.tsx`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385230914
+      }
+    ],
+    "13.3 Teacher report cards page — `src/app/teacher/assessments/report-cards/page.tsx`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385231100
+      }
+    ],
+    "13.4 Add nav items to teacher sidebar — `src/app/teacher/layout.tsx`": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385231257
+      }
+    ],
+    "14. Final checkpoint": [
+      {
+        "executionId": "f4730b1d-8959-45db-9e6f-4df175aa7c9f",
+        "chatSessionId": "sess_902d944a-2d82-4854-bfca-e2767643a730",
+        "timestamp": 1784385231477
+      }
+    ]
+  }
+}

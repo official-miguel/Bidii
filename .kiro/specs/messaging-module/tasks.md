@@ -1,0 +1,387 @@
+# Implementation Plan: Messaging Module (Communication Centre)
+
+## Overview
+
+This plan builds the Communication Centre from scratch on top of the existing RBAC, integration, and offline infrastructure. All work is additive — no existing modules are modified beyond the navigation wiring in two layout files. Implementation language: **TypeScript / Next.js** (matching the codebase).
+
+Tasks are ordered so that each group produces a shippable, testable slice before the next group begins.
+
+---
+
+## Tasks
+
+- [ ] 0. Database migration — messaging models
+  - [ ] 0.1 Add `MessageChannel` and `MessageStatus` enums to `prisma/schema.prisma`
+    - `MessageChannel`: SMS, WHATSAPP
+    - `MessageStatus`: PENDING, SENT, DELIVERED, FAILED, CANCELLED
+    - _Requirements: 7, 8_
+  - [ ] 0.2 Add `RecipientGroup` model to `prisma/schema.prisma`
+    - Fields: id (cuid PK), schoolId, name, description?, createdAt, updatedAt
+    - Unique: `@@unique([schoolId, name])`; Index: `@@index([schoolId])`
+    - Relations: School (cascade), members GroupMember[], messages MessageRecipientGroup[]
+    - _Requirements: 3.9_
+  - [ ] 0.3 Add `GroupMember` model to `prisma/schema.prisma`
+    - Fields: id (cuid PK), groupId, teacherId?, studentId?, extName?, extPhone?
+    - Relations: RecipientGroup (cascade), Teacher? (SetNull), Student? (SetNull)
+    - Indexes: groupId, teacherId, studentId
+    - _Requirements: 3.3_
+  - [ ] 0.4 Add `MessageTemplate` model to `prisma/schema.prisma`
+    - Fields: id (cuid PK), schoolId, name, category?, body, createdAt, updatedAt
+    - Unique: `@@unique([schoolId, name])`; Index: `@@index([schoolId])`
+    - _Requirements: 4.7_
+  - [ ] 0.5 Add `Message` model to `prisma/schema.prisma`
+    - Fields: id, schoolId, senderUserId, channel MessageChannel, body, recipientDescriptor Json, recipientSummary, attachmentUrl?, attachmentName?, scheduledAt?, status MessageStatus @default(PENDING), createdAt, updatedAt
+    - Indexes: `@@index([schoolId])`, `@@index([schoolId, createdAt(sort: Desc)])`, `@@index([schoolId, status])`, `@@index([senderUserId])`
+    - _Requirements: 8_
+  - [ ] 0.6 Add `MessageLog` model to `prisma/schema.prisma`
+    - Fields: id, messageId, schoolId, channel, phone, recipientLabel, status MessageStatus, providerMsgId?, errorDetail?, createdAt, updatedAt
+    - Indexes: messageId, schoolId, `@@index([schoolId, status])`
+    - _Requirements: 8.3_
+  - [ ] 0.7 Add `MessageRecipientGroup` join model to `prisma/schema.prisma`
+    - `@@id([messageId, groupId])`
+    - _Requirements: 3, 8_
+  - [ ] 0.8 Add `MessagingSettings` model to `prisma/schema.prisma`
+    - Fields: schoolId (PK), resultsClosing String @default("Thank you..."), batchSize Int @default(50), updatedAt
+    - _Requirements: 9.5, 12.5_
+  - [ ] 0.9 Add back-relations to existing models (School, User, Teacher, Student)
+    - School: messages, messageLogs, recipientGroups, messageTemplates, messagingSettings
+    - User: sentMessages
+    - Teacher: groupMemberships GroupMember[]
+    - Student: groupMemberships GroupMember[]
+    - _Requirements: 3.3, 11_
+  - [ ] 0.10 Create migration file `prisma/migrations/20260722200000_add_messaging_module/migration.sql`
+    - CREATE TYPE for MessageChannel, MessageStatus enums
+    - CREATE TABLE for all six new models with indexes
+    - No ALTER TABLE on existing tables (back-relations are virtual in Prisma)
+    - _Requirements: 0.1–0.9_
+  - [ ] 0.11 Run `prisma generate` to regenerate the Prisma client
+    - Verify TypeScript compilation succeeds with new models in scope
+    - _Requirements: all_
+
+- [ ] 1. Service layer — `src/lib/messaging/`
+  - [ ] 1.1 Create `src/lib/messaging/resolve.ts`
+    - Export `RecipientDescriptor` discriminated union type (student, teacher, class, form, group, allParents, allTeachers, allStaff, school, external)
+    - Export `resolveRecipients(descriptors, schoolId): Promise<{ resolved: {label,phone}[]; skipped: {label,reason}[] }>`
+    - Deduplicate by phone; skip null/empty phones with reason "no contact"
+    - Scope all Prisma queries to schoolId
+    - _Requirements: 6.7, 6.8, 11.1–11.5_
+  - [ ] 1.2 Create `src/lib/messaging/placeholders.ts`
+    - Export `PlaceholderContext` type
+    - Export `applyPlaceholders(body, ctx): string`
+    - Replace /name, /class, /stream, /Admission, /staffname, /staffno, /results
+    - Tokens with no context value replaced with `[unknown]`
+    - _Requirements: 4.3, 4.4_
+  - [ ] 1.3 Create `src/lib/messaging/dispatch.ts`
+    - Export `DispatchResult` type
+    - Export `dispatchMessage(schoolId, channel, phone, body): Promise<DispatchResult>`
+    - Reads key via `getSchoolIntegrationKey(schoolId, channel)`
+    - Returns `{ status: 'FAILED', errorDetail: 'integration not configured' }` when no key
+    - Stub adapter for SMS (Africa's Talking shape) and WhatsApp (360dialog shape)
+    - _Requirements: 7.1, 7.2, 7.3, 7.4_
+  - [ ] 1.4 Create `src/lib/messaging/examResults.ts`
+    - Export `buildResultsMessage(studentId, periodId, schoolId, closing): Promise<{body,recipientLabel,phone|null}>`
+    - Fetches AssessmentItem rows for student+period, formats /results block for 8-4-4 and CBE
+    - Applies all placeholders via applyPlaceholders
+    - _Requirements: 9.4, 9.5, 9.11_
+
+- [ ] 2. IndexedDB stores — extend `src/lib/offline/db.ts`
+  - [ ] 2.1 Add `messaging_messages` object store (keyPath: `id`)
+    - Store MessageSummary shape: id, channel, status, recipientSummary, body (truncated), createdAt, scheduledAt, senderEmail
+    - _Requirements: 2.3, 8.8, 12.1_
+  - [ ] 2.2 Add `messaging_groups` object store (keyPath: `id`)
+    - _Requirements: 3.5, 12.1_
+  - [ ] 2.3 Add `messaging_templates` object store (keyPath: `id`)
+    - _Requirements: 4.5, 12.1_
+  - [ ] 2.4 Add `messaging_recipients` object store (keyPath: `id`)
+    - Flattened {id, name (lowercase), type: 'student'|'teacher', classId?, form?, staffId?}
+    - Used for instant local search without a network round-trip
+    - _Requirements: 6.2, 12.2_
+  - [ ] 2.5 Add `messaging_outbox` object store (keyPath: `localId`)
+    - Fields: localId (uuid), body, descriptors, channel, attachmentUrl?, retryCount, createdAt
+    - _Requirements: 10.1, 10.6_
+  - [ ] 2.6 Create `src/lib/messaging/offlineSync.ts`
+    - Export `seedRecipientsCache(schoolId)` — fetches students and teachers and writes to `messaging_recipients`
+    - Export `flushOutbox()` — reads `messaging_outbox`, posts each to `/api/messaging/send`, removes on success, increments retryCount on failure, moves to failed state after 3 attempts
+    - Wire `flushOutbox` to the browser `online` event in the Communication Centre shell
+    - _Requirements: 10.2, 10.3, 10.4, 10.5_
+
+- [ ] 3. Core API routes — messages and send
+  - [ ] 3.1 Create `GET /api/messaging/messages/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'view')
+    - Params: page, q, status, dateFrom, dateTo
+    - Returns MessageSummary[] (20/page) ordered by createdAt DESC
+    - _Requirements: 8.1, 8.5_
+  - [ ] 3.2 Create `GET /api/messaging/messages/[id]/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'view')
+    - Returns full Message + all MessageLog rows
+    - _Requirements: 8.2, 8.3_
+  - [ ] 3.3 Create `POST /api/messaging/send/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'manage')
+    - Zod body: { descriptors, channel, body, scheduledAt?, attachmentUrl?, attachmentName? }
+    - Validates channel has active integration key (422 if not)
+    - Immediate send: creates Message(PENDING), returns 202, resolves+dispatches in background, creates MessageLog rows, updates Message.status
+    - Scheduled send: creates Message(PENDING) with scheduledAt set; no dispatch yet
+    - _Requirements: 5.3, 5.4, 5.5, 5.6, 7.1–7.5_
+  - [ ] 3.4 Create `POST /api/messaging/messages/[id]/retry/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'manage')
+    - Re-dispatches FAILED MessageLog rows only; returns 202
+    - _Requirements: 8.6_
+  - [ ] 3.5 Create `POST /api/messaging/messages/[id]/cancel/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'manage')
+    - Only allowed when status=PENDING and scheduledAt > now; sets CANCELLED
+    - _Requirements: 8.7_
+  - [ ] 3.6 Create `GET /api/messaging/scheduled-flush/route.ts`
+    - No RBAC guard (internal cron route); add to vercel.json crons or Next.js route segment config
+    - Finds PENDING messages with scheduledAt <= now; dispatches each
+    - _Requirements: 5.6_
+
+- [ ] 4. Groups API routes
+  - [ ] 4.1 Create `GET /api/messaging/groups/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'view')
+    - Returns all RecipientGroup rows + member count for school
+    - _Requirements: 3.5_
+  - [ ] 4.2 Create `POST /api/messaging/groups/route.ts` (same file as GET, HTTP POST handler)
+    - Guard: requirePermission('COMMUNICATION', 'manage')
+    - Zod body: { name, description? }; validates uniqueness; HTTP 201 on success
+    - _Requirements: 3.1, 3.2_
+  - [ ] 4.3 Create `PUT /api/messaging/groups/[id]/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'manage'); verify group.schoolId
+    - Zod body: { name?, description? }
+    - _Requirements: 3.4_
+  - [ ] 4.4 Create `DELETE /api/messaging/groups/[id]/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'manage')
+    - Block if any scheduled Message references this group; return 409 with explanation
+    - _Requirements: 3.6_
+  - [ ] 4.5 Create `POST /api/messaging/groups/[id]/members/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'manage')
+    - Zod body: { teacherId? } | { studentId? } | { extName, extPhone }
+    - _Requirements: 3.3_
+  - [ ] 4.6 Create `DELETE /api/messaging/groups/[id]/members/[memberId]/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'manage')
+    - _Requirements: 3.4_
+
+- [ ] 5. Templates API routes
+  - [ ] 5.1 Create `GET /api/messaging/templates/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'view')
+    - Returns all MessageTemplate rows for school
+    - _Requirements: 4.5_
+  - [ ] 5.2 Create `POST /api/messaging/templates/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'manage')
+    - Zod body: { name, category?, body }; validates uniqueness; HTTP 201
+    - _Requirements: 4.1, 4.2_
+  - [ ] 5.3 Create `PUT /api/messaging/templates/[id]/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'manage')
+    - _Requirements: 4.1_
+  - [ ] 5.4 Create `DELETE /api/messaging/templates/[id]/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'manage')
+    - _Requirements: 4.1_
+
+- [ ] 6. Recipient and settings API routes
+  - [ ] 6.1 Create `GET /api/messaging/recipients/search/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'view')
+    - Params: q (min 1 char), limit (default 15)
+    - Queries Student.fullName and Teacher.fullName with Prisma contains (insensitive)
+    - _Requirements: 6.2, 12.2_
+  - [ ] 6.2 Create `GET /api/messaging/recipients/resolve/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'manage')
+    - Params: descriptors (JSON)
+    - Returns { resolved: {label,phone}[]; skipped: {label,reason}[] }
+    - _Requirements: 6.7, 6.8_
+  - [ ] 6.3 Create `GET /api/messaging/settings/route.ts` and `PUT /api/messaging/settings/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'manage')
+    - Upserts MessagingSettings for school
+    - _Requirements: 9.6, 12.5_
+
+- [ ] 7. Exam Results API routes
+  - [ ] 7.1 Create `GET /api/messaging/exam-results/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'manage')
+    - Params: periodId
+    - Returns { totalStudents, withContact, withoutContact, period }
+    - _Requirements: 9.2, 9.3_
+  - [ ] 7.2 Create `GET /api/messaging/exam-results/preview/[studentId]/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'manage')
+    - Params: periodId
+    - Calls buildResultsMessage; returns { body, recipientLabel, phone }
+    - _Requirements: 9.4_
+  - [ ] 7.3 Create `POST /api/messaging/exam-results/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'manage')
+    - Zod body: { periodId, channel, closingLine? }
+    - Creates Message rows and dispatches in batches of MessagingSettings.batchSize
+    - Writes progress to a temporary DB row (or in-memory map keyed by batchId)
+    - Returns 202 with { batchId }
+    - Enforces per-student isolation: each parent receives only their child's results
+    - _Requirements: 9.7, 9.8, 9.10, 9.11_
+  - [ ] 7.4 Create `GET /api/messaging/exam-results/progress/[batchId]/route.ts`
+    - Guard: requirePermission('COMMUNICATION', 'view')
+    - Returns { sent, total, failed, done }
+    - _Requirements: 9.8_
+
+- [ ] 8. Checkpoint — verify all API routes end-to-end
+  - [ ] 8.1 Manually test `POST /api/messaging/send` with a single student recipient on SMS channel using curl or REST client; verify MessageLog row created with correct status
+  - [ ] 8.2 Verify `DELETE /api/messaging/groups/[id]` returns 409 when a scheduled message targets the group
+  - [ ] 8.3 Verify `POST /api/messaging/exam-results` sends each student only their own results (no cross-student data)
+  - [ ] 8.4 Verify all routes return 401 for unauthenticated requests and 403 for a canView-only user hitting a canManage route
+
+- [ ] 9. UI — shared components
+  - [ ] 9.1 Create `src/components/messaging/DeliveryStatusBadge.tsx`
+    - Renders PENDING (grey), SENT (blue), DELIVERED (green), FAILED (red) chips
+    - Consistent with existing badge patterns
+    - _Requirements: 8.3, 13.1_
+  - [ ] 9.2 Create `src/components/messaging/ChannelBadge.tsx`
+    - SMS and WhatsApp icon chips
+    - _Requirements: 8.1, 13.1_
+  - [ ] 9.3 Create `src/components/messaging/OfflineQueueBanner.tsx`
+    - Shows "N messages queued — will send when reconnected" when outbox has entries
+    - Dismissible; updates count reactively from IndexedDB
+    - _Requirements: 10.2_
+  - [ ] 9.4 Create `src/components/messaging/CommunicationShell.tsx`
+    - Three-tab bar: Messages | Groups | Templates + New Message button
+    - Tab bar collapses to horizontal-scroll strip at < 768px
+    - Accepts `canManage: boolean` prop; hides write actions when false
+    - Renders `<OfflineQueueBanner>` at top when queue is non-empty
+    - _Requirements: 2.4, 2.6, 13.5_
+
+- [ ] 10. UI — Message history and detail
+  - [ ] 10.1 Create `src/components/messaging/MessageList.tsx`
+    - Loads from `messaging_messages` IndexedDB store immediately on mount
+    - Fires `GET /api/messaging/messages` in background; merges into store
+    - Renders rows: channel badge, recipient summary, truncated body (120 chars), relative time, status badge
+    - Search input debounced 150ms — filters local cache first, falls back to API for misses
+    - "Load more" button appends next page (page param)
+    - Empty state: centred icon + "No messages sent yet." heading + one-liner
+    - Loading state: animate-pulse skeleton rows
+    - _Requirements: 8.1, 8.4, 8.5, 8.8, 12.1, 12.2_
+  - [ ] 10.2 Create `src/components/messaging/MessageDetail.tsx`
+    - Rendered as a `<dialog>` slide-over panel (desktop) / full-screen sheet (mobile)
+    - Shows full body, channel, sent/scheduled time, sender email, recipient summary
+    - Recipient log table: name, phone (masked), channel, status badge
+    - Retry button visible when any log has status FAILED (calls POST retry route)
+    - Cancel button visible when status PENDING and scheduledAt is in the future
+    - _Requirements: 8.2, 8.3, 8.6, 8.7_
+
+- [ ] 11. UI — Recipient Picker
+  - [ ] 11.1 Create `src/components/messaging/RecipientPicker.tsx`
+    - Quick-select chips: All Parents, All Students, All Teachers, All Staff, Entire School
+    - Per-form chips (Form 1–4) derived from school's SchoolClass data loaded from cache
+    - RecipientGroup chips loaded from `messaging_groups` IndexedDB store
+    - Live search input: queries `messaging_recipients` store by name prefix; falls back to `/api/messaging/recipients/search` for cache misses
+    - Results list stays open after a selection; previously selected recipients remain
+    - Selected items displayed as dismissible chips above input
+    - "Entire School" clears all other selections; all others are additive
+    - Accepts `onChange(descriptors: RecipientDescriptor[])` prop
+    - _Requirements: 6.1–6.9_
+  - [ ] 11.2 Create `src/components/messaging/TemplateSelector.tsx`
+    - Dropdown populated from `messaging_templates` IndexedDB store
+    - Selecting a template fires `onSelect(template)` without clearing recipient state
+    - _Requirements: 4.6, 5.2, 6.9_
+
+- [ ] 12. UI — Composer
+  - [ ] 12.1 Create `src/components/messaging/Composer.tsx`
+    - Rendered as overlay panel (desktop) / full-screen (mobile)
+    - Embeds RecipientPicker, TemplateSelector, body textarea, channel radio, schedule toggle + datetime picker, character counter, attachment picker
+    - Character counter: amber at 128/160 chars, red at 160; resets per 160-char boundary for multi-part SMS
+    - Live preview pane: calls `GET /api/messaging/recipients/resolve` debounced 500ms; renders first resolved recipient's message with placeholders applied client-side via applyPlaceholders equivalent
+    - Send/Schedule button disabled with tooltip when: no recipients, body empty, channel not configured
+    - On submit: POST /api/messaging/send; on network failure write to outbox and show OfflineQueueBanner
+    - On success: close panel, update MessageList
+    - _Requirements: 5.1–5.7, 7.1–7.7, 10.1, 13.7_
+
+- [ ] 13. UI — Groups management
+  - [ ] 13.1 Create `src/components/messaging/GroupManager.tsx`
+    - Lists all RecipientGroups with name, description, member count, created date
+    - Create button opens inline form: name + description inputs
+    - Each row has Manage and Delete actions
+    - Delete shows confirmation dialog; displays "Cannot delete — scheduled messages reference this group" error on 409 response
+    - Empty state + loading skeleton
+    - _Requirements: 3.1–3.8_
+  - [ ] 13.2 Create `src/components/messaging/GroupMemberPanel.tsx`
+    - Rendered as slide-over for one group
+    - Lists current members: name, type (Teacher / Student / External), remove button
+    - Add member section: search students/teachers by name (uses RecipientPicker live search), or enter external name + phone
+    - Validates at least one member before closing
+    - _Requirements: 3.3, 3.4, 3.8_
+
+- [ ] 14. UI — Templates management
+  - [ ] 14.1 Create `src/components/messaging/TemplateEditor.tsx`
+    - Create/edit form: name, category dropdown (Fee Reminder, Meeting Notice, Exam Reminder, Holiday, Emergency, Attendance, Results, Other), body textarea
+    - Placeholder tokens (/name, /class, /stream, /Admission, /staffname, /staffno, /results) rendered as distinct colour-coded inline buttons that insert the token at cursor position
+    - Live character count for body
+    - Save / Cancel actions; on success updates `messaging_templates` IndexedDB store
+    - _Requirements: 4.1–4.4_
+  - [ ] 14.2 Create `src/components/messaging/TemplateList.tsx`
+    - Lists all templates with name, category badge, body preview (first 100 chars), Edit and Use actions
+    - Empty state + loading skeleton
+    - _Requirements: 4.5, 4.6_
+
+- [ ] 15. UI — Exam Results
+  - [ ] 15.1 Create `src/components/messaging/ExamResultsPanel.tsx`
+    - Period selector dropdown (fetches from existing `/api/assessments/periods`)
+    - On period select: calls `GET /api/messaging/exam-results?periodId=...`; shows summary cards (total students, with contact, without contact)
+    - Closing line text input (pre-populated from MessagingSettings.resultsClosing)
+    - Channel radio: SMS | WhatsApp
+    - Student table with Preview button per row
+    - "Send All Results" button (disabled until period selected)
+    - _Requirements: 9.1–9.7_
+  - [ ] 15.2 Create `src/components/messaging/ExamResultsProgress.tsx`
+    - Polls `GET /api/messaging/exam-results/progress/[batchId]` every 2 s
+    - Renders a progress bar (N of M sent), sent count, failed count
+    - On done: shows completion summary with downloadable CSV of skipped students (no contact)
+    - _Requirements: 9.8, 9.9_
+  - [ ] 15.3 Create preview modal within ExamResultsPanel
+    - Student selector: name input or click from table; calls `GET /api/messaging/exam-results/preview/[studentId]?periodId=...`
+    - Shows rendered message body in a read-only textarea
+    - Shows phone number masked (last 4 digits visible)
+    - _Requirements: 9.4_
+
+- [ ] 16. Pages — wire components into routes
+  - [ ] 16.1 Create `src/app/principal/communication/page.tsx`
+    - `"use client"` — fetches canManage from user context (or pass via layout props)
+    - Renders `<CommunicationShell>` with Messages tab active
+    - Embeds `<MessageList>` and the `<Composer>` overlay triggered by New Message button
+    - Seeds `messaging_recipients` IndexedDB on first load via `seedRecipientsCache`
+    - _Requirements: 2.1, 2.3, 2.4, 13.3_
+  - [ ] 16.2 Create `src/app/principal/communication/groups/page.tsx`
+    - Renders `<CommunicationShell>` with Groups tab active
+    - Embeds `<GroupManager>` and `<GroupMemberPanel>` slide-over
+    - _Requirements: 3_
+  - [ ] 16.3 Create `src/app/principal/communication/templates/page.tsx`
+    - Renders `<CommunicationShell>` with Templates tab active
+    - Embeds `<TemplateList>` and `<TemplateEditor>` slide-over
+    - _Requirements: 4_
+  - [ ] 16.4 Create `src/app/principal/communication/exam-results/page.tsx`
+    - Renders `<ExamResultsPanel>` and `<ExamResultsProgress>` overlay
+    - _Requirements: 9_
+  - [ ] 16.5 Create `src/app/staff/communication/page.tsx`
+    - Identical structure to principal page; uses `requirePermission` in layout to enforce canView
+    - _Requirements: 1.2, 1.4_
+  - [ ] 16.6 Create `src/app/staff/communication/groups/page.tsx`
+    - _Requirements: 1.2, 1.4, 3_
+  - [ ] 16.7 Create `src/app/staff/communication/templates/page.tsx`
+    - _Requirements: 1.2, 1.4, 4_
+  - [ ] 16.8 Create `src/app/staff/communication/exam-results/page.tsx`
+    - _Requirements: 1.2, 1.5, 9_
+
+- [ ] 17. Navigation wiring
+  - [ ] 17.1 Add `{ href: '/principal/communication', label: 'Communication' }` to the `NAV` array in `src/app/principal/layout.tsx`
+    - Position: after the Library entry
+    - _Requirements: 2.1_
+  - [ ] 17.2 Add `COMMUNICATION: '/staff/communication'` to `MODULE_ROUTES` in `src/app/staff/layout.tsx`
+    - Add label mapping: `href === '/staff/communication' ? 'Communication' : ...`
+    - _Requirements: 2.2_
+
+- [ ] 18. Checkpoint — verify full UI flow end-to-end
+  - [ ] 18.1 Open Communication Centre as Principal; verify message history loads from cache before network response
+  - [ ] 18.2 Create a "Board of Management" group; add two teachers and one external contact; verify member count shows 3
+  - [ ] 18.3 Create a "Fee Reminder" template with /name and /class placeholders; open Composer with template; verify preview resolves placeholders for a selected student
+  - [ ] 18.4 Send a message to "Form 1" via SMS; verify Message row created, MessageLog rows exist, status badge updates
+  - [ ] 18.5 Disable network in browser devtools; compose a message; verify it appears in outbox banner; re-enable network; verify auto-send and history update
+  - [ ] 18.6 Open Exam Results; select a published period; preview one student; verify only that student's results appear; send all; verify progress bar reaches 100%
+
+- [ ] 19. Polish and consistency audit
+  - [ ] 19.1 Audit all Communication Centre pages for consistent empty/loading states (animate-pulse skeletons, centred empty-state card with icon)
+  - [ ] 19.2 Verify mobile layout: all pages render without horizontal overflow at 375px viewport; tab bar scrolls horizontally; Composer opens full-screen
+  - [ ] 19.3 Verify canView-only user: New Message button hidden, Groups/Templates in read-only mode, Send Exam Results button absent
+  - [ ] 19.4 Verify all six new Prisma models have `@@index([schoolId])` and no query in any API route omits `where: { schoolId: user.schoolId }`
+  - [ ] 19.5 Ensure character counter changes colour at 128 chars (amber) and 160 chars (red), resets for multi-part SMS
+  - [ ] 19.6 Verify `OfflineQueueBanner` count updates in real time as messages are queued and flushed
+  - _Requirements: 1.3, 1.7, 12.3, 12.7, 13_

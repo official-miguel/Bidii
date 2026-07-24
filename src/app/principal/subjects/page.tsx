@@ -1,0 +1,463 @@
+"use client";
+
+import { useEffect, useState, FormEvent, useCallback } from "react";
+import Link from "next/link";
+import Modal from "@/components/Modal";
+import {
+  PageHeader,
+  ErrorBanner,
+  EmptyState,
+  Chip,
+  ActionIconButton,
+  inputClass,
+  labelClass,
+  primaryButtonClass,
+  secondaryButtonClass,
+} from "@/components/ui";
+import { SkeletonTable } from "@/components/ui/ProgressivePage";
+import { useStaffStore } from "@/lib/stores/staffStore";
+import WorkspaceToolbar from "@/components/workspace/WorkspaceToolbar";
+import SubjectWorkspaceDrawer from "@/components/entity-drawers/SubjectWorkspaceDrawer";
+import StaffProfileDrawer    from "@/components/entity-drawers/StaffProfileDrawer";
+import DepartmentWorkspaceDrawer from "@/components/entity-drawers/DepartmentWorkspaceDrawer";
+import ClassWorkspaceDrawer  from "@/components/entity-drawers/ClassWorkspaceDrawer";
+import { ExternalLink } from "lucide-react";
+
+type Department = { id: string; name: string };
+type Subject = {
+  id: string;
+  name: string;
+  code: string;
+  type: "CORE" | "ELECTIVE";
+  applicableForms: number[];
+  department: Department;
+  lessonsPerWeek: number;
+  doubleLesson: boolean;
+  requiresSpecialRoom: string | null;
+  _count: { teacherSubjects: number };
+};
+
+const FORMS = [1, 2, 3, 4, 5, 6];
+
+export default function SubjectsPage() {
+  const storeSubjects = useStaffStore((s) => s.subjects);
+
+  const [subjects, setSubjects] = useState<Subject[] | null>(() =>
+    storeSubjects.length > 0 ? (storeSubjects as unknown as Subject[]) : null
+  );
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<Subject | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedForms, setSelectedForms] = useState<number[]>([]);
+
+  // Workspace toolbar filters
+  const [search, setSearch] = useState("");
+  const [filterDept, setFilterDept] = useState("");
+  const [filterType, setFilterType] = useState("");
+
+  // ── Entity drawer state ───────────────────────────────────────────────────
+  const [drawerSubjId,  setDrawerSubjId]  = useState<string | null>(null);
+  const [drawerStaffId, setDrawerStaffId] = useState<string | null>(null);
+  const [drawerDeptId,  setDrawerDeptId]  = useState<string | null>(null);
+  const [drawerClassId, setDrawerClassId] = useState<string | null>(null);
+
+  function openSubjDrawer(id: string)  { setDrawerSubjId(id);  setDrawerStaffId(null); setDrawerDeptId(null); setDrawerClassId(null); }
+  function openStaffDrawer(id: string) { setDrawerStaffId(id); setDrawerSubjId(null);  setDrawerDeptId(null); setDrawerClassId(null); }
+  function openDeptDrawer(id: string)  { setDrawerDeptId(id);  setDrawerSubjId(null);  setDrawerStaffId(null); setDrawerClassId(null); }
+  function openClassDrawer(id: string) { setDrawerClassId(id); setDrawerSubjId(null);  setDrawerStaffId(null); setDrawerDeptId(null); }
+
+  const load = useCallback(async () => {
+    const [subjRes, deptRes] = await Promise.all([
+      fetch("/api/subjects"),
+      fetch("/api/departments"),
+    ]);
+    const freshSubjects = await subjRes.json();
+    setSubjects(freshSubjects);
+    setDepartments(await deptRes.json());
+  }, []);
+
+  useEffect(() => {
+    load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function openCreate() {
+    setEditing(null);
+    setSelectedForms([]);
+    setError(null);
+    setModalOpen(true);
+  }
+
+  function openEdit(s: Subject) {
+    setEditing(s);
+    setSelectedForms(s.applicableForms);
+    setError(null);
+    setModalOpen(true);
+  }
+
+  function toggleForm(f: number) {
+    setSelectedForms((prev) => (prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]));
+  }
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    const form = new FormData(e.currentTarget);
+    const payload = {
+      name: form.get("name") as string,
+      code: form.get("code") as string,
+      type: form.get("type") as string,
+      departmentId: form.get("departmentId") as string,
+      applicableForms: selectedForms,
+      lessonsPerWeek: Number(form.get("lessonsPerWeek")) || 5,
+      doubleLesson: form.get("doubleLesson") === "on",
+      requiresSpecialRoom: (form.get("requiresSpecialRoom") as string) || "",
+    };
+
+    if (selectedForms.length === 0) {
+      setError("Select at least one form this subject applies to.");
+      return;
+    }
+
+    const res = await fetch(editing ? `/api/subjects/${editing.id}` : "/api/subjects", {
+      method: editing ? "PATCH" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      setError(data.error || "Something went wrong.");
+      return;
+    }
+    setModalOpen(false);
+    load();
+  }
+
+  async function handleDelete(s: Subject) {
+    if (!confirm(`Delete ${s.name}? This can't be undone.`)) return;
+    const res = await fetch(`/api/subjects/${s.id}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || "Couldn't delete subject.");
+      return;
+    }
+    load();
+  }
+
+  return (
+    <div>
+      <PageHeader
+        title="Subjects"
+        description="The master subject list. Everything downstream — staff assignment, timetables, results, electives — reads from here."
+        action={
+          <button
+            className={primaryButtonClass}
+            onClick={openCreate}
+            disabled={departments.length === 0}
+            title={departments.length === 0 ? "Add a department first" : undefined}
+          >
+            Add subject
+          </button>
+        }
+      />
+
+      {departments.length === 0 && subjects !== null && (
+        <div className="mb-4 rounded-md bg-warn-bg text-warn text-sm px-3 py-2">
+          Create at least one department before adding subjects.
+        </div>
+      )}
+
+      <WorkspaceToolbar>
+        <WorkspaceToolbar.Search
+          value={search}
+          onChange={setSearch}
+          placeholder="Search by name or code…"
+        />
+
+        <WorkspaceToolbar.Filter
+          label="Department"
+          value={filterDept}
+          options={[
+            { value: "", label: "All departments" },
+            ...departments.map(d => ({ value: d.id, label: d.name })),
+          ]}
+          onChange={setFilterDept}
+        />
+
+        <WorkspaceToolbar.Filter
+          label="Type"
+          value={filterType}
+          options={[
+            { value: "", label: "All types" },
+            { value: "CORE", label: "Core" },
+            { value: "ELECTIVE", label: "Elective" },
+          ]}
+          onChange={setFilterType}
+        />
+
+        {(search || filterDept || filterType) && (
+          <button
+            type="button"
+            className="text-sm text-teal hover:underline"
+            onClick={() => { setSearch(""); setFilterDept(""); setFilterType(""); }}
+          >
+            Clear filters
+          </button>
+        )}
+      </WorkspaceToolbar>
+
+      {subjects === null ? (
+        <SkeletonTable rows={8} cols={8} />
+      ) : subjects.length === 0 ? (
+        <EmptyState message="No subjects yet. Add the subjects your school offers." />
+      ) : (
+        <div className="bg-white border border-line rounded-xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[700px]">
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b border-line bg-slate-50/80 text-left text-xs font-semibold text-slate uppercase tracking-wide">
+                  <th className="px-5 py-3.5">Subject</th>
+                  <th className="px-5 py-3.5 w-[90px]">Code</th>
+                  <th className="px-5 py-3.5 w-[100px]">Type</th>
+                  <th className="px-5 py-3.5 hidden md:table-cell">Department</th>
+                  <th className="px-5 py-3.5 w-[100px]">Forms</th>
+                  <th className="px-5 py-3.5 w-[110px] hidden lg:table-cell">Periods/wk</th>
+                  <th className="px-5 py-3.5 w-[90px] hidden lg:table-cell">Teachers</th>
+                  <th className="px-5 py-3.5 w-[80px]" />
+                </tr>
+              </thead>
+              <tbody>
+                {(subjects ?? [])
+                  .filter(s => {
+                    const q = search.toLowerCase();
+                    if (q && !s.name.toLowerCase().includes(q) && !s.code.toLowerCase().includes(q)) return false;
+                    if (filterDept && s.department.id !== filterDept) return false;
+                    if (filterType && s.type !== filterType) return false;
+                    return true;
+                  })
+                  .map((s) => (
+                  <tr key={s.id} className="group border-b border-line last:border-0 hover:bg-slate-50/50 transition-colors cursor-pointer" onClick={() => openSubjDrawer(s.id)}>
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-ink group-hover:text-teal transition-colors">{s.name}</span>
+                        <ExternalLink className="h-3.5 w-3.5 text-slate/30 group-hover:text-teal transition-colors shrink-0" />
+                      </div>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <span className="text-xs font-mono text-slate bg-slate-50 border border-line rounded px-1.5 py-0.5">{s.code}</span>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <Chip variant={s.type === "CORE" ? "success" : "warn"} size="xs">
+                        {s.type === "CORE" ? "Core" : "Elective"}
+                      </Chip>
+                    </td>
+                    <td className="px-5 py-3.5 hidden md:table-cell" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => openDeptDrawer(s.department.id)}
+                        className="text-sm text-slate hover:text-teal hover:underline flex items-center gap-1 transition-colors"
+                      >
+                        {s.department.name}
+                        <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-60" />
+                      </button>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <div className="flex flex-wrap gap-0.5">
+                        {s.applicableForms.sort((a, b) => a - b).map(f => (
+                          <Chip key={f} variant="default" size="xs">F{f}</Chip>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-5 py-3.5 hidden lg:table-cell">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm text-slate tabular-nums">{s.lessonsPerWeek}</span>
+                        {s.doubleLesson && <Chip variant="info" size="xs">double</Chip>}
+                      </div>
+                    </td>
+                    <td className="px-5 py-3.5 hidden lg:table-cell">
+                      <span className="text-sm text-slate tabular-nums">{s._count.teacherSubjects}</span>
+                    </td>
+                    <td className="px-5 py-3.5" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <ActionIconButton icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536M9 13l6.5-6.5a2 2 0 012.828 2.828L11.828 15.828a2 2 0 01-1.414.586H8v-2.414a2 2 0 01.586-1.414z" /></svg>} label="Edit" onClick={() => openEdit(s)} />
+                        <ActionIconButton icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" /></svg>} label="Delete" variant="danger" onClick={() => handleDelete(s)} />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {modalOpen && (
+        <Modal title={editing ? "Edit subject" : "Add subject"} onClose={() => setModalOpen(false)}>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && <ErrorBanner message={error} />}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Subject name</label>
+                <input
+                  name="name"
+                  required
+                  defaultValue={editing?.name}
+                  className={inputClass}
+                  placeholder="e.g. Biology"
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Code</label>
+                <input
+                  name="code"
+                  required
+                  maxLength={10}
+                  defaultValue={editing?.code}
+                  className={inputClass}
+                  placeholder="e.g. BIO"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Type</label>
+                <select name="type" defaultValue={editing?.type || "CORE"} className={inputClass}>
+                  <option value="CORE">Core (compulsory)</option>
+                  <option value="ELECTIVE">Elective</option>
+                </select>
+              </div>
+              <div>
+                <label className={labelClass}>Department</label>
+                <select
+                  name="departmentId"
+                  required
+                  defaultValue={editing?.department.id || ""}
+                  className={inputClass}
+                >
+                  <option value="" disabled>
+                    Select…
+                  </option>
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className={labelClass}>Applies to forms</label>
+              <div className="flex flex-wrap gap-2">
+                {FORMS.map((f) => (
+                  <button
+                    type="button"
+                    key={f}
+                    onClick={() => toggleForm(f)}
+                    className={`text-sm rounded-md border px-3 py-1.5 transition-colors ${
+                      selectedForms.includes(f)
+                        ? "bg-teal text-white border-teal"
+                        : "border-line text-ink hover:bg-paper"
+                    }`}
+                  >
+                    Form {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="border-t border-line pt-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate mb-3">
+                AI Timetable Generator inputs
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelClass}>Periods per week</label>
+                  <input
+                    name="lessonsPerWeek"
+                    type="number"
+                    min={1}
+                    max={20}
+                    defaultValue={editing?.lessonsPerWeek ?? 5}
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Special room (optional)</label>
+                  <input
+                    name="requiresSpecialRoom"
+                    defaultValue={editing?.requiresSpecialRoom || ""}
+                    placeholder="e.g. Lab, Computer Lab"
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-ink mt-3">
+                <input
+                  type="checkbox"
+                  name="doubleLesson"
+                  defaultChecked={editing?.doubleLesson ?? false}
+                  className="rounded border-line"
+                />
+                Schedule as consecutive double lessons
+              </label>
+              <p className="text-xs text-slate mt-2">
+                Used when generating a timetable with AI — see{" "}
+                <Link href="/principal/timetable" className="underline">
+                  Timetable
+                </Link>
+                .
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" className={secondaryButtonClass} onClick={() => setModalOpen(false)}>
+                Cancel
+              </button>
+              <button type="submit" className={primaryButtonClass}>
+                {editing ? "Save changes" : "Add subject"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ── Entity drawers — intelligent cross-navigation ── */}
+      <SubjectWorkspaceDrawer
+        subjectId={drawerSubjId}
+        open={!!drawerSubjId}
+        onClose={() => setDrawerSubjId(null)}
+        onOpenStaff={(id) => openStaffDrawer(id)}
+        onOpenDepartment={(id) => openDeptDrawer(id)}
+        basePath="/principal"
+      />
+      <StaffProfileDrawer
+        staffId={drawerStaffId}
+        open={!!drawerStaffId}
+        onClose={() => setDrawerStaffId(null)}
+        onOpenDepartment={(id) => openDeptDrawer(id)}
+        onOpenClass={(id) => openClassDrawer(id)}
+        basePath="/principal"
+      />
+      <DepartmentWorkspaceDrawer
+        departmentId={drawerDeptId}
+        open={!!drawerDeptId}
+        onClose={() => setDrawerDeptId(null)}
+        onOpenStaff={(id) => openStaffDrawer(id)}
+        onOpenSubject={(id) => openSubjDrawer(id)}
+        basePath="/principal"
+      />
+      <ClassWorkspaceDrawer
+        classId={drawerClassId}
+        open={!!drawerClassId}
+        onClose={() => setDrawerClassId(null)}
+        onOpenStaff={(id) => openStaffDrawer(id)}
+        onOpenSubject={(id) => openSubjDrawer(id)}
+        basePath="/principal"
+      />
+    </div>
+  );
+}

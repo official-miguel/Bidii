@@ -1,0 +1,79 @@
+/// Section: AI Timetable Generator — turns a school's TimetableConfig
+/// (day start time, period length, break/lunch placement and length) into
+/// actual clock times for each period. The generator and every grid in the
+/// app schedule in abstract period numbers (1, 2, 3…) — this is the one
+/// place that maps period numbers to "8:00–8:40" for a given school, so
+/// every screen that shows a timetable can display the school's own real
+/// format instead of a bare period number.
+
+export type ScheduleTimesConfig = {
+  periodsPerDay: number;
+  dayStartTime: string; // "HH:MM", 24-hour
+  periodDurationMinutes: number;
+  breakAfterPeriod: number | null;
+  breakDurationMinutes: number;
+  lunchAfterPeriod: number | null;
+  lunchDurationMinutes: number;
+};
+
+export type PeriodTime = {
+  period: number;
+  startMinutes: number; // minutes since midnight
+  endMinutes: number;
+  label: string; // e.g. "8:00–8:40"
+};
+
+function parseStartTime(value: string): number {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
+  if (!match) return 8 * 60; // fall back to 8:00 for anything unparseable
+  const hours = Math.min(23, Math.max(0, Number(match[1])));
+  const minutes = Math.min(59, Math.max(0, Number(match[2])));
+  return hours * 60 + minutes;
+}
+
+function formatMinutes(totalMinutes: number): string {
+  const hours24 = Math.floor(totalMinutes / 60) % 24;
+  const minutes = totalMinutes % 60;
+  const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
+  return `${hours12}:${String(minutes).padStart(2, "0")}`;
+}
+
+/// Returns the start/end clock time for every period 1..periodsPerDay,
+/// accounting for a break and/or lunch inserted after specific periods.
+/// Purely additive/descriptive — never used by the scheduling algorithm
+/// itself, only for display.
+export function computePeriodTimes(config: ScheduleTimesConfig): PeriodTime[] {
+  const periods: PeriodTime[] = [];
+  let cursor = parseStartTime(config.dayStartTime);
+
+  for (let period = 1; period <= config.periodsPerDay; period++) {
+    const start = cursor;
+    const end = start + Math.max(1, config.periodDurationMinutes);
+    periods.push({
+      period,
+      startMinutes: start,
+      endMinutes: end,
+      label: `${formatMinutes(start)}–${formatMinutes(end)}`,
+    });
+    cursor = end;
+
+    if (config.breakAfterPeriod === period) {
+      cursor += Math.max(0, config.breakDurationMinutes);
+    }
+    if (config.lunchAfterPeriod === period) {
+      cursor += Math.max(0, config.lunchDurationMinutes);
+    }
+  }
+
+  return periods;
+}
+
+/// The school's whole day, start to finish, as a display string — e.g.
+/// "School day: 8:00 – 15:40". Used in the AI panel's settings summary.
+export function schoolDaySpan(config: ScheduleTimesConfig): string {
+  const periods = computePeriodTimes(config);
+  if (periods.length === 0) return "";
+  const start = formatMinutes(periods[0].startMinutes);
+  const end = formatMinutes(periods[periods.length - 1].endMinutes);
+  return `${start} – ${end}`;
+}
