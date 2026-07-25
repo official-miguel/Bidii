@@ -768,7 +768,7 @@ export default function MarksheetGrid({
   // ── Filter selection (driven by ExamFilterBar) ─────────────────────────
   const [periodId,  setPeriodId]  = useState<string>("");
   const [classId,   setClassId]   = useState<string>(defaultClassId ?? classes[0]?.id ?? "");
-  const [subjectId, setSubjectId] = useState<string>(defaultSubjectId ?? subjects[0]?.id ?? "");
+  const [subjectId, setSubjectId] = useState<string>(defaultSubjectId ?? "");
 
   // We keep a local copy of periods for the breadcrumb label only.
   const [periods, setPeriods] = useState<Period[]>([]);

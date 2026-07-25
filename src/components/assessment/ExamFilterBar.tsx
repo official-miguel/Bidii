@@ -170,9 +170,18 @@ export default function ExamFilterBar({
             const match = classes.find((c) => c.id === defaultClassId && c.form === initialForm);
             if (match) setClassId(match.id);
           }
-          if (!hideSubject && defaultSubjectId) {
-            const match = subjects.find((s) => s.id === defaultSubjectId);
-            if (match) setSubjectId(match.id);
+          if (!hideSubject) {
+            if (defaultSubjectId) {
+              const match = subjects.find((s) => s.id === defaultSubjectId);
+              if (match) setSubjectId(match.id);
+            } else {
+              // Auto-select the first subject applicable to the resolved form
+              const resolvedForm = typeof initialForm === "number" ? initialForm : null;
+              const firstSubject = resolvedForm !== null
+                ? subjects.find((s) => s.applicableForms.includes(resolvedForm))
+                : subjects[0];
+              if (firstSubject) setSubjectId(firstSubject.id);
+            }
           }
         }
         setPeriodsLoading(false);
@@ -270,9 +279,15 @@ export default function ExamFilterBar({
     prevKey.current = "";
     const newForm = id === "" ? "" : parseInt(id, 10);
     setForm(newForm);
-    // Reset stream and subject when form changes — they are form-specific.
+    // Reset stream when form changes — streams are form-specific.
     setClassId("");
-    setSubjectId("");
+    // Auto-select the first subject applicable to the new form.
+    if (!hideSubject && typeof newForm === "number") {
+      const first = subjects.find((s) => s.applicableForms.includes(newForm));
+      setSubjectId(first?.id ?? "");
+    } else {
+      setSubjectId("");
+    }
   }
 
   function handleStreamChange(id: string) {
