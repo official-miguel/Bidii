@@ -22,6 +22,10 @@ type ClassLite = { id: string; name: string; form: number; stream?: string | nul
 const selectClass =
   "rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink focus:outline-none focus:border-teal focus:ring-2 focus:ring-teal/20 dark:bg-dark-surface dark:border-dark-border dark:text-dark-text";
 
+const STATUS_ORDER: Record<string, number> = {
+  OPEN: 0, UNDER_REVIEW: 1, ESCALATED: 2, RESOLVED: 3,
+};
+
 function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value);
   useEffect(() => {
@@ -357,10 +361,6 @@ export default function DisciplineDashboard({
     const resolved = records?.filter((r) => r.status === "RESOLVED").length ?? 0;
     return { total: records?.length ?? 0, open, resolved };
   }, [records]);
-
-  const STATUS_ORDER: Record<string, number> = {
-    OPEN: 0, UNDER_REVIEW: 1, ESCALATED: 2, RESOLVED: 3,
-  };
 
   const filtered = useMemo(() => {
     if (!records) return [];
