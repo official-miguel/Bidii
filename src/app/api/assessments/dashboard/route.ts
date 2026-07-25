@@ -20,9 +20,10 @@ const DASHBOARD_CACHE_TTL_S = 0;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = prisma as any;
 
-type PeriodRow = { id: string; name: string; academicYear: string; term: number | null };
-type PaperRow  = { id: string; subjectId: string; maxMarks: number };
-type ItemRow   = { studentId: string; subjectId: string | null; paperId: string | null; numericScore: number | null };
+type PeriodRow    = { id: string; name: string; academicYear: string; term: number | null };
+type PaperRow     = { id: string; subjectId: string; maxMarks: number };
+type ItemRow      = { studentId: string; subjectId: string | null; paperId: string | null; numericScore: number | null };
+type TrendItemRow = { periodId: string; studentId: string; subjectId: string | null; paperId: string | null; numericScore: number | null };
 
 export async function GET(req: NextRequest) {
   try {
