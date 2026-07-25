@@ -11,6 +11,7 @@ import {
 } from "@/components/ui";
 import { Avatar, StudentLite, STATUS_LABELS, fmtSize } from "./shared";
 import { X, Loader2, Sparkles, Paperclip } from "lucide-react";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 
 type Suggestion = {
   title: string;
@@ -65,27 +66,47 @@ export default function QuickIncidentModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [text, setText] = useState("");
+  // Draft is scoped to "new" — incidents are always new records (no edit mode)
+  const [draft, setDraft, clearDraft] = useFormDraft("bidii_draft_incident", {
+    text:        "",
+    studentId:   initialStudentId ?? "",
+    title:       "",
+    aiSummary:   "",
+    severity:    "",
+    date:        new Date().toISOString().slice(0, 10),
+    time:        "",
+    location:    "",
+    witnesses:   "",
+    actionTaken: "",
+    status:      "OPEN",
+  });
+
+  const [text, setText]             = useState(draft.text);
   const [studentQuery, setStudentQuery] = useState("");
-  const [studentId, setStudentId] = useState(initialStudentId || "");
+  const [studentId, setStudentId]   = useState(initialStudentId || draft.studentId);
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
   const [suggesting, setSuggesting] = useState(false);
-  const [title, setTitle] = useState("");
-  const [aiSummary, setAiSummary] = useState("");
-  const [severity, setSeverity] = useState<string>("");
-  const [showMore, setShowMore] = useState(false);
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [time, setTime] = useState("");
-  const [location, setLocation] = useState("");
-  const [witnesses, setWitnesses] = useState("");
-  const [actionTaken, setActionTaken] = useState("");
-  const [status, setStatus] = useState("OPEN");
-  const [files, setFiles] = useState<PendingFile[]>([]);
-  const [dragOver, setDragOver] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [title, setTitle]           = useState(draft.title);
+  const [aiSummary, setAiSummary]   = useState(draft.aiSummary);
+  const [severity, setSeverity]     = useState<string>(draft.severity);
+  const [showMore, setShowMore]     = useState(false);
+  const [date, setDate]             = useState(draft.date);
+  const [time, setTime]             = useState(draft.time);
+  const [location, setLocation]     = useState(draft.location);
+  const [witnesses, setWitnesses]   = useState(draft.witnesses);
+  const [actionTaken, setActionTaken] = useState(draft.actionTaken);
+  const [status, setStatus]         = useState(draft.status);
+  const [files, setFiles]           = useState<PendingFile[]>([]);
+  const [dragOver, setDragOver]     = useState(false);
+  const [saving, setSaving]         = useState(false);
+  const [error, setError]           = useState<string | null>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // Persist draft on change (skip file objects — not serialisable)
+  useEffect(() => {
+    setDraft({ text, studentId, title, aiSummary, severity, date, time, location, witnesses, actionTaken, status });
+  }, [text, studentId, title, aiSummary, severity, date, time, location, witnesses, actionTaken, status, setDraft]);
 
   useEffect(() => textRef.current?.focus(), []);
 
@@ -207,6 +228,7 @@ export default function QuickIncidentModal({
       await uploadTo(record.id, pf);
     }
     setSaving(false);
+    clearDraft();
     onSaved();
   }
 

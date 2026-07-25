@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Users } from "lucide-react";
 import { royalCardClass } from "@/components/ui";
 import GroupMemberPanel from "./GroupMemberPanel";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 
 interface Group { id: string; name: string; description: string | null; createdAt: string; _count: { members: number } }
 interface Props  { canManage: boolean }
@@ -11,11 +13,18 @@ export default function GroupManager({ canManage }: Props) {
   const [groups, setGroups]         = useState<Group[]>([]);
   const [loading, setLoading]       = useState(true);
   const [showCreate, setShowCreate] = useState(false);
-  const [name, setName]             = useState("");
-  const [description, setDescription] = useState("");
-  const [creating, setCreating]     = useState(false);
-  const [error, setError]           = useState("");
-  const [panelGroup, setPanelGroup] = useState<Group | null>(null);
+
+  const [draft, setDraft, clearDraft] = useFormDraft("bidii_draft_group_create", {
+    name: "", description: "",
+  });
+  const [name, setName]               = useState(draft.name);
+  const [description, setDescription] = useState(draft.description);
+  const [creating, setCreating]       = useState(false);
+  const [error, setError]             = useState("");
+  const [panelGroup, setPanelGroup]   = useState<Group | null>(null);
+
+  // Persist on change
+  useEffect(() => { setDraft({ name, description }); }, [name, description, setDraft]);
 
   async function loadGroups() {
     const r = await fetch("/api/messaging/groups");
@@ -35,6 +44,7 @@ export default function GroupManager({ canManage }: Props) {
     if (r.ok) {
       const created: Group & { _count?: { members: number } } = await r.json();
       const newGroup: Group = { ...created, _count: { members: 0 } };
+      clearDraft();
       setName(""); setDescription(""); setShowCreate(false);
       await loadGroups();
       // Immediately open the member panel so the user can add contacts right away
@@ -115,7 +125,7 @@ export default function GroupManager({ canManage }: Props) {
                 {creating ? "Creating…" : "Create & add members →"}
               </button>
               <button
-                onClick={() => { setShowCreate(false); setError(""); setName(""); setDescription(""); }}
+                onClick={() => { setShowCreate(false); setError(""); clearDraft(); setName(""); setDescription(""); }}
                 className="rounded-lg border border-line text-sm font-medium px-4 py-2 text-ink hover:bg-paper transition-colors"
               >
                 Cancel
@@ -135,7 +145,7 @@ export default function GroupManager({ canManage }: Props) {
       ) : groups.length === 0 && !showCreate ? (
         <div className="rounded-xl border border-dashed border-line px-6 py-14 text-center">
           <div className="w-14 h-14 rounded-2xl bg-royal-50 flex items-center justify-center mx-auto mb-4">
-            <span className="text-3xl">👥</span>
+            <Users className="h-7 w-7 text-royal/60" aria-hidden />
           </div>
           <p className="text-base font-medium text-ink mb-1">No groups yet</p>
           <p className="text-sm text-slate mb-4">
@@ -156,7 +166,7 @@ export default function GroupManager({ canManage }: Props) {
             <div key={g.id} className={`${royalCardClass} p-4 flex items-center justify-between gap-4`}>
               <div className="flex items-center gap-3 min-w-0">
                 <div className="w-10 h-10 rounded-xl bg-royal-50 flex items-center justify-center shrink-0">
-                  <span className="text-xl">👥</span>
+                  <Users className="h-5 w-5 text-royal/70" aria-hidden />
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-ink truncate">{g.name}</p>

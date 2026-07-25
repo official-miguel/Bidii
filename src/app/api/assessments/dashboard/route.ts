@@ -13,9 +13,9 @@ import { scoreToGrade, meanGrade, pointsToGrade, subjectScore, type KcseGrade, A
 const DASHBOARD_STUDENT_LIMIT = 5_000;
 
 // Dashboard results are expensive to compute but change rarely between saves.
-// We cache for 60 seconds, keyed by (schoolId, periodId, classId, subjectId, form).
-// The ETag is a hash of the response body so the browser skips parsing on 304.
-const DASHBOARD_CACHE_TTL_S = 60;
+// Cache is intentionally disabled so filter changes always return fresh data.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const DASHBOARD_CACHE_TTL_S = 0;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = prisma as any;
@@ -25,86 +25,147 @@ type PaperRow  = { id: string; subjectId: string; maxMarks: number };
 type ItemRow   = { studentId: string; subjectId: string | null; paperId: string | null; numericScore: number | null };
 
 export async function GET(req: NextRequest) {
+  try {
+    return await dashboardHandler(req);
+  } catch (err) {
+    console.error("[dashboard] unhandled error:", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
+
+async function dashboardHandler(req: NextRequest) {
   const params = req.nextUrl.searchParams;
-  const periodId = params.get("periodId");
-  const classId   = params.get("classId")  ?? undefined;
+  const periodId  = params.get("periodId");
+  const classId   = params.get("classId")   ?? undefined;
   const subjectId = params.get("subjectId") ?? undefined;
   const formParam = params.get("form");
-  const form = formParam ? parseInt(formParam, 10) : undefined;
+  const form      = formParam ? parseInt(formParam, 10) : undefined;
 
   if (!periodId) {
     return NextResponse.json({ error: "periodId is required." }, { status: 400 });
   }
-  if (form !== undefined && (isNaN(form) || form < 1 || form > 4)) {
-    return NextResponse.json({ error: "form must be 1–4." }, { status: 400 });
+  if (form !== undefined && isNaN(form)) {
+    return NextResponse.json({ error: "form must be a number." }, { status: 400 });
   }
 
+  // ── Batch 1: user session (must be first — schoolId needed for all queries) ─
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const actor = await resolveAssessmentActor(user, user.schoolId);
-  if (!canAccessDashboard(actor)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // ── Batch 2: auth actor + period + classes — all independent of each other ──
+  const classWhere: Record<string, unknown> = { schoolId: user.schoolId };
+  if (classId)            classWhere.id   = classId;
+  if (form !== undefined) classWhere.form = form;
 
-  const period: (PeriodRow & { frameworkId: string }) | null =
-    await db.assessmentPeriod.findFirst({
+  const [actor, period, classes] = await Promise.all([
+    resolveAssessmentActor(user, user.schoolId),
+    db.assessmentPeriod.findFirst({
       where: {
         id: periodId,
         schoolId: user.schoolId,
         framework: { type: "EIGHT_FOUR_FOUR", isActive: true },
       },
       select: { id: true, name: true, academicYear: true, term: true, frameworkId: true },
-    });
+    }) as Promise<(PeriodRow & { frameworkId: string }) | null>,
+    prisma.schoolClass.findMany({
+      where: classWhere,
+      orderBy: [{ form: "asc" }, { name: "asc" }],
+      select: { id: true, name: true, form: true },
+    }),
+  ]);
+
+  if (!canAccessDashboard(actor)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   if (!period) return NextResponse.json({ error: "Period not found." }, { status: 404 });
-
-  const classWhere: Record<string, unknown> = { schoolId: user.schoolId };
-  if (classId) classWhere.id = classId;
-  if (form !== undefined) classWhere.form = form;
-
-  const classes = await prisma.schoolClass.findMany({
-    where: classWhere,
-    orderBy: [{ form: "asc" }, { name: "asc" }],
-    select: { id: true, name: true, form: true },
-  });
 
   const classIds = classes.map((c) => c.id);
   if (classIds.length === 0) return emptyDashboard(period, { periodId, classId, subjectId, form });
 
-  const students = await prisma.student.findMany({
-    where: { classId: { in: classIds }, schoolId: user.schoolId },
-    select: { id: true, classId: true },
-    take: DASHBOARD_STUDENT_LIMIT,
-  });
+  // ── Heatmap sibling-class expansion (needs classes result first) ───────────
+  // When a single class is selected, expand the heatmap to all sibling classes
+  // in the same form so teachers can compare their class's performance.
+  let heatmapClasses  = classes;
+  let heatmapClassIds = classIds;
+
+  const needsSiblings = classId && classes.length === 1;
+  const [siblingsResult, studentsResult] = await Promise.all([
+    needsSiblings
+      ? prisma.schoolClass.findMany({
+          where: { schoolId: user.schoolId, form: classes[0].form },
+          orderBy: [{ name: "asc" }],
+          select: { id: true, name: true, form: true },
+        })
+      : Promise.resolve(null),
+    prisma.student.findMany({
+      where: { classId: { in: classIds }, schoolId: user.schoolId },
+      select: { id: true, classId: true },
+      take: DASHBOARD_STUDENT_LIMIT,
+    }),
+  ]);
+
+  if (siblingsResult) {
+    heatmapClasses  = siblingsResult;
+    heatmapClassIds = siblingsResult.map((c) => c.id);
+  }
+
+  const students   = studentsResult;
   const studentIds = students.map((s) => s.id);
   const truncated  = students.length === DASHBOARD_STUDENT_LIMIT;
   if (studentIds.length === 0) return emptyDashboard(period, { periodId, classId, subjectId, form });
 
-  const papersWhere: Record<string, unknown> = { schoolId: user.schoolId, frameworkId: period.frameworkId };
-  if (subjectId) papersWhere.subjectId = subjectId;
-  const papers: PaperRow[] = await db.paper.findMany({
-    where: papersWhere,
-    select: { id: true, subjectId: true, maxMarks: true },
-  });
-
+  // ── Batch 3: papers + subjects + allPeriods — independent of each other ────
+  const papersWhere: Record<string, unknown>   = { schoolId: user.schoolId, frameworkId: period.frameworkId };
   const subjectsWhere: Record<string, unknown> = { schoolId: user.schoolId };
-  if (subjectId) subjectsWhere.id = subjectId;
-  const subjects = await prisma.subject.findMany({
-    where: subjectsWhere,
-    select: { id: true, name: true, code: true },
-  });
+  if (subjectId) { papersWhere.subjectId = subjectId; subjectsWhere.id = subjectId; }
 
+  const [papers, subjects, allPeriods] = await Promise.all([
+    db.paper.findMany({
+      where: papersWhere,
+      select: { id: true, subjectId: true, maxMarks: true },
+    }) as Promise<PaperRow[]>,
+    prisma.subject.findMany({
+      where: subjectsWhere,
+      select: { id: true, name: true, code: true },
+    }),
+    db.assessmentPeriod.findMany({
+      where: { schoolId: user.schoolId, frameworkId: period.frameworkId },
+      orderBy: [{ term: "asc" }, { name: "asc" }],
+      select: { id: true, name: true, academicYear: true, term: true },
+    }) as Promise<PeriodRow[]>,
+  ]);
+
+  // ── Batch 4: current-period items + trend items — independent ─────────────
   const itemsWhere: Record<string, unknown> = {
-    studentId: { in: studentIds },
+    studentId:  { in: studentIds },
     periodId,
-    schoolId: user.schoolId,
+    schoolId:   user.schoolId,
     resultKind: "NUMERIC",
   };
   if (subjectId) itemsWhere.subjectId = subjectId;
-  const items: ItemRow[] = await db.assessmentItem.findMany({
-    where: itemsWhere,
-    select: { studentId: true, subjectId: true, paperId: true, numericScore: true },
-  });
+
+  const allPeriodIds = allPeriods.map((p) => p.id);
+
+  const [items, trendItems] = await Promise.all([
+    db.assessmentItem.findMany({
+      where: itemsWhere,
+      select: { studentId: true, subjectId: true, paperId: true, numericScore: true },
+    }) as Promise<ItemRow[]>,
+    allPeriodIds.length > 0
+      ? db.assessmentItem.findMany({
+          where: {
+            periodId:   { in: allPeriodIds },
+            studentId:  { in: studentIds },
+            schoolId:   user.schoolId,
+            resultKind: "NUMERIC",
+          },
+          select: { periodId: true, studentId: true, subjectId: true, paperId: true, numericScore: true },
+        }) as Promise<TrendItemRow[]>
+      : Promise.resolve([] as TrendItemRow[]),
+  ]);
 
   // papers grouped by subjectId
   const papersBySubject = new Map<string, Array<{ id: string; maxMarks: number }>>();
@@ -230,35 +291,9 @@ export async function GET(req: NextRequest) {
     overallMeanGrade = pointsToGrade(avg);
   }
 
-  // ── TREND ────────────────────────────────────────────────────────────────────
-  // Optimisation: instead of N separate findMany calls (one per period), fetch
-  // all trend items for all periods in a single query, then group in JS.
-  // This replaces Promise.all(allPeriods.map(async p => findMany(...))) which
-  // issued one DB round-trip per period — O(N) → O(1) round-trips.
-  const allPeriods: PeriodRow[] = await db.assessmentPeriod.findMany({
-    where: { schoolId: user.schoolId, frameworkId: period.frameworkId },
-    orderBy: [{ term: "asc" }, { name: "asc" }],
-    select: { id: true, name: true, academicYear: true, term: true },
-  });
-
-  // Single bulk fetch across all periods for these students.
-  // Guard: cap the trend item fetch to the same student set already in memory.
-  type TrendItemRow = { periodId: string; studentId: string; subjectId: string | null; paperId: string | null; numericScore: number | null };
-  const allPeriodIds = allPeriods.map((p) => p.id);
-  const trendItems: TrendItemRow[] = allPeriodIds.length > 0
-    ? await db.assessmentItem.findMany({
-        where: {
-          periodId:   { in: allPeriodIds },
-          studentId:  { in: studentIds },
-          schoolId:   user.schoolId,
-          resultKind: "NUMERIC",
-        },
-        select: { periodId: true, studentId: true, subjectId: true, paperId: true, numericScore: true },
-      })
-    : [];
-
-  // Build per-period lookup maps once — O(trendItems).
-  // periodId → ( "studentId:paperId" → score ) and ( "studentId:subjectId" → score )
+  // ── TREND ─────────────────────────────────────────────────────────────────
+  // allPeriods and trendItems were already fetched in Batch 4 above.
+  // Build per-period lookup maps — O(trendItems).
   const trendScoreByPaper   = new Map<string, Map<string, number | null>>();
   const trendScoreBySubject = new Map<string, Map<string, number | null>>();
   for (const item of trendItems) {
@@ -306,34 +341,115 @@ export async function GET(req: NextRequest) {
   });
 
   // ── HEATMAP ──────────────────────────────────────────────────────────────────
-  // Push AVG per (subjectId, classId) into PostgreSQL.
-  // We already have the per-student pct in `results`; use DB-side AVG instead of
-  // the JS accumulator to verify the pattern and reduce memory for wide grids.
-  // For subject×class cells we use the existing results accumulator (already O(1))
-  // since the data is already in memory; no extra round-trip needed.
-  type HeatCell = { sum: number; count: number };
+  // When a specific class is selected (e.g. 3W) we expand the heat-map to all
+  // classes of the same form so teachers can compare across the form.
+  // We need scores for heatmap sibling classes that may not be in `results`
+  // (which is scoped to the originally requested class(es)).
+  type HeatCell = { sum: number; count: number; sumPts: number };
   const heatAcc = new Map<string, HeatCell>();
+
+  // Accumulate scores already in memory (original class scope).
   for (const r of results) {
     if (r.pct === null) continue;
     const key = `${r.subjectId}:${r.classId}`;
-    const cell = heatAcc.get(key) ?? { sum: 0, count: 0 };
+    const cell = heatAcc.get(key) ?? { sum: 0, count: 0, sumPts: 0 };
     cell.sum += r.pct;
+    cell.sumPts += scoreToGrade(r.pct).points;
     cell.count += 1;
     heatAcc.set(key, cell);
   }
 
-  const subjectClassHeatmap = subjects.map((s) => ({
-    subjectId: s.id,
-    subjectName: s.name,
-    classes: classes.map((cls) => {
-      const cell = heatAcc.get(`${s.id}:${cls.id}`);
-      return {
-        classId: cls.id,
-        className: cls.name,
-        meanScore: cell && cell.count > 0 ? Math.round((cell.sum / cell.count) * 100) / 100 : null,
+  // If the heatmap scope is wider than the main scope, fetch sibling-class data.
+  const extraClassIds = heatmapClassIds.filter((id) => !classIds.includes(id));
+  if (extraClassIds.length > 0) {
+    const extraStudents = await prisma.student.findMany({
+      where: { classId: { in: extraClassIds }, schoolId: user.schoolId },
+      select: { id: true, classId: true },
+      take: DASHBOARD_STUDENT_LIMIT,
+    });
+    const extraStudentIds = extraStudents.map((s) => s.id);
+    if (extraStudentIds.length > 0) {
+      const extraItemsWhere: Record<string, unknown> = {
+        studentId: { in: extraStudentIds },
+        periodId,
+        schoolId: user.schoolId,
+        resultKind: "NUMERIC",
       };
-    }),
-  }));
+      if (subjectId) extraItemsWhere.subjectId = subjectId;
+      const extraItems: ItemRow[] = await db.assessmentItem.findMany({
+        where: extraItemsWhere,
+        select: { studentId: true, subjectId: true, paperId: true, numericScore: true },
+      });
+
+      const extraScoreByPaper = new Map<string, number>();
+      const extraScoreBySubject = new Map<string, number>();
+      for (const item of extraItems) {
+        if (item.paperId && item.numericScore !== null) {
+          extraScoreByPaper.set(`${item.studentId}:${item.paperId}`, item.numericScore);
+        } else if (!item.paperId && item.subjectId && item.numericScore !== null) {
+          extraScoreBySubject.set(`${item.studentId}:${item.subjectId}`, item.numericScore);
+        }
+      }
+
+      const extraStudentClassMap = new Map(extraStudents.map((s) => [s.id, s.classId]));
+      for (const s of subjects) {
+        const subjectPapers = papersBySubject.get(s.id) ?? [];
+        for (const student of extraStudents) {
+          let pct: number | null = null;
+          if (subjectPapers.length === 0) {
+            const score = extraScoreBySubject.get(`${student.id}:${s.id}`);
+            if (score !== undefined) pct = score;
+          } else {
+            const ps = subjectPapers.map((p) => {
+              const key = `${student.id}:${p.id}`;
+              return extraScoreByPaper.has(key) ? extraScoreByPaper.get(key)! : null;
+            });
+            pct = subjectScore(ps, subjectPapers.map((p) => p.maxMarks));
+          }
+          if (pct === null) continue;
+          const key = `${s.id}:${extraStudentClassMap.get(student.id)!}`;
+          const cell = heatAcc.get(key) ?? { sum: 0, count: 0, sumPts: 0 };
+          cell.sum += pct;
+          cell.sumPts += scoreToGrade(pct).points;
+          cell.count += 1;
+          heatAcc.set(key, cell);
+        }
+      }
+    }
+  }
+
+  const subjectClassHeatmap = subjects.map((s) => {
+    const classCells = heatmapClasses.map((cls) => {
+      const cell = heatAcc.get(`${s.id}:${cls.id}`);
+      const meanScore = cell && cell.count > 0 ? Math.round((cell.sum / cell.count) * 100) / 100 : null;
+      const meanPoints = cell && cell.count > 0 ? Math.round((cell.sumPts / cell.count) * 100) / 100 : null;
+      return { classId: cls.id, className: cls.name, meanScore, meanPoints };
+    });
+    // Total mean points across all heatmap-scope classes for this subject.
+    const validPts = classCells.map((c) => c.meanPoints).filter((v): v is number => v !== null);
+    const totalMeanPoints = validPts.length > 0 ? Math.round((validPts.reduce((s, v) => s + v, 0) / validPts.length) * 100) / 100 : null;
+    return { subjectId: s.id, subjectName: s.name, classes: classCells, totalMeanPoints };
+  });
+
+  // ── HEATMAP FOOTER — mean points per class (all heatmap-scope classes) ──
+  const heatmapClassSummary = heatmapClasses.map((cls) => {
+    const cells = subjectClassHeatmap.map((row) => row.classes.find((c) => c.classId === cls.id));
+    const validPts = cells.map((c) => c?.meanPoints ?? null).filter((v): v is number => v !== null);
+    const validScores = cells.map((c) => c?.meanScore ?? null).filter((v): v is number => v !== null);
+    const meanPoints = validPts.length > 0 ? Math.round((validPts.reduce((s, v) => s + v, 0) / validPts.length) * 100) / 100 : null;
+    const meanScore = validScores.length > 0 ? Math.round((validScores.reduce((s, v) => s + v, 0) / validScores.length) * 100) / 100 : null;
+    return { classId: cls.id, className: cls.name, meanScore, meanPoints };
+  });
+
+  const allSummaryPoints = heatmapClassSummary.map((c) => c.meanPoints).filter((v): v is number => v !== null);
+  const heatmapTotalSummary = allSummaryPoints.length > 0
+    ? (() => {
+        const allScores = heatmapClassSummary.map((c) => c.meanScore).filter((v): v is number => v !== null);
+        const meanScore = allScores.length > 0 ? Math.round((allScores.reduce((s, v) => s + v, 0) / allScores.length) * 100) / 100 : null;
+        const meanPoints = Math.round((allSummaryPoints.reduce((s, v) => s + v, 0) / allSummaryPoints.length) * 100) / 100;
+        return { meanScore, meanPoints };
+      })()
+    : null;
 
   if (!results.some((r) => r.pct !== null)) {
     return emptyDashboard(period, { periodId, classId, subjectId, form });
@@ -354,28 +470,20 @@ export async function GET(req: NextRequest) {
     classComparison,
     trendData,
     subjectClassHeatmap,
+    heatmapClassSummary,
+    heatmapTotalSummary,
   };
 
-  // ETag — hash of the body so the browser skips JSON.parse on cache hit.
+  // ETag — hash of the body for deduplication logging only; no caching.
   const etag = `"dash-${createHash("sha1")
     .update(JSON.stringify(body))
     .digest("hex")
     .slice(0, 20)}"`;
 
-  if (req.headers.get("if-none-match") === etag) {
-    return new NextResponse(null, {
-      status: 304,
-      headers: {
-        ETag: etag,
-        "Cache-Control": `private, max-age=${DASHBOARD_CACHE_TTL_S}`,
-      },
-    });
-  }
-
   return NextResponse.json(body, {
     headers: {
       ETag: etag,
-      "Cache-Control": `private, max-age=${DASHBOARD_CACHE_TTL_S}`,
+      "Cache-Control": "no-store",
     },
   });
 }

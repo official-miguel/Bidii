@@ -60,7 +60,7 @@ function buildDatabaseUrl(): string {
 
     // Give Neon time to wake a cold compute endpoint.
     if (!url.searchParams.has("connect_timeout")) {
-      url.searchParams.set("connect_timeout", "15");
+      url.searchParams.set("connect_timeout", "20");
     }
 
     // How long (seconds) Prisma waits for a free connection slot before
@@ -68,6 +68,15 @@ function buildDatabaseUrl(): string {
     // of 10 to handle bursts of concurrent server-component renders.
     if (!url.searchParams.has("pool_timeout")) {
       url.searchParams.set("pool_timeout", "30");
+    }
+
+    // TCP keepalives — tells Neon the connection is still alive so it
+    // doesn't close it mid-request during slow queries.
+    if (!url.searchParams.has("keepalives")) {
+      url.searchParams.set("keepalives", "1");
+    }
+    if (!url.searchParams.has("keepalives_idle")) {
+      url.searchParams.set("keepalives_idle", "10");
     }
 
     return url.toString();
@@ -79,7 +88,9 @@ function buildDatabaseUrl(): string {
 export const prisma =
   globalForPrisma.prisma ||
   new PrismaClient({
-    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
+    // In development: only show errors, not the harmless "connection closed"
+    // warnings that Neon emits when it recycles idle serverless connections.
+    log: process.env.NODE_ENV === "development" ? ["error"] : ["error"],
     datasources: {
       db: { url: buildDatabaseUrl() },
     },

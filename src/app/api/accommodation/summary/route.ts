@@ -16,48 +16,57 @@ export async function GET() {
 
   const { schoolId } = user;
 
-  // Parallel fetches for dashboard summary
-  const [dormitories, totalPositions, occupiedPositions, settings] =
-    await Promise.all([
-      prisma.dormitory.findMany({
-        where: { schoolId },
-        select: {
-          id: true,
-          name: true,
-          genderPolicy: true,
-          status: true,
-          totalCapacity: true,
-          allocationPolicy: true,
-          structure: true,
-          boardingMaster: { select: { fullName: true } },
-          _count: {
-            select: {
-              allocations: { where: { status: "CURRENT" } },
-            },
-          },
-        },
-        orderBy: { name: "asc" },
-      }),
-      prisma.sleepingPosition.count({ where: { schoolId } }),
-      prisma.sleepingPosition.count({ where: { schoolId, isOccupied: true } }),
-      prisma.accommodationSettings.findUnique({ where: { schoolId } }),
-    ]);
+  // Fetch dormitories, per-dorm bed counts from SleepingPosition, and settings in parallel.
+  const [dormitories, bedCountsByDorm, settings] = await Promise.all([
+    prisma.dormitory.findMany({
+      where: { schoolId },
+      select: {
+        id: true,
+        name: true,
+        genderPolicy: true,
+        status: true,
+        allocationPolicy: true,
+        structure: true,
+        boardingMaster: { select: { fullName: true } },
+      },
+      orderBy: { name: "asc" },
+    }),
 
-  const activeCount = dormitories.filter((d) => d.status === "ACTIVE").length;
-  const maintenanceCount = dormitories.filter(
-    (d) => d.status === "UNDER_MAINTENANCE"
-  ).length;
-  const closedCount = dormitories.filter((d) => d.status === "CLOSED").length;
+    // Count total and occupied sleeping positions grouped by dorm.
+    // SleepingPosition is the real unit of allocation — one position per student.
+    prisma.sleepingPosition.groupBy({
+      by: ["dormId"],
+      where: { schoolId },
+      _count: { _all: true },
+    }).then(async (totals) => {
+      const occupied = await prisma.sleepingPosition.groupBy({
+        by: ["dormId"],
+        where: { schoolId, isOccupied: true },
+        _count: { _all: true },
+      });
+      const occupiedMap = new Map(occupied.map((r) => [r.dormId, r._count._all]));
+      return new Map(
+        totals.map((r) => [
+          r.dormId,
+          { total: r._count._all, occupied: occupiedMap.get(r.dormId) ?? 0 },
+        ])
+      );
+    }),
 
-  const boardingStudents = await prisma.allocationRecord.count({
-    where: { schoolId, status: "CURRENT" },
-  });
+    prisma.accommodationSettings.findUnique({ where: { schoolId } }),
+  ]);
+
+  const activeCount      = dormitories.filter((d) => d.status === "ACTIVE").length;
+  const maintenanceCount = dormitories.filter((d) => d.status === "UNDER_MAINTENANCE").length;
+  const closedCount      = dormitories.filter((d) => d.status === "CLOSED").length;
+  const warningPct       = settings?.occupancyWarningPct ?? 90;
 
   const dormSummaries = dormitories.map((d) => {
-    const occupied = d._count.allocations;
-    const capacity = d.totalCapacity;
+    const beds     = bedCountsByDorm.get(d.id) ?? { total: 0, occupied: 0 };
+    const capacity = beds.total;
+    const occupied = beds.occupied;
+    const available = Math.max(0, capacity - occupied);
     const pct = capacity > 0 ? Math.round((occupied / capacity) * 100) : 0;
-    const warningPct = settings?.occupancyWarningPct ?? 90;
     return {
       id: d.id,
       name: d.name,
@@ -67,11 +76,23 @@ export async function GET() {
       allocationPolicy: d.allocationPolicy,
       capacity,
       occupied,
-      available: Math.max(0, capacity - occupied),
+      available,
       occupancyPct: pct,
       isAlmostFull: pct >= warningPct,
       boardingMasterName: d.boardingMaster?.fullName ?? null,
     };
+  });
+
+  // Top-level totals: all beds across all dorms (including maintenance/closed
+  // so the "total" figure is accurate), but available = free beds in active dorms only.
+  const totalPositions   = dormSummaries.reduce((s, d) => s + d.capacity, 0);
+  const totalOccupied    = dormSummaries.reduce((s, d) => s + d.occupied, 0);
+  const availableInActive = dormSummaries
+    .filter((d) => d.status === "ACTIVE")
+    .reduce((s, d) => s + d.available, 0);
+
+  const boardingStudents = await prisma.allocationRecord.count({
+    where: { schoolId, status: "CURRENT" },
   });
 
   return NextResponse.json({
@@ -81,11 +102,11 @@ export async function GET() {
     closedDormitories: closedCount,
     boardingStudents,
     totalSleepingPositions: totalPositions,
-    occupiedPositions,
-    availablePositions: Math.max(0, totalPositions - occupiedPositions),
+    occupiedPositions: totalOccupied,
+    availablePositions: availableInActive,
     occupancyPct:
       totalPositions > 0
-        ? Math.round((occupiedPositions / totalPositions) * 100)
+        ? Math.round((totalOccupied / totalPositions) * 100)
         : 0,
     dormSummaries,
     settings: settings ?? null,

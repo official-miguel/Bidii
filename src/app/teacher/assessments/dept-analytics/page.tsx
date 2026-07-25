@@ -23,7 +23,7 @@ export default async function TeacherDeptAnalyticsPage() {
     redirect("/teacher/assessments");
   }
 
-  const isHod       = actor.roles.some((r) => r.role === "HOD");
+  const isHod        = actor.roles.some((r) => r.role === "HOD");
   const isWideAccess = actor.roles.some((r) => ["DIRECTOR", "EXAM_OFFICER"].includes(r.role));
 
   // Resolve own department.
@@ -37,9 +37,7 @@ export default async function TeacherDeptAnalyticsPage() {
   }
 
   let departments: Array<{ id: string; name: string }>;
-
   if (isHod && !isWideAccess) {
-    // HOD: only their own dept.
     if (ownDeptId) {
       const dept = await prisma.department.findUnique({
         where: { id: ownDeptId },
@@ -50,35 +48,56 @@ export default async function TeacherDeptAnalyticsPage() {
       departments = [];
     }
   } else {
-    // DIRECTOR/EXAM_OFFICER: all depts, own dept floated to top.
     const all = await prisma.department.findMany({
       where: { schoolId: user.schoolId },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     });
     if (ownDeptId) {
-      const own   = all.filter((d) => d.id === ownDeptId);
-      const rest  = all.filter((d) => d.id !== ownDeptId);
-      departments = [...own, ...rest];
+      departments = [
+        ...all.filter((d) => d.id === ownDeptId),
+        ...all.filter((d) => d.id !== ownDeptId),
+      ];
     } else {
       departments = all;
     }
   }
 
-  const framework = await db.assessmentFramework.findFirst({
-    where: { schoolId: user.schoolId, type: "EIGHT_FOUR_FOUR", isActive: true },
-    select: { id: true },
-  }) as { id: string } | null;
+  // Classes — scope to teacher's assigned classes unless wide access.
+  let classFilter: { id: { in: string[] } } | Record<string, never> = {};
+  if (!isWideAccess && actor.teacher?.id) {
+    const assignments = await prisma.classSubjectTeacher.findMany({
+      where: { teacherId: actor.teacher.id },
+      select: { classId: true },
+    });
+    const ids = [...new Set(assignments.map((a) => a.classId))];
+    if (actor.classTeacherOfId) ids.push(actor.classTeacherOfId);
+    const unique = [...new Set(ids)];
+    classFilter = unique.length > 0 ? { id: { in: unique } } : { id: { in: ["__none__"] } };
+  }
 
-  const periods = framework
-    ? (await db.assessmentPeriod.findMany({
-        where: { schoolId: user.schoolId, frameworkId: framework.id },
-        orderBy: [{ academicYear: "desc" }, { term: "desc" }],
-        select: { id: true, name: true, academicYear: true, term: true, isCurrent: true },
-      }) as Array<{ id: string; name: string; academicYear: string; term: number | null; isCurrent: boolean }>)
-    : [];
+  const classes = await db.schoolClass.findMany({
+    where: { schoolId: user.schoolId, ...classFilter },
+    orderBy: [{ form: "asc" }, { name: "asc" }],
+    select: { id: true, name: true, form: true },
+  }) as Array<{ id: string; name: string; form: number }>;
 
-  const currentPeriodId = periods.find((p) => p.isCurrent)?.id ?? periods[0]?.id;
+  // Subjects — teacher's assigned subjects or all if wide access.
+  const subjectIds = isWideAccess || !actor.teacher?.id
+    ? undefined
+    : (await prisma.classSubjectTeacher.findMany({
+        where: { teacherId: actor.teacher.id },
+        select: { subjectId: true },
+      })).map((a) => a.subjectId);
+
+  const subjects = await prisma.subject.findMany({
+    where: {
+      schoolId: user.schoolId,
+      ...(subjectIds ? { id: { in: subjectIds } } : {}),
+    },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, applicableForms: true },
+  });
 
   if (departments.length === 0) {
     return (
@@ -105,8 +124,8 @@ export default async function TeacherDeptAnalyticsPage() {
       <DeptAnalyticsPage
         departments={departments}
         defaultDepartmentId={departments[0]?.id}
-        currentPeriodId={currentPeriodId}
-        periods={periods}
+        classes={classes}
+        subjects={subjects}
       />
     </div>
   );

@@ -20,12 +20,18 @@ export default async function DisciplineCasePage({ params }: { params: { id: str
           schoolClass: { select: { name: true, form: true } },
         },
       },
-      recordedBy: { select: { email: true } },
+      recordedBy: {
+        select: { email: true, role: true, teacher: { select: { fullName: true } } },
+      },
       caseNotes: {
         orderBy: { createdAt: "desc" },
-        include: { createdBy: { select: { email: true } } },
+        include: {
+          createdBy: {
+            select: { email: true, role: true, teacher: { select: { fullName: true } } },
+          },
+        },
       },
-      events: { orderBy: { createdAt: "asc" }, include: { createdBy: { select: { email: true } } } },
+      events: false,
       files: {
         select: { id: true, fileName: true, mimeType: true, size: true, createdAt: true },
         orderBy: { createdAt: "desc" },
@@ -34,6 +40,12 @@ export default async function DisciplineCasePage({ params }: { params: { id: str
   });
 
   if (!record) notFound();
+
+  // Normalise the user shape for the client component
+  function normUser(u: { email: string; role: string; teacher: { fullName: string } | null } | null) {
+    if (!u) return null;
+    return { email: u.email, role: u.role, name: u.teacher?.fullName ?? null };
+  }
 
   return (
     <div>
@@ -48,10 +60,27 @@ export default async function DisciplineCasePage({ params }: { params: { id: str
       />
 
       <DisciplineCaseClient
-        record={record}
-        initialNotes={record.caseNotes.map((n) => ({ ...n, createdAt: n.createdAt.toISOString() }))}
-        initialEvents={record.events.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() }))}
-        initialFiles={record.files.map((f) => ({ ...f, createdAt: f.createdAt.toISOString() }))}
+        record={{
+          id:          record.id,
+          offence:     record.offence,
+          status:      record.status,
+          description: record.description,
+          actionTaken: record.actionTaken,
+          resolution:  record.resolution,
+          createdAt:   record.createdAt.toISOString(),
+          recordedBy:  normUser(record.recordedBy),
+          student:     record.student,
+        }}
+        initialNotes={record.caseNotes.map((n) => ({
+          id:        n.id,
+          body:      n.body,
+          createdAt: n.createdAt.toISOString(),
+          createdBy: normUser(n.createdBy),
+        }))}
+        initialFiles={record.files.map((f) => ({
+          ...f,
+          createdAt: f.createdAt.toISOString(),
+        }))}
       />
     </div>
   );

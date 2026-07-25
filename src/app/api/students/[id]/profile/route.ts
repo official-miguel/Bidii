@@ -78,6 +78,7 @@ export async function GET(
     framework,
     discRecs,
     achievements,
+    rankingConfig,
   ] = await Promise.all([
     // All subjects for this student's form.
     prisma.subject.findMany({
@@ -119,6 +120,12 @@ export async function GET(
       where: { schoolId: user.schoolId, students: { some: { studentId: student.id } } },
       orderBy: { achievementDate: "desc" },
       select: { id: true, title: true, category: true, achievementDate: true, awardLevel: true, aiSummary: true },
+    }),
+
+    // Ranking config — for the academic flag threshold.
+    prisma.rankingConfig.findUnique({
+      where: { schoolId: user.schoolId },
+      select: { meanFlagThreshold: true },
     }),
   ]);
 
@@ -246,6 +253,7 @@ export async function GET(
     todayAttendance,
     examHistory,
     attendance: { total: attTotal, present: attPresent, absent: attAbsent, rate: attRate },
+    meanFlagThreshold: rankingConfig?.meanFlagThreshold ?? null,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     discipline: discRecs.map((r: any) => ({
       id: r.id, offence: r.offence, status: r.status,

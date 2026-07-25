@@ -16,7 +16,7 @@ export default async function DashboardPage({
   if (!user || user.role !== "PRINCIPAL") redirect("/login");
 
   const allClasses = await db.schoolClass.findMany({
-    where: { schoolId: user.schoolId, form: { in: [1, 2, 3, 4, 5, 6] } },
+    where: { schoolId: user.schoolId },
     orderBy: [{ form: "asc" }, { name: "asc" }],
     select: { id: true, name: true, form: true, frameworkType: true },
   }) as Array<{ id: string; name: string; form: number; frameworkType: string }>;
@@ -24,7 +24,7 @@ export default async function DashboardPage({
   const subjects = await prisma.subject.findMany({
     where: { schoolId: user.schoolId },
     orderBy: { name: "asc" },
-    select: { id: true, name: true },
+    select: { id: true, name: true, applicableForms: true },
   });
 
   const cbeClasses  = allClasses.filter((c) => c.frameworkType === "CBE");
@@ -39,7 +39,7 @@ export default async function DashboardPage({
     return (
       <div className="space-y-5">
         <div>
-          <h1 className="font-display text-xl font-semibold text-ink">Assessment Dashboard</h1>
+          <h1 className="font-display text-xl font-semibold text-ink">In-depth Analysis</h1>
           <p className="text-sm text-slate mt-0.5">Unified view across 8-4-4 and CBE classes.</p>
         </div>
 
@@ -114,7 +114,7 @@ export default async function DashboardPage({
     return (
       <div className="space-y-5">
         <div>
-          <h1 className="font-display text-xl font-semibold text-ink">Assessment Dashboard</h1>
+          <h1 className="font-display text-xl font-semibold text-ink">In-depth Analysis</h1>
           <p className="text-sm text-slate mt-0.5">CBE attainment — performance levels by sub-strand, learning area, and pathway.</p>
         </div>
         <CbeDashboardEnhanced
@@ -129,7 +129,7 @@ export default async function DashboardPage({
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="font-display text-xl font-semibold text-ink">Assessment Dashboard</h1>
+        <h1 className="font-display text-xl font-semibold text-ink">In-depth Analysis</h1>
         <p className="text-sm text-slate mt-0.5">Aggregate performance metrics across periods, classes, and subjects.</p>
       </div>
       <DashboardCharts

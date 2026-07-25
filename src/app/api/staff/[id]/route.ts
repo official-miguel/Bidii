@@ -22,11 +22,17 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
       },
       user: {
         select: {
+          id: true,
           email: true,
           isActive: true,
           role: true,
           mustChangePassword: true,
           staffRole: { select: { id: true, name: true } },
+          userStaffRoles: {
+            select: {
+              staffRole: { select: { id: true, name: true, description: true } },
+            },
+          },
         },
       },
     },
@@ -40,12 +46,10 @@ const updateSchema = z.object({
   fullName: z.string().trim().min(2).optional(),
   email: z.string().trim().email().optional().or(z.literal("")),
   phone: z.string().trim().optional().or(z.literal("")),
+  designation: z.string().trim().max(100).nullable().optional().or(z.literal("")),
   primaryDepartmentId: z.string().nullable().optional(),
   todEligible: z.boolean().optional(),
   subjectIds: z.array(z.string()).optional(),
-  // Reassign which StaffRole an existing ADMIN_STAFF login has — e.g.
-  // promoting a Secretary to Deputy Principal permissions. Ignored for
-  // staff with no login, or whose login is a TEACHER account.
   staffRoleId: z.string().nullable().optional(),
 });
 
@@ -102,8 +106,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         where: { id: params.id },
         data: {
           ...rest,
-          email: rest.email === "" ? null : rest.email,
-          phone: rest.phone === "" ? null : rest.phone,
+          email:       rest.email       === "" ? null : rest.email,
+          phone:       rest.phone       === "" ? null : rest.phone,
+          designation: rest.designation === "" ? null : rest.designation,
         },
         include: {
           user: { select: { role: true, staffRole: { select: { id: true, name: true } } } },

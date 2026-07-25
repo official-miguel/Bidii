@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Modal from "@/components/Modal";
 import { ErrorBanner, inputClass, labelClass, primaryButtonClass, secondaryButtonClass } from "@/components/ui";
 import { Avatar, Achievement, StudentLite, CATEGORY_META } from "./shared";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 
 type Suggestion = {
   title: string;
@@ -26,20 +27,34 @@ export default function AchievementModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [text, setText] = useState(editing?.description || "");
-  const [title, setTitle] = useState(editing?.title || "");
-  const [category, setCategory] = useState(editing?.category || "OTHER");
-  const [awardLevel, setAwardLevel] = useState(editing?.awardLevel || "");
-  const [date, setDate] = useState(editing?.achievementDate?.slice(0, 10) || new Date().toISOString().slice(0, 10));
-  const [selectedIds, setSelectedIds] = useState<string[]>(
-    editing ? editing.students.map((s) => s.student.id) : initialStudentIds || []
-  );
+  // Scope key to the record being edited; "new" for creates
+  const draftKey = `bidii_draft_achievement_${editing?.id ?? "new"}`;
+  const [draft, setDraft, clearDraft] = useFormDraft(draftKey, {
+    text:        editing?.description          ?? "",
+    title:       editing?.title                ?? "",
+    category:    editing?.category             ?? "OTHER",
+    awardLevel:  editing?.awardLevel           ?? "",
+    date:        editing?.achievementDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
+    selectedIds: (editing ? editing.students.map((s) => s.student.id) : initialStudentIds) ?? [] as string[],
+  });
+
+  const [text, setText]           = useState(draft.text);
+  const [title, setTitle]         = useState(draft.title);
+  const [category, setCategory]   = useState(draft.category);
+  const [awardLevel, setAwardLevel] = useState(draft.awardLevel);
+  const [date, setDate]           = useState(draft.date);
+  const [selectedIds, setSelectedIds] = useState<string[]>(draft.selectedIds);
   const [studentQuery, setStudentQuery] = useState("");
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
   const [suggesting, setSuggesting] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving]       = useState(false);
+  const [error, setError]         = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // Persist on change
+  useEffect(() => {
+    setDraft({ text, title, category, awardLevel, date, selectedIds });
+  }, [text, title, category, awardLevel, date, selectedIds, setDraft]);
 
   const selected = useMemo(
     () => selectedIds.map((id) => students.find((s) => s.id === id)).filter(Boolean) as StudentLite[],
@@ -109,6 +124,7 @@ export default function AchievementModal({
       setError((await res.json()).error || "Couldn't save the achievement.");
       return;
     }
+    clearDraft();
     onSaved();
   }
 

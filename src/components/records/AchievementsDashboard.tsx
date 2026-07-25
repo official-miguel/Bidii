@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Trophy, Plus, Filter, X } from "lucide-react";
+import { Trophy, Plus, Filter, X, Users, Star, BookOpen, Search } from "lucide-react";
 import StudentWorkspace from "./StudentWorkspace";
 import AchievementModal from "./AchievementModal";
 import {
@@ -272,19 +272,19 @@ export default function AchievementsDashboard({ canManage }: { canManage: boolea
         <StatCard
           label="Students recognised"
           value={totalStudents}
-          icon={<span aria-hidden>👥</span>}
+          icon={<Users className="h-5 w-5" />}
           loading={loading}
         />
         <StatCard
           label="Sports"
           value={categoryBreakdown.find((c) => c.key === "SPORTS")?.count ?? 0}
-          icon={<span aria-hidden>🏆</span>}
+          icon={<Star className="h-5 w-5" />}
           loading={loading}
         />
         <StatCard
           label="Academics"
           value={categoryBreakdown.find((c) => c.key === "ACADEMICS")?.count ?? 0}
-          icon={<span aria-hidden>🎓</span>}
+          icon={<BookOpen className="h-5 w-5" />}
           loading={loading}
         />
       </div>
@@ -294,12 +294,7 @@ export default function AchievementsDashboard({ canManage }: { canManage: boolea
         <div className="flex gap-2">
           {/* Search */}
           <div className="relative flex-1">
-            <span
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate text-sm select-none"
-              aria-hidden
-            >
-              🔍
-            </span>
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate pointer-events-none" aria-hidden />
             <input
               className="w-full rounded-lg border border-line bg-white pl-9 pr-3 py-2 text-sm text-ink placeholder:text-slate focus:outline-none focus:border-teal focus:ring-2 focus:ring-teal/20 dark:bg-dark-surface dark:border-dark-border dark:text-dark-text"
               placeholder="Search by student, achievement title, category, or AI summary…"
@@ -517,46 +512,6 @@ export default function AchievementsDashboard({ canManage }: { canManage: boolea
                     );
                   })}
               </div>
-            )}
-          </div>
-
-          {/* Recent achievements */}
-          <div className="bg-card border border-line rounded-xl p-4">
-            <h2 className="text-sm font-semibold text-ink mb-3">Recent</h2>
-            {loading ? (
-              <div className="space-y-2">
-                {[0, 1, 2].map((i) => (
-                  <Skeleton key={i} className="h-10 w-full" />
-                ))}
-              </div>
-            ) : (achievements ?? []).length === 0 ? (
-              <p className="text-xs text-slate">Nothing recorded yet.</p>
-            ) : (
-              <ul className="space-y-2">
-                {(achievements ?? []).slice(0, 6).map((a) => {
-                  const meta = CATEGORY_META[a.category] ?? CATEGORY_META.OTHER;
-                  const first = a.students[0];
-                  return (
-                    <li key={a.id}>
-                      <button
-                        type="button"
-                        className="w-full text-left flex items-start gap-2 rounded-md px-1.5 py-1 hover:bg-paper transition-colors"
-                        onClick={() => first && handleViewStudent(first.student)}
-                      >
-                        <span className="text-sm mt-0.5" aria-hidden>
-                          {meta.emoji}
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block text-xs text-ink truncate">{a.title}</span>
-                          <span className="block text-[11px] text-slate">
-                            {fmtDate(a.achievementDate)}
-                          </span>
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
             )}
           </div>
         </aside>

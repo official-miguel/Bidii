@@ -60,7 +60,7 @@ export default async function TeacherDashboardPage({
       ...(subjectIds ? { id: { in: subjectIds } } : {}),
     },
     orderBy: { name: "asc" },
-    select: { id: true, name: true },
+    select: { id: true, name: true, applicableForms: true },
   });
 
   const cbeClasses  = allClasses.filter((c) => c.frameworkType === "CBE");
@@ -73,7 +73,7 @@ export default async function TeacherDashboardPage({
   if (allClasses.length === 0) {
     return (
       <div className="space-y-3">
-        <h1 className="font-display text-xl font-semibold text-ink">Dashboard</h1>
+        <h1 className="font-display text-xl font-semibold text-ink">In-depth Analysis</h1>
         <div className="rounded-lg border border-dashed border-line px-6 py-10 text-center text-sm text-slate">
           No class assignments found. Contact the principal to be assigned to classes.
         </div>
@@ -84,7 +84,7 @@ export default async function TeacherDashboardPage({
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="font-display text-xl font-semibold text-ink">Dashboard</h1>
+        <h1 className="font-display text-xl font-semibold text-ink">In-depth Analysis</h1>
         <p className="text-sm text-slate mt-0.5">
           {isWideAccess ? "School-wide assessment analytics." : "Analytics for your assigned classes and subjects."}
         </p>

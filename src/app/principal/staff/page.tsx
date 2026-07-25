@@ -18,6 +18,7 @@ import DepartmentWorkspaceDrawer from "@/components/entity-drawers/DepartmentWor
 import ClassWorkspaceDrawer  from "@/components/entity-drawers/ClassWorkspaceDrawer";
 import SubjectWorkspaceDrawer from "@/components/entity-drawers/SubjectWorkspaceDrawer";
 import { Pencil, UserMinus, UserPlus, ShieldCheck, ExternalLink } from "lucide-react";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Department = { id: string; name: string };
@@ -26,6 +27,7 @@ type StaffRole  = { id: string; name: string };
 type Teacher = {
   id: string; fullName: string; staffId: string;
   email: string | null; phone: string | null; todEligible: boolean;
+  designation: string | null;
   primaryDepartment: Department | null;
   classTeacherOf: { id: string; name: string } | null;
   teacherSubjects: { subject: Subject }[];
@@ -105,9 +107,24 @@ function DirectoryTab() {
   const [modalOpen, setModalOpen]   = useState(false);
   const [editing, setEditing]       = useState<Teacher | null>(null);
   const [error, setError]           = useState<string | null>(null);
-  const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
-  const [createLogin, setCreateLogin] = useState(false);
-  const [roleChoice, setRoleChoice]   = useState<string>(TEACHING_STAFF);
+
+  // Draft for the "new staff" form — scoped to "new" for creates, staff id for edits
+  const staffDraftKey = editing ? `bidii_draft_staff_${editing.id}` : "bidii_draft_staff_new";
+  const [staffDraft, setStaffDraft, clearStaffDraft] = useFormDraft(staffDraftKey, {
+    roleChoice:       TEACHING_STAFF,
+    selectedSubjects: [] as string[],
+    createLogin:      false,
+  });
+
+  const [selectedSubjects, setSelectedSubjects] = useState<string[]>(staffDraft.selectedSubjects);
+  const [createLogin, setCreateLogin] = useState(staffDraft.createLogin);
+  const [roleChoice, setRoleChoice]   = useState<string>(staffDraft.roleChoice);
+
+  // Persist controlled fields whenever they change (only while modal is open)
+  useEffect(() => {
+    if (!modalOpen) return;
+    setStaffDraft({ roleChoice, selectedSubjects, createLogin });
+  }, [roleChoice, selectedSubjects, createLogin, modalOpen, setStaffDraft]);
   const [tempPassword, setTempPassword] = useState<{ email: string; password: string } | null>(null);
   const [nextStaffId, setNextStaffId] = useState<string | null>(null);
   const nextStaffIdFetched = useRef(false);
@@ -145,8 +162,12 @@ function DirectoryTab() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function openCreate() {
-    setEditing(null); setSelectedSubjects([]); setCreateLogin(false);
-    setRoleChoice(TEACHING_STAFF); setError(null);
+    setEditing(null);
+    // Restore draft values for the new-staff form
+    setSelectedSubjects(staffDraft.selectedSubjects);
+    setCreateLogin(staffDraft.createLogin);
+    setRoleChoice(staffDraft.roleChoice || TEACHING_STAFF);
+    setError(null);
     if (!nextStaffIdFetched.current) {
       nextStaffIdFetched.current = true;
       setNextStaffId(null);
@@ -156,9 +177,13 @@ function DirectoryTab() {
   }
 
   function openEdit(t: Teacher) {
-    setEditing(t); setSelectedSubjects(t.teacherSubjects.map(ts => ts.subject.id));
-    setCreateLogin(false); setRoleChoice(t.user?.staffRole?.id || TEACHING_STAFF);
-    setError(null); setModalOpen(true);
+    setEditing(t);
+    // Always use the server data for edits — don't restore a draft
+    setSelectedSubjects(t.teacherSubjects.map(ts => ts.subject.id));
+    setCreateLogin(false);
+    setRoleChoice(t.user?.staffRole?.id || TEACHING_STAFF);
+    setError(null);
+    setModalOpen(true);
   }
 
   function toggleSubject(id: string) {
@@ -174,6 +199,7 @@ function DirectoryTab() {
       const payload = {
         fullName: form.get("fullName") as string, email: (form.get("email") as string) || "",
         phone: (form.get("phone") as string) || "",
+        designation: (form.get("designation") as string) || null,
         primaryDepartmentId: isTeaching ? (form.get("primaryDepartmentId") as string) || null : null,
         todEligible: isTeaching ? form.get("todEligible") === "on" : false,
         subjectIds: isTeaching ? selectedSubjects : [], staffRoleId: isTeaching ? null : roleChoice,
@@ -181,12 +207,13 @@ function DirectoryTab() {
       const res = await fetch(`/api/staff/${editing.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Something went wrong."); return; }
-      setModalOpen(false); load();
+      clearStaffDraft(); setModalOpen(false); load();
     } else {
       const payload = {
         fullName: form.get("fullName") as string, staffId: (form.get("staffId") as string) || undefined,
         startingStaffId: form.get("startingStaffId") ? Number(form.get("startingStaffId")) : undefined,
         email: (form.get("email") as string) || "", phone: (form.get("phone") as string) || "",
+        designation: (form.get("designation") as string) || null,
         primaryDepartmentId: isTeaching ? (form.get("primaryDepartmentId") as string) || null : null,
         todEligible: isTeaching ? form.get("todEligible") === "on" : false,
         subjectIds: isTeaching ? selectedSubjects : [], createLogin: isTeaching ? createLogin : true,
@@ -195,6 +222,7 @@ function DirectoryTab() {
       const res = await fetch("/api/staff", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Something went wrong."); return; }
+      clearStaffDraft();
       setModalOpen(false);
       if (data.tempPassword) setTempPassword({ email: payload.email, password: data.tempPassword });
       nextStaffIdFetched.current = false; setNextStaffId(null); load();
@@ -365,11 +393,11 @@ function DirectoryTab() {
               ? "Update this staff member's details, role, and subject assignments."
               : "Add a new member of staff to the school register."
           }
-          onClose={() => setModalOpen(false)}
+          onClose={() => { clearStaffDraft(); setModalOpen(false); }}
           size="xl"
           footer={
             <div className="flex justify-end gap-3">
-              <button type="button" className={secondaryButtonClass} onClick={() => setModalOpen(false)}>
+              <button type="button" className={secondaryButtonClass} onClick={() => { clearStaffDraft(); setModalOpen(false); }}>
                 Cancel
               </button>
               <button type="submit" form="staff-form" className={primaryButtonClass}>
@@ -425,6 +453,19 @@ function DirectoryTab() {
                       Access is controlled by this role&apos;s permissions — configure them in Roles &amp; Permissions.
                     </p>
                   )}
+                </div>
+
+                <div>
+                  <label className={labelClass}>Designation</label>
+                  <input
+                    name="designation"
+                    defaultValue={editing?.designation || ""}
+                    className={inputClass}
+                    placeholder="e.g. Head of Department, Deputy Principal, Patron…"
+                  />
+                  <p className="text-xs text-slate mt-1.5">
+                    A title or role that distinguishes this staff member — shown on their profile.
+                  </p>
                 </div>
               </div>
             </div>

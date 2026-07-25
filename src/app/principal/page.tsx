@@ -154,12 +154,12 @@ export default async function PrincipalDashboard() {
   const setupIncomplete = totalDepts === 0 || totalSubjects === 0;
 
   const quickLinks: QuickLink[] = [
-    { label: "Add student",       href: "/principal/students/new",    icon: "UserPlus" },
-    { label: "Add staff",         href: "/principal/staff/new",       icon: "UserPlus" },
-    { label: "Take attendance",   href: "/principal/attendance",      icon: "ClipboardCheck" },
-    { label: "Send message",      href: "/principal/communication",   icon: "MessageSquare" },
-    { label: "View reports",      href: "/principal/reports",         icon: "BarChart2" },
-    { label: "Manage permissions", href: "/principal/staff-roles",   icon: "Shield" },
+    { label: "Students",           href: "/principal/students",       icon: "UserPlus" },
+    { label: "Staff",              href: "/principal/staff",          icon: "Users" },
+    { label: "Take attendance",    href: "/principal/attendance",     icon: "ClipboardCheck" },
+    { label: "Send message",       href: "/principal/communication",  icon: "MessageSquare" },
+    { label: "View reports",       href: "/principal/reports",        icon: "BarChart2" },
+    { label: "Permissions",        href: "/principal/staff-roles",    icon: "Shield" },
   ];
 
   return (
@@ -198,6 +198,12 @@ export default async function PrincipalDashboard() {
           badge={unresolvedDiscipline > 0 ? `${unresolvedDiscipline} open` : undefined}
           badgeColor="warn"
         />
+      </div>
+
+      {/* Attendance today */}
+      <div>
+        <h2 className="text-base font-semibold text-ink dark:text-dark-text mb-3">Attendance today</h2>
+        <AttendanceStats compact initialData={attendanceData} />
       </div>
 
       {/* Accommodation */}
@@ -240,12 +246,6 @@ export default async function PrincipalDashboard() {
 
       {/* Quick links */}
       <QuickLinkGrid links={quickLinks} title="Quick actions" />
-
-      {/* Attendance today */}
-      <div>
-        <h2 className="text-base font-semibold text-ink dark:text-dark-text mb-3">Attendance today</h2>
-        <AttendanceStats compact initialData={attendanceData} />
-      </div>
 
       {/* Bottom row: calendar + library */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

@@ -74,19 +74,8 @@ export default function QuickActionsPanel({ isOpen, onClose, role }: Props) {
   const router = useRouter();
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Close on outside click
-  useEffect(() => {
-    if (!isOpen) return;
-    function handler(e: MouseEvent) {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [isOpen, onClose]);
-
-  // Close on Esc
+  // Close on Esc only — outside-click is handled by the wrapper in TopAppBar
+  // to avoid the double-listener toggle conflict on mobile taps.
   useEffect(() => {
     if (!isOpen) return;
     function handler(e: KeyboardEvent) {
@@ -127,7 +116,8 @@ export default function QuickActionsPanel({ isOpen, onClose, role }: Props) {
       ref={panelRef}
       role="region"
       aria-label="Quick actions"
-      className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)]
+      className="absolute right-0 top-full mt-2 w-80
+                 max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-5rem)] overflow-y-auto
                  rounded-xl bg-white border border-line shadow-xl z-50
                  dark:bg-dark-surface dark:border-dark-border
                  animate-scale-in origin-top-right"
@@ -235,13 +225,13 @@ export function QuickActionsButton({
       aria-label="Quick actions"
       aria-expanded={isOpen}
       title="Quick Actions"
-      className={`flex items-center justify-center w-9 h-9 rounded-lg transition-colors
+      className={`flex items-center justify-center w-11 h-11 rounded-lg transition-colors
                   ${isOpen
-                    ? "bg-teal-50 text-teal dark:bg-teal-900/20 dark:text-teal"
+                    ? "bg-teal/10 text-teal dark:bg-teal-900/20 dark:text-teal"
                     : "text-slate hover:bg-teal-50 hover:text-teal dark:text-dark-muted dark:hover:bg-dark-border dark:hover:text-dark-text"
                   }`}
     >
-      <Zap className="h-4.5 w-4.5" />
+      <Zap className="h-[18px] w-[18px]" />
     </button>
   );
 }

@@ -88,6 +88,9 @@ export async function GET(req: NextRequest) {
         schoolId: true,
         createdAt: true,
         updatedAt: true,
+        electives: {
+          select: { subjectId: true },
+        },
       },
       orderBy: [{ admissionNumber: "asc" }],
       take: limit + 1, // +1 to detect the next page
@@ -114,10 +117,11 @@ export async function GET(req: NextRequest) {
 
 const createSchema = z.object({
   fullName: z.string().trim().min(2, "Enter the student's full name."),
-  // Only used for the very first student, to seed the sequence.
   startingAdmissionNumber: z.coerce.number().int().positive().optional(),
   form: z.coerce.number().int().min(1, "Choose a form."),
   dateOfBirth: z.string().trim().optional().or(z.literal("")),
+  gender: z.enum(["MALE", "FEMALE"]).nullable().optional(),
+  boardingStatus: z.enum(["DAY", "BOARDING"]).nullable().optional(),
   parentName: z.string().trim().optional().or(z.literal("")),
   parentContact: z.string().trim().optional().or(z.literal("")),
   electiveSubjectIds: z.array(z.string()).default([]),
@@ -190,6 +194,8 @@ export async function POST(req: NextRequest) {
           fullName: data.fullName,
           admissionNumber: String(next),
           dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : null,
+          gender: data.gender ?? null,
+          boardingStatus: data.boardingStatus ?? null,
           classId,
           parentName: data.parentName || null,
           parentContact: data.parentContact || null,
@@ -234,6 +240,60 @@ export async function POST(req: NextRequest) {
         // Non-fatal — card will be auto-provisioned on first library access
         // if creation fails here (e.g. race condition on card number).
       });
+
+      // ── Auto-allocate dorm if school policy + student is boarding ──────
+      if (
+        data.boardingStatus === "BOARDING" &&
+        (await prisma.school.findUnique({
+          where: { id: user.schoolId },
+          select: { autoAllocateDorms: true },
+        }))?.autoAllocateDorms
+      ) {
+        try {
+          const studentForm = student.schoolClass?.form;
+          const dorms = await prisma.dormitory.findMany({
+            where: { schoolId: user.schoolId, status: "ACTIVE" },
+            include: {
+              permittedForms: true,
+              _count: { select: { allocations: { where: { status: "CURRENT" } } } },
+            },
+            orderBy: { name: "asc" },
+          });
+          // Filter by gender and form eligibility
+          const eligible = dorms.filter((d) => {
+            if (d._count.allocations >= d.totalCapacity && d.totalCapacity > 0) return false;
+            if (d.allocationPolicy === "RESTRICTED_BY_FORM" && d.permittedForms.length > 0) {
+              if (!d.permittedForms.some((pf: { form: number }) => pf.form === studentForm)) return false;
+            }
+            return true;
+          });
+          if (eligible.length > 0) {
+            // Round-robin: pick the dorm with the most available capacity
+            const chosen = eligible.reduce((a, b) => {
+              const ca = Math.max(0, a.totalCapacity - a._count.allocations);
+              const cb = Math.max(0, b.totalCapacity - b._count.allocations);
+              return cb > ca ? b : a;
+            });
+            await prisma.allocationRecord.create({
+              data: {
+                schoolId:  user.schoolId,
+                studentId: student.id,
+                dormId:    chosen.id,
+                status:    "CURRENT",
+                startDate: new Date(),
+                notes:     "Auto-allocated on registration",
+                allocatedById: user.id,
+              },
+            });
+            await prisma.dormitory.update({
+              where: { id: chosen.id },
+              data: { totalCapacity: chosen.totalCapacity }, // keep totalCapacity; occupancy is counted
+            });
+          }
+        } catch {
+          // Auto-allocation is non-fatal — student is still registered
+        }
+      }
 
       emitSSE(user.schoolId, "student.created", student);
       return NextResponse.json(student, { status: 201 });

@@ -37,14 +37,14 @@ export default async function TeacherAssessmentsLayout({
   const isClassTeacher = !!teacher?.classTeacherOf;
 
   const navItems: AssessmentNavItem[] = [
-    { href: "/teacher/assessments",                    label: "Overview",          icon: "🏠", exact: true },
-    { href: "/teacher/assessments/marksheet",           label: "Mark Sheets",       icon: "📝" },
-    { href: "/teacher/assessments/dashboard",           label: "Dashboard",         icon: "📊" },
+    { href: "/teacher/assessments",                    label: "Overview",          icon: "overview",         exact: true },
+    { href: "/teacher/assessments/marksheet",           label: "Mark Sheets",       icon: "marksheet" },
+    { href: "/teacher/assessments/dashboard",           label: "In-depth Analysis", icon: "dashboard" },
     ...(hasDept
-      ? [{ href: "/teacher/assessments/dept-analytics", label: "Dept Analytics",    icon: "🏛️" }]
+      ? [{ href: "/teacher/assessments/dept-analytics", label: "Dept Analytics",    icon: "dept-analytics" as const }]
       : []),
-    { href: "/teacher/assessments/ranking",             label: "Staff Performance", icon: "🏆" },
-    { href: "/teacher/assessments/report-cards",        label: "Report Cards",      icon: "📄" },
+    { href: "/teacher/assessments/ranking",             label: "Staff Performance", icon: "performance" },
+    { href: "/teacher/assessments/report-cards",        label: "Report Cards",      icon: "report-cards" },
   ];
 
   // Mirror the academics-hub context nav (same items, same order) so the top

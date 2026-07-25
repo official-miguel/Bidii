@@ -12,6 +12,8 @@
  */
 
 import { useState, useEffect, FormEvent } from "react";
+import { Plus } from "lucide-react";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -70,11 +72,24 @@ export default function FrameworkManager() {
 
   // Create framework form
   const [showCreate, setShowCreate] = useState(false);
-  const [createType, setCreateType] = useState<FrameworkType>("EIGHT_FOUR_FOUR");
-  const [createLabel, setCreateLabel] = useState("");
-  const [createYear, setCreateYear] = useState(new Date().getFullYear().toString());
+
+  const [fwDraft, setFwDraft, clearFwDraft] = useFormDraft("bidii_draft_framework_create", {
+    createType:  "EIGHT_FOUR_FOUR" as FrameworkType,
+    createLabel: "",
+    createYear:  new Date().getFullYear().toString(),
+  });
+
+  const [createType,  setCreateType]  = useState<FrameworkType>(fwDraft.createType);
+  const [createLabel, setCreateLabel] = useState(fwDraft.createLabel);
+  const [createYear,  setCreateYear]  = useState(fwDraft.createYear);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  // Persist framework create form on change
+  useEffect(() => {
+    if (!showCreate) return;
+    setFwDraft({ createType, createLabel, createYear });
+  }, [createType, createLabel, createYear, showCreate, setFwDraft]);
 
   // Expanded framework for period management
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -124,6 +139,7 @@ export default function FrameworkManager() {
       setFrameworks((prev) => [...prev, data.framework]);
       setShowCreate(false);
       setCreateLabel("");
+      clearFwDraft();
       setExpandedId(data.framework.id);
     } finally {
       setCreating(false);
@@ -341,6 +357,7 @@ export default function FrameworkManager() {
               onClick={() => {
                 setShowCreate(false);
                 setCreateError(null);
+                clearFwDraft();
               }}
             >
               Cancel
@@ -355,14 +372,7 @@ export default function FrameworkManager() {
           }}
           className={btnPrimary}
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 20 20"
-            fill="currentColor"
-            className="w-4 h-4"
-          >
-            <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
-          </svg>
+          <Plus className="w-4 h-4" strokeWidth={2} aria-hidden="true" />
           Add Framework
         </button>
       )}
@@ -663,7 +673,8 @@ function PeriodManager({ framework }: { framework: Framework }) {
           onClick={() => setShowAdd(true)}
           className={btnSecondary}
         >
-          + Add Period
+          <Plus className="w-4 h-4" strokeWidth={2} aria-hidden="true" />
+          Add Period
         </button>
       )}
     </div>

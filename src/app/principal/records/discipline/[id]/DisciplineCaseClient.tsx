@@ -1,7 +1,15 @@
 "use client";
 
 import { useState, FormEvent } from "react";
-import { inputClass, primaryButtonClass, secondaryButtonClass } from "@/components/ui";
+import {
+  inputClass,
+  primaryButtonClass,
+  secondaryButtonClass,
+} from "@/components/ui";
+import { CheckCircle2, Clock, FileText, MessageSquare, X } from "lucide-react";
+import { formatCreator } from "@/components/records/shared";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 type DisciplineCaseClientRecord = {
   id: string;
@@ -10,6 +18,8 @@ type DisciplineCaseClientRecord = {
   description: string | null;
   actionTaken: string | null;
   resolution: string | null;
+  createdAt: string;
+  recordedBy: { email: string; role: string; name: string | null } | null;
   student: {
     id: string;
     fullName: string;
@@ -22,15 +32,7 @@ type DisciplineCaseNote = {
   id: string;
   body: string;
   createdAt: string;
-  createdBy: { email: string } | null;
-};
-
-type DisciplineCaseEvent = {
-  id: string;
-  type: string;
-  detail: string | null;
-  createdAt: string;
-  createdBy: { email: string } | null;
+  createdBy: { email: string; role: string; name: string | null } | null;
 };
 
 type DisciplineCaseFile = {
@@ -44,34 +46,152 @@ type DisciplineCaseFile = {
 type Props = {
   record: DisciplineCaseClientRecord;
   initialNotes: DisciplineCaseNote[];
-  initialEvents: DisciplineCaseEvent[];
   initialFiles: DisciplineCaseFile[];
 };
 
+// ── Status helpers ────────────────────────────────────────────────────────────
+
+const STATUS_BADGE: Record<string, string> = {
+  OPEN:         "bg-warn-bg text-warn",
+  UNDER_REVIEW: "bg-royal-50 text-royal",
+  RESOLVED:     "bg-success-bg text-success",
+  ESCALATED:    "bg-danger-bg text-danger",
+};
+const STATUS_LABELS: Record<string, string> = {
+  OPEN:         "Open",
+  UNDER_REVIEW: "Under review",
+  RESOLVED:     "Resolved",
+  ESCALATED:    "Escalated",
+};
+
+// ── Close case inline panel ───────────────────────────────────────────────────
+
+function CloseCasePanel({
+  recordId,
+  studentId,
+  currentActionTaken,
+  onClosed,
+  onCancel,
+}: {
+  recordId: string;
+  studentId: string;
+  currentActionTaken: string | null;
+  onClosed: (actionTaken: string) => void;
+  onCancel: () => void;
+}) {
+  const [actionTaken, setActionTaken] = useState(currentActionTaken ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  void studentId;
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!actionTaken.trim()) {
+      setError("Please describe the action taken before closing.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/discipline/${recordId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "RESOLVED", actionTaken: actionTaken.trim() }),
+      });
+      if (!res.ok) {
+        const d = await res.json() as { error?: string };
+        setError(d.error ?? "Could not close the case.");
+        return;
+      }
+      onClosed(actionTaken.trim());
+    } catch {
+      setError("Network error — please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-success/30 bg-success-bg/30 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-ink flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4 text-success" />
+          Close this case
+        </p>
+        <button type="button" onClick={onCancel}
+          className="h-6 w-6 flex items-center justify-center rounded text-slate hover:text-ink">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <div>
+          <label className="block text-xs font-medium text-slate mb-1">
+            Action taken <span className="text-danger">*</span>
+          </label>
+          <textarea
+            value={actionTaken}
+            onChange={(e) => setActionTaken(e.target.value)}
+            rows={3}
+            placeholder="Describe what action was taken to resolve this case…"
+            className={`${inputClass} resize-none`}
+            autoFocus
+          />
+        </div>
+        {error && (
+          <p className="text-xs text-danger bg-danger-bg/50 rounded px-3 py-2">{error}</p>
+        )}
+        <div className="flex gap-2">
+          <button type="submit" disabled={saving}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-success text-white text-sm font-semibold px-4 py-2 hover:opacity-90 disabled:opacity-50 transition-opacity">
+            <CheckCircle2 className="h-4 w-4" />
+            {saving ? "Closing…" : "Close Case"}
+          </button>
+          <button type="button" onClick={onCancel} className={secondaryButtonClass}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ── Main component ─────────────────────────────────────────────────────────────
+
 export default function DisciplineCaseClient({
-  record,
+  record: initialRecord,
   initialNotes,
-  initialEvents,
   initialFiles,
 }: Props) {
-  const [notes, setNotes] = useState(initialNotes);
-  const [events, setEvents] = useState(initialEvents);
-  const [files] = useState(initialFiles);
-  const [showNoteForm, setShowNoteForm] = useState(false);
-  const [showEventForm, setShowEventForm] = useState(false);
-  const [newNote, setNewNote] = useState("");
-  const [newEvent, setNewEvent] = useState({ title: "", description: "", eventDate: "" });
-  const [saving, setSaving] = useState(false);
+  const [record, setRecord] = useState(initialRecord);
+  const [notes, setNotes]   = useState(initialNotes);
+  const [files]             = useState(initialFiles);
+
+  const [showNoteForm,   setShowNoteForm]   = useState(false);
+  const [showClosePanel, setShowClosePanel] = useState(false);
+  const [newNote,  setNewNote]  = useState("");
+  const [saving, setSaving]     = useState(false);
+
+  const isOpen        = record.status === "OPEN" || record.status === "UNDER_REVIEW";
+  const createdByName = formatCreator(record.recordedBy);
+
+  function handleCaseClosed(actionTaken: string) {
+    setRecord((r) => ({ ...r, status: "RESOLVED", actionTaken }));
+    setShowClosePanel(false);
+  }
 
   async function handleAddNote(e: FormEvent) {
     e.preventDefault();
     if (!newNote.trim()) return;
     setSaving(true);
-    const res = await fetch(`/api/students/${record.student.id}/discipline/${record.id}/notes`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ note: newNote }),
-    });
+    const res = await fetch(
+      `/api/students/${record.student.id}/discipline/${record.id}/notes`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: newNote }),
+      }
+    );
     if (res.ok) {
       const data = await res.json();
       setNotes((prev) => [data, ...prev]);
@@ -81,180 +201,207 @@ export default function DisciplineCaseClient({
     setSaving(false);
   }
 
-  async function handleAddEvent(e: FormEvent) {
-    e.preventDefault();
-    if (!newEvent.title.trim() || !newEvent.eventDate) return;
-    setSaving(true);
-    const res = await fetch(`/api/students/${record.student.id}/discipline/${record.id}/events`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(newEvent),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setEvents((prev) => [...prev, data]);
-      setNewEvent({ title: "", description: "", eventDate: "" });
-      setShowEventForm(false);
-    }
-    setSaving(false);
-  }
-
   return (
-    <div className="space-y-6">
-      <div className="bg-card border border-line rounded-lg p-4">
-        <h3 className="font-medium text-ink mb-2">Case Details</h3>
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-          <dt className="text-slate">Offence</dt>
-          <dd className="text-ink">{record.offence}</dd>
-          <dt className="text-slate">Action Taken</dt>
-          <dd className="text-ink">{record.actionTaken || "—"}</dd>
-          <dt className="text-slate">Resolution</dt>
-          <dd className="text-ink">{record.resolution || "—"}</dd>
-          <dt className="text-slate">Status</dt>
-          <dd className="text-ink">{record.status}</dd>
-          <dt className="text-slate">Description</dt>
-          <dd className="col-span-2 text-ink">{record.description || "—"}</dd>
+    <div className="space-y-5">
+
+      {/* ── Case details card ──────────────────────────────────────────────── */}
+      <div className="rounded-xl border border-line bg-card overflow-hidden">
+        {/* Card header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-line bg-paper/60">
+          <span
+            className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
+              STATUS_BADGE[record.status] ?? "bg-line text-slate"
+            }`}
+          >
+            {STATUS_LABELS[record.status] ?? record.status}
+          </span>
+          {isOpen && !showClosePanel && (
+            <button
+              type="button"
+              onClick={() => setShowClosePanel(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-success/30 bg-success-bg text-success text-xs font-semibold px-3 py-1.5 hover:bg-success/20 transition-colors"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Close Case
+            </button>
+          )}
+        </div>
+
+        {/* Close case panel */}
+        {showClosePanel && (
+          <div className="px-5 py-4 border-b border-line">
+            <CloseCasePanel
+              recordId={record.id}
+              studentId={record.student.id}
+              currentActionTaken={record.actionTaken}
+              onClosed={handleCaseClosed}
+              onCancel={() => setShowClosePanel(false)}
+            />
+          </div>
+        )}
+
+        {/* Detail grid */}
+        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-0 divide-y divide-line sm:divide-y-0 sm:divide-x">
+          {[
+            { label: "Offence",      value: record.offence },
+            { label: "Created by",   value: createdByName },
+            { label: "Action taken", value: record.actionTaken || "—" },
+            { label: "Resolution",   value: record.resolution  || "—" },
+          ].map(({ label, value }) => (
+            <div key={label} className="px-5 py-4">
+              <dt className="text-xs font-medium text-slate mb-1">{label}</dt>
+              <dd className="text-sm text-ink leading-relaxed">{value}</dd>
+            </div>
+          ))}
+          {record.description && (
+            <div className="px-5 py-4 sm:col-span-2 border-t border-line">
+              <dt className="text-xs font-medium text-slate mb-1">Description</dt>
+              <dd className="text-sm text-ink leading-relaxed whitespace-pre-wrap">{record.description}</dd>
+            </div>
+          )}
         </dl>
       </div>
 
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-medium text-ink">Case Notes</h3>
-          <button type="button" className="text-sm text-royal hover:underline" onClick={() => setShowNoteForm(!showNoteForm)}>
-            {showNoteForm ? "Cancel" : "Add note"}
+      {/* ── Timeline ───────────────────────────────────────────────────────── */}
+      <div className="rounded-xl border border-line bg-card overflow-hidden">
+        <div className="px-5 py-3.5 border-b border-line bg-paper/60">
+          <h3 className="text-sm font-semibold text-ink flex items-center gap-2">
+            <Clock className="h-4 w-4 text-slate" />
+            Timeline
+          </h3>
+        </div>
+        <div className="px-5 py-4">
+          <ol className="relative border-l border-line ml-2 space-y-4 py-1">
+            <li className="ml-5">
+              <span className="absolute -left-1.5 mt-1 h-3 w-3 rounded-full border-2 border-white bg-teal dark:border-dark-bg" />
+              <p className="text-xs font-semibold text-ink">Case opened</p>
+              <p className="text-xs text-slate mt-0.5">
+                {new Date(record.createdAt).toLocaleDateString("en-KE", {
+                  day: "numeric", month: "long", year: "numeric",
+                })}
+              </p>
+            </li>
+            <li className="ml-5">
+              <span className="absolute -left-1.5 mt-1 h-3 w-3 rounded-full border-2 border-white bg-teal/40 dark:border-dark-bg" />
+              <p className="text-xs font-semibold text-ink">Class / Form</p>
+              <p className="text-xs text-slate mt-0.5">
+                {record.student.schoolClass.name}
+                <span className="ml-1.5 text-slate/60">(Form {record.student.schoolClass.form})</span>
+              </p>
+            </li>
+          </ol>
+        </div>
+      </div>
+
+      {/* ── Case Notes ─────────────────────────────────────────────────────── */}
+      <div className="rounded-xl border border-line bg-card overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-line bg-paper/60">
+          <h3 className="text-sm font-semibold text-ink flex items-center gap-2">
+            <MessageSquare className="h-4 w-4 text-slate" />
+            Case Notes
+            {notes.length > 0 && (
+              <span className="text-xs font-medium text-slate bg-line rounded-full px-2 py-0.5">
+                {notes.length}
+              </span>
+            )}
+          </h3>
+          <button
+            type="button"
+            className="text-xs text-royal hover:underline font-medium"
+            onClick={() => setShowNoteForm((v) => !v)}
+          >
+            {showNoteForm ? "Cancel" : "+ Add note"}
           </button>
         </div>
-        {showNoteForm && (
-          <form onSubmit={handleAddNote} className="mb-4 space-y-2">
-            <textarea
-              value={newNote}
-              onChange={(e) => setNewNote(e.target.value)}
-              rows={3}
-              className={inputClass}
-              placeholder="Add a note..."
-              required
-            />
-            <div className="flex gap-2">
-              <button type="submit" className={primaryButtonClass} disabled={saving}>
-                {saving ? "Saving…" : "Save note"}
-              </button>
-              <button type="button" className={secondaryButtonClass} onClick={() => setShowNoteForm(false)}>
-                Cancel
-              </button>
-            </div>
-          </form>
-        )}
-        <div className="space-y-2">
+
+        <div className="px-5 py-4 space-y-3">
+          {showNoteForm && (
+            <form onSubmit={handleAddNote} className="space-y-2 pb-3 border-b border-line">
+              <textarea
+                value={newNote}
+                onChange={(e) => setNewNote(e.target.value)}
+                rows={3}
+                className={`${inputClass} resize-none`}
+                placeholder="Add a note…"
+                autoFocus
+                required
+              />
+              <div className="flex gap-2">
+                <button type="submit" className={primaryButtonClass} disabled={saving}>
+                  {saving ? "Saving…" : "Save note"}
+                </button>
+                <button type="button" className={secondaryButtonClass}
+                  onClick={() => setShowNoteForm(false)}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+
           {notes.length === 0 ? (
-            <p className="text-sm text-slate">No notes yet.</p>
+            <p className="text-sm text-slate py-2">No notes yet.</p>
           ) : (
-            notes.map((n) => (
-              <div key={n.id} className="bg-card border border-line rounded-lg p-3">
-                <p className="text-sm text-ink">{n.body}</p>
-                <p className="text-xs text-slate mt-1">{new Date(n.createdAt).toLocaleString()} by {n.createdBy?.email || "System"}</p>
-              </div>
-            ))
+            <ul className="space-y-2.5">
+              {notes.map((n) => (
+                <li key={n.id}
+                  className="rounded-lg border border-line bg-white dark:bg-dark-surface px-4 py-3">
+                  <p className="text-sm text-ink leading-relaxed">{n.body}</p>
+                  <p className="text-xs text-slate mt-1.5">
+                    {new Date(n.createdAt).toLocaleString()} · {formatCreator(n.createdBy)}
+                  </p>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       </div>
 
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-medium text-ink">Events</h3>
-          <button type="button" className="text-sm text-royal hover:underline" onClick={() => setShowEventForm(!showEventForm)}>
-            {showEventForm ? "Cancel" : "Add event"}
-          </button>
-        </div>
-        {showEventForm && (
-          <form onSubmit={handleAddEvent} className="mb-4 space-y-2">
-            <div className="grid grid-cols-2 gap-3">
-              <input
-                value={newEvent.title}
-                onChange={(e) => setNewEvent((prev) => ({ ...prev, title: e.target.value }))}
-                placeholder="Event title"
-                className={inputClass}
-                required
-              />
-              <input
-                type="date"
-                value={newEvent.eventDate}
-                onChange={(e) => setNewEvent((prev) => ({ ...prev, eventDate: e.target.value }))}
-                className={inputClass}
-                required
-              />
-            </div>
-            <textarea
-              value={newEvent.description}
-              onChange={(e) => setNewEvent((prev) => ({ ...prev, description: e.target.value }))}
-              rows={2}
-              className={inputClass}
-              placeholder="Description (optional)"
-            />
-            <div className="flex gap-2">
-              <button type="submit" className={primaryButtonClass} disabled={saving}>
-                {saving ? "Saving…" : "Save event"}
-              </button>
-              <button type="button" className={secondaryButtonClass} onClick={() => setShowEventForm(false)}>
-                Cancel
-              </button>
-            </div>
-          </form>
-        )}
-        <div className="space-y-2">
-          {events.length === 0 ? (
-            <p className="text-sm text-slate">No events yet.</p>
-          ) : (
-            events.map((e) => (
-              <div key={e.id} className="bg-card border border-line rounded-lg p-3">
-                <p className="font-medium text-ink">{e.type}</p>
-                {e.detail && <p className="text-sm text-slate mt-1">{e.detail}</p>}
-                <p className="text-xs text-slate mt-1">{new Date(e.createdAt).toLocaleDateString()} • by {e.createdBy?.email || "System"}</p>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-
-      <div>
-        <h3 className="font-medium text-ink mb-3">Files</h3>
-        {files.length === 0 ? (
-          <p className="text-sm text-slate">No files attached.</p>
-        ) : (
-          <div className="flex flex-wrap gap-3">
+      {/* ── Attached Files ─────────────────────────────────────────────────── */}
+      {files.length > 0 && (
+        <div className="rounded-xl border border-line bg-card overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-line bg-paper/60">
+            <h3 className="text-sm font-semibold text-ink flex items-center gap-2">
+              <FileText className="h-4 w-4 text-slate" />
+              Attached Files
+              <span className="text-xs font-medium text-slate bg-line rounded-full px-2 py-0.5">
+                {files.length}
+              </span>
+            </h3>
+          </div>
+          <div className="px-5 py-4 flex flex-wrap gap-3">
             {files.map((f) => (
-              <div key={f.id} className="flex items-center gap-3 bg-card border border-line rounded-lg p-3">
+              <div key={f.id}
+                className="flex items-center gap-3 rounded-xl border border-line bg-white dark:bg-dark-surface px-4 py-3 max-w-xs">
                 {f.mimeType.startsWith("image/") ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={`/api/student-files/${f.id}`}
                     alt={f.fileName}
-                    className="w-16 h-16 object-cover rounded border border-line"
+                    className="w-14 h-14 object-cover rounded-lg border border-line shrink-0"
                     loading="lazy"
-                    onError={(e) => {
-                      e.currentTarget.src = "/placeholder.svg";
-                    }}
+                    onError={(e) => { e.currentTarget.src = "/placeholder.svg"; }}
                   />
                 ) : (
-                  <div className="w-16 h-16 flex items-center justify-center rounded border border-line bg-paper">
-                    <span className="text-xs text-slate">File</span>
+                  <div className="w-14 h-14 flex items-center justify-center rounded-lg border border-line bg-paper shrink-0">
+                    <FileText className="h-6 w-6 text-slate" />
                   </div>
                 )}
-                <div>
-                  <p className="text-sm text-ink">{f.fileName}</p>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-ink truncate">{f.fileName}</p>
                   <p className="text-xs text-slate">{(f.size / 1024).toFixed(1)} KB</p>
+                  <a
+                    href={`/api/student-files/${f.id}`}
+                    download={f.fileName}
+                    className="text-xs text-royal hover:underline"
+                  >
+                    Download
+                  </a>
                 </div>
-                <a
-                  href={`/api/student-files/${f.id}`}
-                  download={f.fileName}
-                  className="text-sm text-royal hover:underline ml-auto"
-                >
-                  Download
-                </a>
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

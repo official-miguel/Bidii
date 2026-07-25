@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { ChevronUp, ChevronDown, RefreshCw, Lightbulb } from "lucide-react";
 import { ErrorBanner } from "@/components/ui";
 
 // ---------------------------------------------------------------------------
@@ -115,7 +116,12 @@ function Section({
           {title}
           {badge}
         </span>
-        <span className="text-slate text-xs">{open ? "▲" : "▼"}</span>
+        <span className="text-slate shrink-0">
+          {open
+            ? <ChevronUp  className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />
+            : <ChevronDown className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />
+          }
+        </span>
       </button>
       {open && <div className="px-5 pb-5 border-t border-line">{children}</div>}
     </div>
@@ -223,9 +229,10 @@ export default function AssessmentAiPanel({
             type="button"
             onClick={() => fetchInsights()}
             disabled={loading}
-            className="text-xs text-slate hover:text-ink disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 text-xs text-slate hover:text-ink disabled:opacity-50 transition-colors"
           >
-            ↻ Refresh
+            <RefreshCw className="w-3.5 h-3.5" strokeWidth={1.8} aria-hidden="true" />
+            Refresh
           </button>
           <button
             type="button"
@@ -342,7 +349,10 @@ export default function AssessmentAiPanel({
                     <div key={i} className="rounded-lg bg-paper border border-line px-4 py-3">
                       <p className="text-sm font-semibold text-ink">{r.area}</p>
                       <p className="text-xs text-slate mt-0.5">{r.issue}</p>
-                      <p className="text-xs text-ink mt-1">💡 {r.suggestion}</p>
+                      <p className="text-xs text-ink mt-1 flex items-start gap-1.5">
+                        <Lightbulb className="w-3.5 h-3.5 shrink-0 mt-px text-warn" strokeWidth={1.8} aria-hidden="true" />
+                        {r.suggestion}
+                      </p>
                     </div>
                   ))}
                 </div>

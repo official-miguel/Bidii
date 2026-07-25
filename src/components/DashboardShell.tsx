@@ -30,13 +30,13 @@ function initials(email: string, label: string): string {
 
 interface DashboardShellProps {
   children:      React.ReactNode;
-  role:          string;   // URL prefix: "principal" | "teacher" | "staff" | "parent"
-  roleLabel:     string;   // Display: "Principal" | "Head of Department" | …
+  role:          string;
+  roleLabel:     string;
   userEmail:     string;
   schoolName?:   string;
+  motto?:        string | null;
   /** Hubs this user may see. undefined = all (PRINCIPAL/TEACHER). */
   visibleHubs?:  Set<NavHub>;
-  /** Warning shown at the top of content area when the teacher record is unlinked. */
   warnUnlinked?: boolean;
 }
 
@@ -46,6 +46,7 @@ export default function DashboardShell({
   roleLabel,
   userEmail,
   schoolName,
+  motto,
   visibleHubs,
   warnUnlinked,
 }: DashboardShellProps) {
@@ -70,6 +71,14 @@ export default function DashboardShell({
             role={role}
           />
           <div className="md:pl-16 pt-16 min-h-screen">
+            {/* School motto banner */}
+            {motto && (
+              <div className="bg-teal/5 border-b border-teal/10 dark:bg-teal/10 dark:border-teal/20">
+                <p className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-1.5 text-xs text-center font-medium text-teal/80 dark:text-teal/70 italic tracking-wide">
+                  {motto}
+                </p>
+              </div>
+            )}
             <div className="mx-auto max-w-7xl px-4 sm:px-6 py-6 sm:py-8 lg:px-10">
               {warnUnlinked && (
                 <div className="rounded-lg bg-warn-bg border border-warn/20 text-warn text-sm px-4 py-3 mb-6">

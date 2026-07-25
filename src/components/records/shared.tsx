@@ -18,7 +18,7 @@ export type DisciplineRecord = {
   aiSummary: string | null;
   createdAt: string;
   student: StudentLite;
-  recordedBy: { email: string } | null;
+  recordedBy: { email: string; role: string; teacher: { fullName: string } | null } | null;
   _count: { files: number; caseNotes: number };
 };
 
@@ -44,6 +44,27 @@ export type StudentFileMeta = {
   disciplineRecordId?: string | null;
   disciplineRecord?: { offence: string } | null;
 };
+
+const ROLE_LABELS: Record<string, string> = {
+  PRINCIPAL:   "Principal",
+  TEACHER:     "Teacher",
+  ADMIN_STAFF: "Admin Staff",
+  PARENT:      "Parent",
+};
+
+/**
+ * Returns the best display label for a user who recorded/created something.
+ * Priority: teacher full name → role label → email.
+ */
+export function formatCreator(
+  u: { email: string; role?: string; name?: string | null; teacher?: { fullName: string } | null } | null
+): string {
+  if (!u) return "System";
+  if (u.teacher?.fullName) return u.teacher.fullName;
+  if (u.name) return u.name;
+  if (u.role && ROLE_LABELS[u.role]) return ROLE_LABELS[u.role];
+  return u.email;
+}
 
 export const STATUS_LABELS: Record<string, string> = {
   OPEN: "Open",

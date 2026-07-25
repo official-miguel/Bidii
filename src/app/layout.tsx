@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ThemeProvider, ThemeScript } from "@/components/ThemeProvider";
 import ProductivityProvider from "@/components/ProductivityProvider";
+import SuppressRechartsWarnings from "@/components/SuppressRechartsWarnings";
 
 export const metadata: Metadata = {
   title: "Bidii School Management System",
@@ -36,6 +37,7 @@ export default function RootLayout({
       </head>
       <body className="font-sans antialiased bg-paper dark:bg-dark-bg text-ink dark:text-dark-text">
         <ThemeProvider>
+          <SuppressRechartsWarnings />
           <ProductivityProvider>{children}</ProductivityProvider>
         </ThemeProvider>
       </body>

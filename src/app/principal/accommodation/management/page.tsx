@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, FormEvent } from "react";
+import Link from "next/link";
 import {
   Wrench, AlertTriangle, Building2,
   Users, UserMinus, CheckCircle2, Shuffle, Lock,
@@ -467,14 +468,21 @@ export default function DormManagementPage() {
               <div className="flex flex-col sm:flex-row sm:items-start gap-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap mb-1">
-                    <h3 className="text-sm font-semibold text-ink dark:text-dark-text">{dorm.name}</h3>
+                    <Link href={`/principal/accommodation/dormitories/${dorm.id}`}
+                      className="text-sm font-semibold text-ink hover:text-teal transition-colors dark:text-dark-text dark:hover:text-teal">
+                      {dorm.name}
+                    </Link>
                     <span className={`inline-flex items-center gap-1 text-xs font-medium ${meta.color}`}>
                       <StatusIcon className="h-3 w-3" /> {meta.label}
                     </span>
                   </div>
                   {dorm.boardingMaster && (
                     <p className="text-xs text-slate dark:text-dark-muted mb-2">
-                      {dorm.boardingMaster.fullName} · Boarding master
+                      <Link href={`/principal/staff/${dorm.boardingMaster.id}`}
+                        className="hover:text-teal transition-colors">
+                        {dorm.boardingMaster.fullName}
+                      </Link>
+                      {" · Boarding master"}
                     </p>
                   )}
                   <div className="flex items-center gap-4 text-xs text-slate dark:text-dark-muted mb-3">

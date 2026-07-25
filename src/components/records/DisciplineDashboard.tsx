@@ -2,8 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ShieldAlert, Plus, Filter, X } from "lucide-react";
-import StudentWorkspace from "./StudentWorkspace";
+import { ShieldAlert, Plus, Filter, X, CheckCircle2, Clock, AlertCircle, Search } from "lucide-react";
 import QuickIncidentModal from "./QuickIncidentModal";
 import {
   Avatar,
@@ -13,6 +12,7 @@ import {
   STATUS_LABELS,
   Skeleton,
   StatCard,
+  formatCreator,
   fmtDate,
   offenceIcon,
 } from "./shared";
@@ -55,6 +55,118 @@ function EmptyBlock({
   );
 }
 
+/* ── Close Case Modal ───────────────────────────────────────────────────── */
+function CloseCaseModal({
+  record,
+  onClose,
+  onClosed,
+}: {
+  record: DisciplineRecord;
+  onClose: () => void;
+  onClosed: (updated: DisciplineRecord) => void;
+}) {
+  const [actionTaken, setActionTaken] = useState(record.actionTaken ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!actionTaken.trim()) {
+      setError("Please describe the action taken before closing.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/discipline/${record.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "RESOLVED", actionTaken: actionTaken.trim() }),
+      });
+      if (!res.ok) {
+        const d = await res.json() as { error?: string };
+        setError(d.error ?? "Could not close case.");
+        return;
+      }
+      const updated = await res.json() as DisciplineRecord;
+      onClosed({ ...record, ...updated });
+    } catch {
+      setError("Network error — please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md bg-card rounded-2xl shadow-2xl border border-line overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-line">
+          <div className="flex items-center gap-2.5">
+            <span className="w-8 h-8 rounded-lg bg-success-bg flex items-center justify-center shrink-0">
+              <CheckCircle2 className="h-4 w-4 text-success" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-ink">Close Case</p>
+              <p className="text-xs text-slate truncate max-w-[260px]">
+                {record.offence} — {record.student.fullName}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex items-center justify-center h-7 w-7 rounded-lg text-slate hover:text-ink hover:bg-line transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="px-5 py-5 space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-slate mb-1.5">
+              Action taken <span className="text-danger">*</span>
+            </label>
+            <textarea
+              value={actionTaken}
+              onChange={(e) => setActionTaken(e.target.value)}
+              rows={4}
+              placeholder="Describe what action was taken to resolve this case…"
+              className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-sm text-ink placeholder:text-slate/60 focus:outline-none focus:border-teal focus:ring-2 focus:ring-teal/15 resize-none dark:bg-dark-surface dark:border-dark-border dark:text-dark-text"
+              autoFocus
+            />
+          </div>
+          {error && (
+            <p className="text-xs text-danger bg-danger-bg/50 rounded-lg px-3 py-2">{error}</p>
+          )}
+          <div className="flex gap-2 pt-1">
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-success text-white text-sm font-semibold px-4 py-2.5 hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              {saving ? "Closing…" : "Close Case"}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex items-center justify-center rounded-lg border border-line text-sm font-medium px-4 py-2.5 text-ink hover:bg-paper transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 /* ── Status badge pill ──────────────────────────────────────────────────── */
 function StatusPill({ status }: { status: string }) {
   return (
@@ -68,30 +180,42 @@ function StatusPill({ status }: { status: string }) {
   );
 }
 
-/* ── Pure incident row ───────────────────────────────────────────────────── */
+/* ── Incident row ────────────────────────────────────────────────────────── */
 const IncidentRow = memo(function IncidentRow({
   record,
   caseHrefBase,
-  onViewStudent,
+  canManage,
+  onCloseCase,
 }: {
   record: DisciplineRecord;
   caseHrefBase?: string;
-  onViewStudent: (s: StudentLite) => void;
+  canManage: boolean;
+  onCloseCase: (r: DisciplineRecord) => void;
 }) {
   const icon = offenceIcon(record.offence + " " + (record.aiSummary || ""));
+  const isOpen = record.status === "OPEN" || record.status === "UNDER_REVIEW";
+  const createdByName = formatCreator(record.recordedBy);
+  const caseHref = caseHrefBase ? `${caseHrefBase}/${record.id}` : null;
+
   return (
     <li>
-      <div className="bg-card border border-line rounded-xl px-4 py-3.5 hover:border-teal/30 hover:shadow-sm transition-all flex items-start gap-3 group">
-        {/* offence icon */}
+      <div className="relative bg-card border border-line rounded-xl px-4 py-3.5 hover:border-teal/30 hover:shadow-sm transition-all flex items-start gap-3 group">
+
+        {/* Entire-row link to case page (sits behind everything) */}
+        {caseHref && (
+          <Link href={caseHref} className="absolute inset-0 rounded-xl cursor-pointer" aria-label={`Open case: ${record.offence}`} />
+        )}
+
+        {/* Offence icon */}
         <span
-          className="mt-0.5 w-9 h-9 rounded-lg bg-danger-bg/50 flex items-center justify-center text-base shrink-0"
+          className="relative mt-0.5 w-9 h-9 rounded-lg bg-danger-bg/50 flex items-center justify-center text-base shrink-0"
           aria-hidden
         >
           {icon}
         </span>
 
-        {/* main info */}
-        <div className="min-w-0 flex-1">
+        {/* Main info */}
+        <div className="relative min-w-0 flex-1 z-10">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-ink">{record.offence}</span>
             <StatusPill status={record.status} />
@@ -110,35 +234,37 @@ const IncidentRow = memo(function IncidentRow({
             <p className="text-xs text-royal mt-0.5 truncate">✨ {record.aiSummary}</p>
           )}
           <div className="flex items-center gap-2 mt-2 flex-wrap">
-            <button
-              type="button"
-              className="flex items-center gap-1.5 hover:opacity-80 transition-opacity"
-              onClick={() => onViewStudent(record.student)}
+            {/* Student name — links to their profile, sits above the row link */}
+            <Link
+              href={`/principal/students/${record.student.id}`}
+              className="relative flex items-center gap-1.5 hover:opacity-80 transition-opacity z-10"
               title="View student profile"
+              onClick={(e) => e.stopPropagation()}
             >
               <Avatar name={record.student.fullName} size="sm" />
               <span className="text-xs font-medium text-ink">{record.student.fullName}</span>
               <span className="text-xs text-slate font-mono">{record.student.admissionNumber}</span>
-            </button>
+            </Link>
             {record.student.schoolClass && (
               <span className="text-xs text-slate">· {record.student.schoolClass.name}</span>
             )}
-            {record.recordedBy && (
-              <span className="text-xs text-slate/60">· by {record.recordedBy.email}</span>
+            {createdByName && (
+              <span className="text-xs text-slate/60">· by {createdByName}</span>
             )}
           </div>
         </div>
 
-        {/* right side */}
-        <div className="flex flex-col items-end gap-2 shrink-0">
+        {/* Right side */}
+        <div className="relative flex flex-col items-end gap-2 shrink-0 z-10">
           <span className="text-xs text-slate">{fmtDate(record.dateOfOffence)}</span>
-          {caseHrefBase && (
-            <Link
-              href={`${caseHrefBase}/${record.id}`}
-              className="text-xs text-royal hover:underline opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+          {canManage && isOpen && (
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCloseCase(record); }}
+              className="text-xs font-medium text-success bg-success-bg hover:bg-success/20 border border-success/20 rounded-md px-2.5 py-1 transition-colors"
             >
-              Open case →
-            </Link>
+              Close case
+            </button>
           )}
         </div>
       </div>
@@ -154,24 +280,24 @@ export default function DisciplineDashboard({
   canManage: boolean;
   caseHrefBase?: string;
 }) {
-  const [records, setRecords] = useState<DisciplineRecord[] | null>(null);
+  const [records, setRecords]   = useState<DisciplineRecord[] | null>(null);
   const [students, setStudents] = useState<StudentLite[]>([]);
-  const [classes, setClasses] = useState<ClassLite[]>([]);
+  const [classes, setClasses]   = useState<ClassLite[]>([]);
 
-  const [search, setSearch] = useState("");
+  const [search, setSearch]     = useState("");
   const q = useDebounced(search.trim().toLowerCase(), 250);
-  const [classId, setClassId] = useState("");
-  const [stream, setStream] = useState("");
-  const [status, setStatus] = useState("");
+  const [classId, setClassId]   = useState("");
+  const [stream, setStream]     = useState("");
+  const [status, setStatus]     = useState("");
   const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dateTo, setDateTo]     = useState("");
   const [hasFiles, setHasFiles] = useState(false);
-  const [hasAi, setHasAi] = useState(false);
+  const [hasAi, setHasAi]       = useState(false);
   const [showFilters, setShowFilters] = useState(false);
 
-  const [workspaceStudent, setWorkspaceStudent] = useState<StudentLite | null>(null);
-  const [incidentModal, setIncidentModal] = useState<{ studentId?: string } | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [incidentModal, setIncidentModal]       = useState<{ studentId?: string } | null>(null);
+  const [closingRecord, setClosingRecord]       = useState<DisciplineRecord | null>(null);
+  const [refreshKey, setRefreshKey]             = useState(0);
 
   const load = useCallback(async () => {
     await Promise.all([
@@ -197,9 +323,7 @@ export default function DisciplineDashboard({
     ]);
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load, refreshKey]);
+  useEffect(() => { load(); }, [load, refreshKey]);
 
   const loading = records === null;
 
@@ -208,14 +332,6 @@ export default function DisciplineDashboard({
     classes.forEach((c) => c.stream && set.add(c.stream));
     return [...set].sort();
   }, [classes]);
-
-  const stats = useMemo(() => {
-    const open = records?.filter((r) => r.status === "OPEN").length ?? 0;
-    const underReview = records?.filter((r) => r.status === "UNDER_REVIEW").length ?? 0;
-    const resolved = records?.filter((r) => r.status === "RESOLVED").length ?? 0;
-    const escalated = records?.filter((r) => r.status === "ESCALATED").length ?? 0;
-    return { total: records?.length ?? 0, open, underReview, resolved, escalated };
-  }, [records]);
 
   const matchesStudent = useCallback(
     (s: StudentLite) => {
@@ -236,33 +352,45 @@ export default function DisciplineDashboard({
     [dateFrom, dateTo]
   );
 
+  const stats = useMemo(() => {
+    const open     = records?.filter((r) => r.status === "OPEN").length ?? 0;
+    const resolved = records?.filter((r) => r.status === "RESOLVED").length ?? 0;
+    return { total: records?.length ?? 0, open, resolved };
+  }, [records]);
+
+  const STATUS_ORDER: Record<string, number> = {
+    OPEN: 0, UNDER_REVIEW: 1, ESCALATED: 2, RESOLVED: 3,
+  };
+
   const filtered = useMemo(() => {
     if (!records) return [];
-    return records.filter((r) => {
-      if (!matchesStudent(r.student)) return false;
-      if (status && r.status !== status) return false;
-      if (!inDateRange(r.dateOfOffence)) return false;
-      if (hasFiles && r._count.files === 0) return false;
-      if (hasAi && !r.aiSummary) return false;
-      if (q) {
-        const hay =
-          `${r.student.fullName} ${r.student.admissionNumber} ${r.student.schoolClass?.name || ""} ${r.offence} ${r.description || ""} ${r.aiSummary || ""}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
+    return records
+      .filter((r) => {
+        if (!matchesStudent(r.student)) return false;
+        if (status && r.status !== status) return false;
+        if (!inDateRange(r.dateOfOffence)) return false;
+        if (hasFiles && r._count.files === 0) return false;
+        if (hasAi && !r.aiSummary) return false;
+        if (q) {
+          const hay =
+            `${r.student.fullName} ${r.student.admissionNumber} ${r.student.schoolClass?.name || ""} ${r.offence} ${r.description || ""} ${r.aiSummary || ""}`.toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const so = (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9);
+        if (so !== 0) return so;
+        return b.dateOfOffence.localeCompare(a.dateOfOffence);
+      });
   }, [records, q, status, matchesStudent, inDateRange, hasFiles, hasAi]);
 
   const activeFilters = !!(classId || stream || status || dateFrom || dateTo || hasFiles || hasAi);
 
   function clearFilters() {
-    setClassId("");
-    setStream("");
-    setStatus("");
-    setDateFrom("");
-    setDateTo("");
-    setHasFiles(false);
-    setHasAi(false);
+    setClassId(""); setStream(""); setStatus("");
+    setDateFrom(""); setDateTo("");
+    setHasFiles(false); setHasAi(false);
   }
 
   function saved() {
@@ -270,12 +398,31 @@ export default function DisciplineDashboard({
     setRefreshKey((k) => k + 1);
   }
 
-  const handleViewStudent = useCallback((s: StudentLite) => setWorkspaceStudent(s), []);
+  function handleCaseClosed(updated: DisciplineRecord) {
+    setRecords((prev) =>
+      prev
+        ? prev.map((r) =>
+            r.id === updated.id
+              ? {
+                  ...r,
+                  status: updated.status,
+                  actionTaken:
+                    (updated as unknown as { actionTaken?: string }).actionTaken ??
+                    r.actionTaken,
+                }
+              : r
+          )
+        : prev
+    );
+    setClosingRecord(null);
+  }
+
+  const handleCloseCase = useCallback((r: DisciplineRecord) => setClosingRecord(r), []);
 
   return (
     <div>
       {/* ── Stats row ───────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-3 gap-3 mb-6">
         <StatCard
           label="Total cases"
           value={stats.total}
@@ -285,19 +432,13 @@ export default function DisciplineDashboard({
         <StatCard
           label="Open"
           value={stats.open}
-          icon={<span aria-hidden>⏳</span>}
-          loading={loading}
-        />
-        <StatCard
-          label="Under review"
-          value={stats.underReview}
-          icon={<span aria-hidden>🔍</span>}
+          icon={<AlertCircle className="h-5 w-5" />}
           loading={loading}
         />
         <StatCard
           label="Resolved"
           value={stats.resolved}
-          icon={<span aria-hidden>✅</span>}
+          icon={<CheckCircle2 className="h-5 w-5" />}
           loading={loading}
         />
       </div>
@@ -307,12 +448,7 @@ export default function DisciplineDashboard({
         <div className="flex gap-2">
           {/* Search */}
           <div className="relative flex-1">
-            <span
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate text-sm select-none"
-              aria-hidden
-            >
-              🔍
-            </span>
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate pointer-events-none" aria-hidden />
             <input
               className="w-full rounded-lg border border-line bg-white pl-9 pr-3 py-2 text-sm text-ink placeholder:text-slate focus:outline-none focus:border-teal focus:ring-2 focus:ring-teal/20 dark:bg-dark-surface dark:border-dark-border dark:text-dark-text"
               placeholder="Search by student, admission no., offence, or AI summary…"
@@ -342,7 +478,7 @@ export default function DisciplineDashboard({
             )}
           </button>
 
-          {/* Add incident */}
+          {/* Record incident */}
           {canManage && (
             <button
               type="button"
@@ -367,9 +503,7 @@ export default function DisciplineDashboard({
             >
               <option value="">All classes</option>
               {classes.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
+                <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
 
@@ -382,9 +516,7 @@ export default function DisciplineDashboard({
               >
                 <option value="">All streams</option>
                 {streams.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
+                  <option key={s} value={s}>{s}</option>
                 ))}
               </select>
             )}
@@ -397,9 +529,7 @@ export default function DisciplineDashboard({
             >
               <option value="">Any status</option>
               {Object.entries(STATUS_LABELS).map(([v, l]) => (
-                <option key={v} value={v}>
-                  {l}
-                </option>
+                <option key={v} value={v}>{l}</option>
               ))}
             </select>
 
@@ -462,144 +592,37 @@ export default function DisciplineDashboard({
       )}
 
       {/* ── Case list ───────────────────────────────────────────────────── */}
-      <div className="grid lg:grid-cols-[1fr_264px] gap-5 items-start">
-        <div>
-          {loading ? (
-            <div className="space-y-3">
-              {[0, 1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-24 w-full" />
-              ))}
-            </div>
-          ) : filtered.length === 0 ? (
-            <EmptyBlock
-              text={
-                q || activeFilters
-                  ? "No discipline cases match your search or filters."
-                  : "No discipline cases recorded yet."
-              }
-              action={
-                canManage && !q && !activeFilters
-                  ? { label: "Record First Incident", onClick: () => setIncidentModal({}) }
-                  : undefined
-              }
-            />
-          ) : (
-            <ul className="space-y-2.5">
-              {filtered.map((r) => (
-                <IncidentRow
-                  key={r.id}
-                  record={r}
-                  caseHrefBase={caseHrefBase}
-                  onViewStudent={handleViewStudent}
-                />
-              ))}
-            </ul>
-          )}
+      {loading ? (
+        <div className="space-y-3">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-24 w-full" />
+          ))}
         </div>
-
-        {/* ── Sidebar: quick stats by status ─────────────────────────── */}
-        <aside className="hidden lg:block space-y-4">
-          {/* Status breakdown */}
-          <div className="bg-card border border-line rounded-xl p-4">
-            <h2 className="text-sm font-semibold text-ink mb-3">By status</h2>
-            {loading ? (
-              <div className="space-y-2">
-                {[0, 1, 2, 3].map((i) => (
-                  <Skeleton key={i} className="h-6 w-full" />
-                ))}
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                {Object.entries(STATUS_LABELS).map(([v, l]) => {
-                  const count = records?.filter((r) => r.status === v).length ?? 0;
-                  return (
-                    <button
-                      key={v}
-                      type="button"
-                      className={`w-full flex items-center justify-between rounded-lg px-2.5 py-1.5 text-sm transition-colors ${
-                        status === v
-                          ? "bg-teal/10 text-teal font-medium"
-                          : "text-slate hover:bg-paper"
-                      }`}
-                      onClick={() => setStatus((s) => (s === v ? "" : v))}
-                      aria-pressed={status === v}
-                    >
-                      <span className="flex items-center gap-2">
-                        <span
-                          className={`w-2 h-2 rounded-full ${
-                            STATUS_BADGE[v]?.includes("warn")
-                              ? "bg-warn"
-                              : STATUS_BADGE[v]?.includes("success")
-                                ? "bg-success"
-                                : STATUS_BADGE[v]?.includes("danger")
-                                  ? "bg-danger"
-                                  : "bg-royal"
-                          }`}
-                        />
-                        {l}
-                      </span>
-                      <span className="font-semibold text-ink">{count}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Recent cases */}
-          <div className="bg-card border border-line rounded-xl p-4">
-            <h2 className="text-sm font-semibold text-ink mb-3">Recent cases</h2>
-            {loading ? (
-              <div className="space-y-2">
-                {[0, 1, 2].map((i) => (
-                  <Skeleton key={i} className="h-10 w-full" />
-                ))}
-              </div>
-            ) : records?.length === 0 ? (
-              <p className="text-xs text-slate">Nothing recorded yet.</p>
-            ) : (
-              <ul className="space-y-2">
-                {(records ?? []).slice(0, 6).map((r) => (
-                  <li key={r.id}>
-                    <button
-                      type="button"
-                      className="w-full text-left flex items-start gap-2 rounded-md px-1.5 py-1 hover:bg-paper transition-colors"
-                      onClick={() => handleViewStudent(r.student)}
-                    >
-                      <span className="text-sm mt-0.5" aria-hidden>
-                        {offenceIcon(r.offence)}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block text-xs text-ink truncate">
-                          {r.student.fullName.split(" ")[0]} — {r.offence}
-                        </span>
-                        <span className="block text-[11px] text-slate">
-                          {fmtDate(r.dateOfOffence)}
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </aside>
-      </div>
-
-      {/* ── Student workspace drawer ─────────────────────────────────────── */}
-      {workspaceStudent && (
-        <StudentWorkspace
-          student={workspaceStudent}
-          canManageDiscipline={canManage}
-          canManageAchievements={false}
-          caseHrefBase={caseHrefBase}
-          refreshKey={refreshKey}
-          onClose={() => setWorkspaceStudent(null)}
-          onRecordIncident={() =>
-            setIncidentModal({ studentId: workspaceStudent.id })
+      ) : filtered.length === 0 ? (
+        <EmptyBlock
+          text={
+            q || activeFilters
+              ? "No discipline cases match your search or filters."
+              : "No discipline cases recorded yet."
           }
-          onAddAchievement={() => {}}
+          action={
+            canManage && !q && !activeFilters
+              ? { label: "Record First Incident", onClick: () => setIncidentModal({}) }
+              : undefined
+          }
         />
+      ) : (
+        <ul className="space-y-2.5">
+          {filtered.map((r) => (
+            <IncidentRow
+              key={r.id}
+              record={r}
+              caseHrefBase={caseHrefBase}
+              canManage={canManage}
+              onCloseCase={handleCloseCase}
+            />
+          ))}
+        </ul>
       )}
 
       {/* ── Quick incident modal ─────────────────────────────────────────── */}
@@ -609,6 +632,15 @@ export default function DisciplineDashboard({
           initialStudentId={incidentModal.studentId}
           onClose={() => setIncidentModal(null)}
           onSaved={saved}
+        />
+      )}
+
+      {/* ── Close case modal ─────────────────────────────────────────────── */}
+      {closingRecord && (
+        <CloseCaseModal
+          record={closingRecord}
+          onClose={() => setClosingRecord(null)}
+          onClosed={handleCaseClosed}
         />
       )}
     </div>

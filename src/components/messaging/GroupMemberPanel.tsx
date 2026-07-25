@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Users, GraduationCap, UserRound, Link2, Phone, X } from "lucide-react";
 
 interface Member {
   id: string;
@@ -25,11 +26,11 @@ const MODE_LABELS: Record<AddMode, string> = {
   student:  "Student (parent contacted)",
 };
 
-function memberIcon(m: Member) {
-  if (m.extName)  return "🔗";
-  if (m.teacher)  return "👤";
-  if (m.student)  return "🎓";
-  return "👤";
+function MemberIcon({ m }: { m: Member }) {
+  if (m.extName)  return <Link2     className="h-4 w-4 text-slate"   aria-hidden />;
+  if (m.teacher)  return <UserRound className="h-4 w-4 text-royal"   aria-hidden />;
+  if (m.student)  return <GraduationCap className="h-4 w-4 text-teal" aria-hidden />;
+  return                 <UserRound className="h-4 w-4 text-slate"   aria-hidden />;
 }
 
 function memberLabel(m: Member) {
@@ -131,7 +132,7 @@ export default function GroupMemberPanel({ groupId, groupName, onClose, onChange
         <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-line bg-royal-50/40 shrink-0">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xl">👥</span>
+              <Users className="h-5 w-5 text-royal/70 shrink-0" aria-hidden />
               <h2 className="font-display text-base font-semibold text-ink">{groupName}</h2>
             </div>
             <p className="text-xs text-slate mt-0.5 ml-7">
@@ -139,9 +140,7 @@ export default function GroupMemberPanel({ groupId, groupName, onClose, onChange
             </p>
           </div>
           <button onClick={onClose} className="text-slate hover:text-ink p-1 shrink-0 mt-0.5" aria-label="Close">
-            <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd"/>
-            </svg>
+            <X className="w-5 h-5" />
           </button>
         </div>
 
@@ -163,7 +162,12 @@ export default function GroupMemberPanel({ groupId, groupName, onClose, onChange
                       : "text-slate hover:text-ink"
                   }`}
                 >
-                  {m === "external" ? "📞 External" : m === "staff" ? "👤 Staff" : "🎓 Student"}
+                  {m === "external"
+                    ? <><Phone        className="h-3.5 w-3.5 inline mr-1" aria-hidden />External</>
+                    : m === "staff"
+                    ? <><UserRound    className="h-3.5 w-3.5 inline mr-1" aria-hidden />Staff</>
+                    : <><GraduationCap className="h-3.5 w-3.5 inline mr-1" aria-hidden />Student</>
+                  }
                 </button>
               ))}
             </div>
@@ -265,7 +269,7 @@ export default function GroupMemberPanel({ groupId, groupName, onClose, onChange
                   return (
                     <li key={m.id} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-white px-4 py-3">
                       <div className="flex items-center gap-3 min-w-0">
-                        <span className="text-lg shrink-0">{memberIcon(m)}</span>
+                        <span className="shrink-0"><MemberIcon m={m} /></span>
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-ink truncate">{name}</p>
                           {sub && <p className="text-xs text-slate truncate">{sub}</p>}

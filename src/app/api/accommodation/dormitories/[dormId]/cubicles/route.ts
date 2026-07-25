@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { requirePermission } from "@/lib/permissions";
@@ -89,20 +90,43 @@ export async function POST(
       return NextResponse.json({ error: "No cubicle names provided." }, { status: 400 });
     }
 
-    const created = await prisma.$transaction(
-      cubicleNames.map((name) =>
-        prisma.cubicle.create({
-          data: {
-            dormId: params.dormId,
-            schoolId: user.schoolId,
-            name,
-            capacity: capacityEach,
-          },
-        })
-      )
-    );
+    try {
+      const created = await prisma.$transaction(
+        cubicleNames.map((name) =>
+          prisma.cubicle.create({
+            data: {
+              dormId: params.dormId,
+              schoolId: user.schoolId,
+              name,
+              capacity: capacityEach,
+            },
+          })
+        )
+      );
 
-    return NextResponse.json({ created: created.length, cubicles: created }, { status: 201 });
+      return NextResponse.json({ created: created.length, cubicles: created }, { status: 201 });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === "P2002"
+      ) {
+        return NextResponse.json(
+          { error: "One or more cubicle names already exist in this dormitory. Choose a different prefix or remove the existing cubicles first." },
+          { status: 409 }
+        );
+      }
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === "P2003"
+      ) {
+        return NextResponse.json(
+          { error: "Dormitory not found or does not belong to your school." },
+          { status: 404 }
+        );
+      }
+      console.error("[POST /cubicles] bulk create error:", err);
+      return NextResponse.json({ error: "Failed to create cubicles. Please try again." }, { status: 500 });
+    }
   }
 
   // Single cubicle
@@ -127,21 +151,35 @@ export async function POST(
     );
   }
 
-  const cubicle = await prisma.cubicle.create({
-    data: {
-      dormId: params.dormId,
-      schoolId: user.schoolId,
-      name,
-      capacity,
-      allocationPolicy: allocationPolicy ?? null,
-      description,
-      permittedForms:
-        allocationPolicy === "RESTRICTED_BY_FORM" && permittedForms.length > 0
-          ? { create: permittedForms.map((form) => ({ form })) }
-          : undefined,
-    },
-    include: { permittedForms: true },
-  });
+  try {
+    const cubicle = await prisma.cubicle.create({
+      data: {
+        dormId: params.dormId,
+        schoolId: user.schoolId,
+        name,
+        capacity,
+        allocationPolicy: allocationPolicy ?? null,
+        description,
+        permittedForms:
+          allocationPolicy === "RESTRICTED_BY_FORM" && permittedForms.length > 0
+            ? { create: permittedForms.map((form) => ({ form })) }
+            : undefined,
+      },
+      include: { permittedForms: true },
+    });
 
-  return NextResponse.json(cubicle, { status: 201 });
+    return NextResponse.json(cubicle, { status: 201 });
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002"
+    ) {
+      return NextResponse.json(
+        { error: `A cubicle named "${name}" already exists in this dormitory.` },
+        { status: 409 }
+      );
+    }
+    console.error("[POST /cubicles] single create error:", err);
+    return NextResponse.json({ error: "Failed to create cubicle. Please try again." }, { status: 500 });
+  }
 }

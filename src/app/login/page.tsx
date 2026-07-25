@@ -1,18 +1,45 @@
 "use client";
 
-import { useState, FormEvent, Suspense } from "react";
+import { useState, useEffect, FormEvent, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
+import { Eye, EyeOff } from "lucide-react";
+
+const STORAGE_KEY = "bidii_login_draft";
 
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const notice = params.get("notice");
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [email, setEmail]           = useState("");
+  const [password, setPassword]     = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError]           = useState<string | null>(null);
+  const [loading, setLoading]       = useState(false);
+
+  // ── Restore draft from sessionStorage on mount ───────────────────────────
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const draft = JSON.parse(raw) as { email?: string };
+        // Only restore the email — never restore the password for security.
+        if (draft.email) setEmail(draft.email);
+      }
+    } catch {
+      // Ignore parse errors
+    }
+  }, []);
+
+  // ── Persist email to sessionStorage whenever it changes ──────────────────
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ email }));
+    } catch {
+      // Storage quota exceeded — fail silently
+    }
+  }, [email]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -31,6 +58,9 @@ function LoginForm() {
         setError(data.error || "Something went wrong. Try again.");
         return;
       }
+
+      // Clear draft on successful login
+      try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
 
       if (data.role === "PRINCIPAL") {
         router.push("/principal");
@@ -99,20 +129,36 @@ function LoginForm() {
               <label htmlFor="password" className="block text-sm font-medium text-ink dark:text-dark-text mb-1.5">
                 Password
               </label>
-              <input
-                id="password"
-                type="password"
-                required
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-lg border border-line bg-white px-3.5 py-2.5 text-sm text-ink
-                           placeholder:text-slate-light
-                           focus:outline-none focus:border-teal focus:ring-2 focus:ring-teal/15
-                           transition-colors dark:bg-dark-surface dark:border-dark-border
-                           dark:text-dark-text dark:placeholder:text-dark-muted"
-                placeholder="••••••••"
-              />
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  required
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full rounded-lg border border-line bg-white px-3.5 py-2.5 pr-10 text-sm text-ink
+                             placeholder:text-slate-light
+                             focus:outline-none focus:border-teal focus:ring-2 focus:ring-teal/15
+                             transition-colors dark:bg-dark-surface dark:border-dark-border
+                             dark:text-dark-text dark:placeholder:text-dark-muted"
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="absolute inset-y-0 right-0 flex items-center justify-center w-10
+                             text-slate hover:text-ink transition-colors
+                             dark:text-dark-muted dark:hover:text-dark-text"
+                  tabIndex={-1}
+                >
+                  {showPassword
+                    ? <EyeOff className="h-4 w-4" aria-hidden="true" />
+                    : <Eye    className="h-4 w-4" aria-hidden="true" />
+                  }
+                </button>
+              </div>
             </div>
 
             {error && (

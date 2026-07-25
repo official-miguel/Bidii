@@ -1,8 +1,23 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import {
+  getEffectivePermissions,
+  getVisibleHubs,
+  hasAssignedRoles,
+} from "@/lib/permissions";
 import DashboardShell from "@/components/DashboardShell";
 import MustChangePasswordGate from "@/components/MustChangePasswordGate";
+
+// Teacher base hubs — always visible regardless of extra roles.
+// These mirror the pages that actually exist under /teacher/*.
+const TEACHER_BASE_HUBS = new Set([
+  "dashboard",
+  "academic",    // assessments, attendance, timetable, calendar
+  "student-life", // records (if class teacher)
+  "calendar",
+  "communication",
+] as const);
 
 export default async function TeacherLayout({
   children,
@@ -10,17 +25,28 @@ export default async function TeacherLayout({
   children: React.ReactNode;
 }) {
   const user = await getCurrentUser();
+  if (!user || user.role !== "TEACHER") redirect("/login");
 
-  if (!user || user.role !== "TEACHER") {
-    redirect("/login");
-  }
-
-  const [school, teacher] = await Promise.all([
-    prisma.school.findUnique({ where: { id: user.schoolId }, select: { name: true } }),
+  const [school, teacher, hasRoles] = await Promise.all([
+    prisma.school.findUnique({ where: { id: user.schoolId }, select: { name: true, motto: true } }),
     prisma.teacher.findUnique({ where: { userId: user.id }, select: { fullName: true } }),
+    hasAssignedRoles(user.id),
   ]);
 
-  const roleLabel = teacher?.fullName ? teacher.fullName : "Teacher";
+  const roleLabel = teacher?.fullName ?? "Teacher";
+
+  // Fast path — no extra roles assigned → pass undefined so the sidebar
+  // shows all hubs (existing behaviour, zero extra DB queries).
+  let visibleHubs: Set<string> | undefined = undefined;
+
+  if (hasRoles) {
+    // Compute which hubs the assigned StaffRoles unlock, then union with
+    // the teacher base set so nothing the teacher already had is hidden.
+    const extraPerms   = await getEffectivePermissions(user);
+    const extraHubs    = getVisibleHubs(extraPerms); // Set<NavHub>
+    const merged       = new Set([...TEACHER_BASE_HUBS, ...extraHubs]);
+    visibleHubs        = merged as Set<string>;
+  }
 
   return (
     <MustChangePasswordGate mustChangePassword={user.mustChangePassword}>
@@ -29,7 +55,8 @@ export default async function TeacherLayout({
         roleLabel={roleLabel}
         userEmail={user.email}
         schoolName={school?.name}
-        // visibleHubs undefined → all hubs shown (teacher sees everything in sidebar)
+        motto={school?.motto}
+        visibleHubs={visibleHubs as Parameters<typeof DashboardShell>[0]["visibleHubs"]}
       >
         {children}
       </DashboardShell>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { MessageSquare } from "lucide-react";
 import DeliveryStatusBadge from "./DeliveryStatusBadge";
 import ChannelBadge from "./ChannelBadge";
 
@@ -105,7 +106,9 @@ export default function MessageList({ onSelect, selectedId, refreshKey }: Props)
       {/* Empty state */}
       {!loading && items.length === 0 && (
         <div className="rounded-xl border border-dashed border-line px-4 py-12 text-center">
-          <span className="text-4xl block mb-3">💬</span>
+          <div className="w-14 h-14 rounded-2xl bg-royal-50 flex items-center justify-center mx-auto mb-3">
+            <MessageSquare className="h-7 w-7 text-royal/60" aria-hidden />
+          </div>
           <p className="text-sm font-medium text-ink mb-1">No messages yet</p>
           <p className="text-xs text-slate">Messages you send will appear here.</p>
         </div>

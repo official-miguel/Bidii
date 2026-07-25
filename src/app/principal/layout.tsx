@@ -17,7 +17,7 @@ export default async function PrincipalLayout({
 
   const school = await prisma.school.findUnique({
     where: { id: user.schoolId },
-    select: { name: true },
+    select: { name: true, motto: true },
   });
 
   return (
@@ -27,7 +27,7 @@ export default async function PrincipalLayout({
         roleLabel="Principal"
         userEmail={user.email}
         schoolName={school?.name}
-        // visibleHubs undefined → all hubs (principal sees everything)
+        motto={school?.motto}
       >
         {children}
       </DashboardShell>

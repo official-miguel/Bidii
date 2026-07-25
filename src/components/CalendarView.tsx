@@ -33,6 +33,7 @@ import { useCalendarStore }              from "@/lib/stores/calendarStore";
 import type { LocalCalendarEvent }       from "@/lib/stores/calendarStore";
 import { getKenyaPublicHolidaysForMonth } from "@/lib/kenyaHolidays";
 import { useProductivityStore }          from "@/lib/stores/productivityStore";
+import { useFormDraft }                  from "@/lib/hooks/useFormDraft";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -231,10 +232,26 @@ export default function CalendarView({ canManage }: { canManage: boolean }) {
   const [editing,          setEditing]          = useState<CalendarEventItem | null>(null);
   const [formError,        setFormError]        = useState<string | null>(null);
   const [monthPickerOpen,  setMonthPickerOpen]  = useState(false);
-  const [formType,         setFormType]         = useState<EventType>("EVENT");
-  const [formAudience,     setFormAudience]     = useState<CalendarAudience>("EVERYONE");
-  const [formOpeningDate,  setFormOpeningDate]  = useState("");
-  const [formClosingDate,  setFormClosingDate]  = useState("");
+
+  // Draft for the event create/edit form (scoped by editing id)
+  const calDraftKey = `bidii_draft_cal_event_${editing?.id ?? "new"}`;
+  const [calDraft, setCalDraft, clearCalDraft] = useFormDraft(calDraftKey, {
+    formType:        "EVENT" as EventType,
+    formAudience:    "EVERYONE" as CalendarAudience,
+    formOpeningDate: "",
+    formClosingDate: "",
+  });
+
+  const [formType,         setFormType]         = useState<EventType>(calDraft.formType);
+  const [formAudience,     setFormAudience]     = useState<CalendarAudience>(calDraft.formAudience);
+  const [formOpeningDate,  setFormOpeningDate]  = useState(calDraft.formOpeningDate);
+  const [formClosingDate,  setFormClosingDate]  = useState(calDraft.formClosingDate);
+
+  // Persist when form is open
+  useEffect(() => {
+    if (!formOpen) return;
+    setCalDraft({ formType, formAudience, formOpeningDate, formClosingDate });
+  }, [formType, formAudience, formOpeningDate, formClosingDate, formOpen, setCalDraft]);
 
   // ── Today's-events notification (fires once per session on mount) ──────────
   const addNotification = useProductivityStore((s) => s.addNotification);
@@ -263,6 +280,7 @@ export default function CalendarView({ canManage }: { canManage: boolean }) {
   function openCreate(date: string) {
     setEditing(null);
     setFormError(null);
+    clearCalDraft();
     setFormType("EVENT");
     setFormAudience("EVERYONE");
     setFormOpeningDate("");
@@ -347,6 +365,7 @@ export default function CalendarView({ canManage }: { canManage: boolean }) {
 
     setFormOpen(false);
     setEditing(null);
+    clearCalDraft();
     setFormType("EVENT");
     setFormAudience("EVERYONE");
     setFormOpeningDate("");

@@ -1,19 +1,48 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { resolveAssessmentActor, canReadPeriods } from "@/lib/assessment/auth844";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = prisma as any;
 
 // ---------------------------------------------------------------------------
 // GET /api/assessments/frameworks
-// Returns all assessment frameworks for the school.
+// Returns assessment frameworks for the school.
+// - Principals receive full details (counts included).
+// - Any role that can read periods (teachers, HODs, exam officers, etc.)
+//   receives a minimal read-only view: id, type, label, academicYear, isActive.
 // ---------------------------------------------------------------------------
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (user.role !== "PRINCIPAL") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
+  const isPrincipal = user.role === "PRINCIPAL";
+
+  if (!isPrincipal) {
+    // Non-principals get a minimal read: enough to resolve which framework
+    // to use when populating the dashboard exam-period filter.
+    const actor = await resolveAssessmentActor(user, user.schoolId);
+    if (!canReadPeriods(actor)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const frameworks = await db.assessmentFramework.findMany({
+      where: { schoolId: user.schoolId },
+      orderBy: [{ type: "asc" }, { academicYear: "desc" }],
+      select: {
+        id: true,
+        type: true,
+        label: true,
+        academicYear: true,
+        isActive: true,
+      },
+    });
+
+    return NextResponse.json({ frameworks });
+  }
+
+  // Principal — full details including counts.
   const frameworks = await db.assessmentFramework.findMany({
     where: { schoolId: user.schoolId },
     orderBy: [{ type: "asc" }, { academicYear: "desc" }],

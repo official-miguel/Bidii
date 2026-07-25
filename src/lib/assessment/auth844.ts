@@ -58,11 +58,19 @@ export async function resolveAssessmentActor(
   user: User,
   schoolId: string
 ): Promise<AssessmentActor> {
-  // Find the active 8-4-4 framework for this school.
-  const framework = await (prisma as any).assessmentFramework.findFirst({ // eslint-disable-line @typescript-eslint/no-explicit-any
-    where: { schoolId, type: "EIGHT_FOUR_FOUR", isActive: true },
-    select: { id: true },
-  }) as { id: string } | null;
+  // Find the framework to use for role lookups.
+  // Prefer an active 8-4-4 framework (legacy default); fall back to any
+  // active framework so CBC/CBE schools still get their roles resolved.
+  const framework =
+    ((await (prisma as any).assessmentFramework.findFirst({ // eslint-disable-line @typescript-eslint/no-explicit-any
+      where: { schoolId, type: "EIGHT_FOUR_FOUR", isActive: true },
+      select: { id: true },
+    })) as { id: string } | null) ??
+    ((await (prisma as any).assessmentFramework.findFirst({ // eslint-disable-line @typescript-eslint/no-explicit-any
+      where: { schoolId, isActive: true },
+      orderBy: { academicYear: "desc" },
+      select: { id: true },
+    })) as { id: string } | null);
 
   // For ADMIN_STAFF, check module permissions.
   let adminCanView = false;
@@ -185,5 +193,16 @@ export function canGenerateReportCard(actor: AssessmentActor, classId: string): 
 }
 
 export function canReadPeriods(actor: AssessmentActor): boolean {
+  // Any authenticated user may read the period list — it contains no sensitive
+  // mark data and is needed to populate filter bars for all roles.
+  // Principals are always permitted; for other roles we still require some
+  // form of assessment access (own role, admin permission, or class-teacher
+  // assignment) so that completely unrelated staff accounts are excluded.
+  if (actor.isPrincipal) return true;
+  if (actor.user.role === "ADMIN_STAFF") return actor.adminCanView || actor.adminCanManage;
+  // Teachers: permit if they have any assessment role, are a class teacher,
+  // or the school has no 8-4-4 framework yet (roles array will be empty but
+  // the teacher is legitimately using a CBC/CBE framework).
+  if (actor.teacher !== null) return true;
   return canViewMarksheet(actor) || canAccessDashboard(actor);
 }

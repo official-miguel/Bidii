@@ -1,13 +1,14 @@
 /**
  * src/lib/messaging/resolve.ts
  *
- * Expands RecipientDescriptor[] into a flat list of {label, phone} records
+ * Expands RecipientDescriptor[] into a flat list of {label, phone, groupTokens} records
  * by querying the database at send time — never caching phone numbers.
  *
  * SERVER-SIDE ONLY. Never import from client components.
  */
 
 import { prisma } from "@/lib/prisma";
+import { groupToken } from "@/lib/messaging/placeholders";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,7 +26,12 @@ export type RecipientDescriptor =
   | { type: "school" }
   | { type: "external";   phone: string; label: string };
 
-export type ResolvedRecipient = { label: string; phone: string };
+export type ResolvedRecipient = {
+  label: string;
+  phone: string;
+  /** Dynamic group tokens for this recipient, e.g. { "/bomname": "Alice Wanjiku" } */
+  groupTokens?: Record<string, string>;
+};
 export type SkippedRecipient  = { label: string; reason: string };
 
 export type ResolveResult = {
@@ -45,7 +51,7 @@ export async function resolveRecipients(
   const skipped:  SkippedRecipient[]  = [];
   const seen = new Set<string>(); // deduplicate by phone
 
-  function addResolved(label: string, phone: string | null | undefined) {
+  function addResolved(label: string, phone: string | null | undefined, extraTokens?: Record<string, string>) {
     if (!phone || phone.trim() === "") {
       skipped.push({ label, reason: "no contact number on file" });
       return;
@@ -53,7 +59,7 @@ export async function resolveRecipients(
     const normalised = phone.replace(/\s+/g, "");
     if (seen.has(normalised)) return;
     seen.add(normalised);
-    resolved.push({ label, phone: normalised });
+    resolved.push({ label, phone: normalised, ...(extraTokens ? { groupTokens: extraTokens } : {}) });
   }
 
   for (const d of descriptors) {
@@ -106,6 +112,12 @@ export async function resolveRecipients(
       }
 
       case "group": {
+        const grp = await prisma.recipientGroup.findUnique({
+          where: { id: d.groupId },
+          select: { name: true },
+        });
+        const token = grp ? groupToken(grp.name) : null;
+
         const members = await prisma.groupMember.findMany({
           where: { groupId: d.groupId },
           select: {
@@ -115,9 +127,14 @@ export async function resolveRecipients(
           },
         });
         for (const m of members) {
-          if (m.teacher)       addResolved(m.teacher.fullName, m.teacher.phone);
-          else if (m.student)  addResolved(m.student.fullName, m.student.parentContact);
-          else if (m.extName)  addResolved(m.extName, m.extPhone);
+          let name: string | null = null;
+          let phone: string | null | undefined = null;
+          if (m.teacher)      { name = m.teacher.fullName; phone = m.teacher.phone; }
+          else if (m.student) { name = m.student.fullName; phone = m.student.parentContact; }
+          else if (m.extName) { name = m.extName;          phone = m.extPhone; }
+          if (!name) continue;
+          const extra = token ? { [token]: name } : undefined;
+          addResolved(name, phone, extra);
         }
         break;
       }

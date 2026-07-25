@@ -27,7 +27,7 @@ export default async function MarksheetPage({
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const classes = await (prisma as any).schoolClass.findMany({
-    where: { schoolId: user.schoolId, form: { in: [1, 2, 3, 4] } },
+    where: { schoolId: user.schoolId },
     orderBy: [{ form: "asc" }, { name: "asc" }],
     select: { id: true, name: true, form: true, frameworkType: true },
   }) as Array<{ id: string; name: string; form: number; frameworkType: string }>;
@@ -77,16 +77,14 @@ export default async function MarksheetPage({
   }
 
   // ---- 8-4-4 routing (default) ----
+  // Pass all subjects — ExamFilterBar filters by applicableForms internally.
   const subjects = await prisma.subject.findMany({
     where: { schoolId: user.schoolId },
     orderBy: { name: "asc" },
     select: { id: true, name: true, code: true, applicableForms: true },
   });
 
-  const applicableSubjects = selectedClass
-    ? subjects.filter((s) => s.applicableForms.includes(selectedClass.form))
-    : subjects;
-  const defaultSubjectId = searchParams.subjectId ?? applicableSubjects[0]?.id ?? "";
+  const defaultSubjectId = searchParams.subjectId ?? "";
 
   return (
     <div>
@@ -95,8 +93,8 @@ export default async function MarksheetPage({
         description="Enter and review student scores per subject and period."
       />
       <MarksheetGrid
-        classes={classes.map((c) => ({ id: c.id, name: c.name }))}
-        subjects={applicableSubjects}
+        classes={classes.map((c) => ({ id: c.id, name: c.name, form: c.form }))}
+        subjects={subjects}
         defaultClassId={defaultClassId}
         defaultSubjectId={defaultSubjectId}
         readOnly={false}

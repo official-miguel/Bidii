@@ -5,10 +5,12 @@ import { royalCardClass } from "@/components/ui";
 import TemplateEditor from "./TemplateEditor";
 
 interface Template { id: string; name: string; category: string | null; body: string; updatedAt: string }
-interface Props { canManage: boolean; onUse: (t: Template) => void }
+interface Group    { id: string; name: string }
+interface Props    { canManage: boolean; onUse: (t: Template) => void }
 
 export default function TemplateList({ canManage, onUse }: Props) {
   const [templates, setTemplates]   = useState<Template[]>([]);
+  const [groups,    setGroups]      = useState<Group[]>([]);
   const [loading, setLoading]       = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing]       = useState<Template | null>(null);
@@ -19,7 +21,13 @@ export default function TemplateList({ canManage, onUse }: Props) {
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    fetch("/api/messaging/groups")
+      .then((r) => r.ok ? r.json() : [])
+      .then((d: Group[]) => setGroups(d))
+      .catch(() => {});
+  }, []);
 
   async function handleDelete(id: string, name: string) {
     if (!confirm(`Delete template "${name}"?`)) return;
@@ -47,6 +55,7 @@ export default function TemplateList({ canManage, onUse }: Props) {
           <TemplateEditor
             onSaved={() => { setShowCreate(false); load(); }}
             onCancel={() => setShowCreate(false)}
+            groups={groups}
           />
         </div>
       )}
@@ -59,6 +68,7 @@ export default function TemplateList({ canManage, onUse }: Props) {
             initial={editing}
             onSaved={() => { setEditing(null); load(); }}
             onCancel={() => setEditing(null)}
+            groups={groups}
           />
         </div>
       )}

@@ -66,6 +66,7 @@ type ProfileData = {
   attendance: AttendanceSummary;
   discipline: DisciplineRow[];
   achievements: AchievementRow[];
+  meanFlagThreshold: number | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -159,7 +160,7 @@ export default function StudentProfile({
     return <p className="text-sm text-danger">{error ?? "Profile not found."}</p>;
   }
 
-  const { student, todayAttendance, examHistory, attendance, discipline, achievements } = data;
+  const { student, todayAttendance, examHistory, attendance, discipline, achievements, meanFlagThreshold } = data;
   const base = role === "teacher" ? "/teacher" : role === "staff" ? "/staff" : "/principal";
 
   const attColour =
@@ -167,6 +168,10 @@ export default function StudentProfile({
     (attendance.rate ?? 0) >= 75 ? "text-warn" : "text-danger";
 
   const openCases = discipline.filter(d => ["OPEN","ESCALATED"].includes(d.status)).length;
+
+  // Academic flag: most recent exam result below the school's threshold
+  const latestMeanPoints = examHistory.length > 0 ? examHistory[examHistory.length - 1].meanPoints : null;
+  const isAcademicFlagged = meanFlagThreshold !== null && latestMeanPoints !== null && latestMeanPoints < meanFlagThreshold;
 
   return (
     <div className="space-y-5 max-w-2xl">
@@ -197,6 +202,12 @@ export default function StudentProfile({
             </p>
             {/* Summary pills */}
             <div className="flex flex-wrap gap-1.5 mt-2">
+              {isAcademicFlagged && (
+                <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200 flex items-center gap-1">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500" />
+                  Academic concern
+                </span>
+              )}
               {attendance.rate !== null && (
                 <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${
                   (attendance.rate) >= 90 ? "bg-success-bg text-success border-success/20" :
@@ -273,13 +284,21 @@ export default function StudentProfile({
       </div>
 
       {/* ── Recent exam results ────────────────────────────────────────── */}
-      <div className="bg-white border border-line rounded-xl p-5">
+      <div className={`bg-white border rounded-xl p-5 ${isAcademicFlagged ? "border-red-300" : "border-line"}`}>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-ink">Recent exam results</h2>
           <Link href={`${base}/assessments/report-cards?studentId=${student.id}`} className="text-xs text-royal hover:underline">
             View all →
           </Link>
         </div>
+        {isAcademicFlagged && (
+          <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+            <span className="text-base leading-none">⚑</span>
+            <span>
+              Mean points <span className="font-semibold">{latestMeanPoints?.toFixed(2)}</span> is below the school&apos;s flagging threshold of <span className="font-semibold">{meanFlagThreshold?.toFixed(2)}</span>. Academic intervention may be needed.
+            </span>
+          </div>
+        )}
         {examHistory.length === 0 ? (
           <p className="text-sm text-slate">No assessment data recorded yet.</p>
         ) : (

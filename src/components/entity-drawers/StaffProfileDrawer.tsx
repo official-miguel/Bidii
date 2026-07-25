@@ -15,12 +15,13 @@
  * (e.g. clicking a department chip from within this drawer).
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import SlideOver from "@/components/workspace/SlideOver";
 import { Avatar, Chip, Spinner } from "@/components/ui";
 import {
   Mail, Phone, BookOpen, Users, Building2,
   ShieldCheck, Shield, ExternalLink, CheckCircle2, XCircle,
+  Search, X as XIcon, ShieldPlus,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -34,15 +35,18 @@ interface StaffDetail {
   email: string | null;
   phone: string | null;
   todEligible: boolean;
+  designation: string | null;
   primaryDepartment: { id: string; name: string } | null;
   classTeacherOf: { id: string; name: string } | null;
   teacherSubjects: { subject: { id: string; name: string; code: string } }[];
   user: {
+    id: string;
     email: string;
     isActive: boolean;
     role: string;
-    staffRole: { id: string; name: string } | null;
     mustChangePassword: boolean;
+    staffRole: { id: string; name: string } | null;
+    userStaffRoles: { staffRole: { id: string; name: string; description: string | null } }[];
   } | null;
 }
 
@@ -94,6 +98,240 @@ function InfoRow({
 }
 
 // ---------------------------------------------------------------------------
+// RoleAssignmentCard — dropdown to assign StaffRoles from the teacher profile
+// ---------------------------------------------------------------------------
+
+interface RoleSearchResult {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
+function RoleAssignmentCard({
+  staff,
+  onMutate,
+}: {
+  staff: StaffDetail;
+  onMutate: () => void;
+}) {
+  const userId   = staff.user?.id ?? null;
+  const assigned = staff.user?.userStaffRoles.map((r) => r.staffRole) ?? [];
+
+  // All school roles — fetched once when card mounts
+  const [allRoles,  setAllRoles]  = useState<RoleSearchResult[]>([]);
+  const [loading,   setLoading]   = useState(false);
+  // Controls whether the dropdown list is visible
+  const [open,      setOpen]      = useState(false);
+  // Filter text typed inside the trigger button area
+  const [filter,    setFilter]    = useState("");
+  const [busy,      setBusy]      = useState<string | null>(null);
+  const [toast,     setToast]     = useState<{ msg: string; ok: boolean } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const assignedIds = new Set(assigned.map((r) => r.id));
+
+  const showToast = useCallback((msg: string, ok: boolean) => {
+    setToast({ msg, ok });
+    setTimeout(() => setToast(null), 3000);
+  }, []);
+
+  // Fetch all roles once
+  useEffect(() => {
+    if (!userId) return;
+    setLoading(true);
+    fetch("/api/staff-roles")
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setAllRoles(
+            data.map((r: { id: string; name: string; description?: string | null }) => ({
+              id: r.id, name: r.name, description: r.description ?? null,
+            }))
+          );
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [userId]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setFilter("");
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  const filtered = filter.trim()
+    ? allRoles.filter((r) => r.name.toLowerCase().includes(filter.toLowerCase()))
+    : allRoles;
+
+  // Unassigned roles shown in the dropdown (already-assigned ones are shown
+  // in the chips above and can be removed from there)
+  const available = filtered.filter((r) => !assignedIds.has(r.id));
+
+  async function toggle(roleId: string, currentlyAssigned: boolean) {
+    if (!userId) return;
+    setBusy(roleId);
+    try {
+      const res = await fetch(`/api/staff-roles/${roleId}/assign`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ userId, assign: !currentlyAssigned }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) { showToast(json.error ?? "Failed.", false); return; }
+      showToast(currentlyAssigned ? "Role removed." : "Role assigned.", true);
+      setOpen(false);
+      setFilter("");
+      onMutate();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (!userId) return null;
+
+  return (
+    <div className="bg-white border border-line rounded-xl p-5 space-y-3">
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <ShieldPlus className="h-4 w-4 text-teal" />
+        <h3 className="text-xs font-semibold text-slate uppercase tracking-wide">
+          Additional roles
+        </h3>
+      </div>
+
+      {/* Toast */}
+      {toast && (
+        <div className={`rounded-lg px-3 py-2 text-xs font-medium
+          ${toast.ok
+            ? "bg-success-bg text-success border border-success/20"
+            : "bg-danger-bg text-danger border border-danger/20"}`}>
+          {toast.msg}
+        </div>
+      )}
+
+      {/* Assigned role chips */}
+      {assigned.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {assigned.map((role) => (
+            <span key={role.id}
+              className="inline-flex items-center gap-1 rounded-full
+                         bg-teal/10 border border-teal/20 text-teal
+                         pl-2.5 pr-1 py-0.5 text-xs font-medium">
+              {role.name}
+              <button
+                onClick={() => toggle(role.id, true)}
+                disabled={busy === role.id}
+                title="Remove role"
+                className="flex items-center justify-center w-4 h-4 rounded-full
+                           hover:bg-danger/20 hover:text-danger transition-colors
+                           disabled:opacity-40">
+                {busy === role.id
+                  ? <span className="text-[10px] leading-none">…</span>
+                  : <XIcon className="h-3 w-3" />}
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Dropdown trigger + list */}
+      <div ref={containerRef} className="relative">
+        {/* Trigger button */}
+        <button
+          type="button"
+          onClick={() => { setOpen((v) => !v); setFilter(""); }}
+          disabled={loading || allRoles.length === 0}
+          className="w-full flex items-center justify-between gap-2 h-9 px-3
+                     rounded-lg border border-line text-sm bg-paper
+                     hover:border-teal/40 focus:outline-none focus:ring-2 focus:ring-teal/30
+                     disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+          <span className="text-slate/60 text-sm">
+            {loading ? "Loading roles…" : "Assign a role…"}
+          </span>
+          <Search className="h-3.5 w-3.5 text-slate/40 shrink-0" />
+        </button>
+
+        {/* Dropdown panel */}
+        {open && (
+          <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-50
+                          bg-white border border-line rounded-xl shadow-lg
+                          overflow-hidden">
+            {/* Inline filter input */}
+            <div className="px-2 pt-2 pb-1 border-b border-line">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5
+                                   text-slate/40 pointer-events-none" />
+                <input
+                  autoFocus
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  placeholder="Filter roles…"
+                  className="w-full h-8 pl-8 pr-3 text-sm text-ink bg-paper rounded-lg
+                             border border-line focus:outline-none focus:ring-2 focus:ring-teal/30"
+                />
+                {filter && (
+                  <button onClick={() => setFilter("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate hover:text-ink">
+                    <XIcon className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Scrollable role list — max 5 rows visible */}
+            <div className="overflow-y-auto max-h-[220px]">
+              {available.length === 0 ? (
+                <p className="px-4 py-3 text-xs text-slate text-center">
+                  {filter ? `No roles match "${filter}"` : "All roles already assigned"}
+                </p>
+              ) : (
+                available.map((role) => (
+                  <button
+                    key={role.id}
+                    type="button"
+                    onClick={() => toggle(role.id, false)}
+                    disabled={busy === role.id}
+                    className="w-full flex items-start gap-3 px-4 py-2.5 text-left
+                               border-b border-line/50 last:border-0
+                               hover:bg-teal-50/50 transition-colors disabled:opacity-40">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-ink truncate">{role.name}</p>
+                      {role.description && (
+                        <p className="text-[10px] text-slate truncate mt-0.5">
+                          {role.description}
+                        </p>
+                      )}
+                    </div>
+                    <span className="shrink-0 text-[10px] font-medium text-teal mt-0.5">
+                      {busy === role.id ? "…" : "Assign"}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {assigned.length === 0 && allRoles.length > 0 && (
+        <p className="text-[11px] text-slate/55">
+          Assign a role to grant extra module access on top of this
+          teacher&apos;s built-in class and subject permissions.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -109,12 +347,10 @@ export default function StaffProfileDrawer({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!open || !staffId) return;
-    setStaff(null);
+  function fetchStaff() {
+    if (!staffId) return;
     setError(null);
     setLoading(true);
-
     fetch(`/api/staff/${staffId}`)
       .then((r) => r.json())
       .then((d) => {
@@ -123,6 +359,13 @@ export default function StaffProfileDrawer({
       })
       .catch((e) => setError(e.message || "Couldn't load staff profile."))
       .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    if (!open || !staffId) return;
+    setStaff(null);
+    fetchStaff();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, staffId]);
 
   const { label: roleLabel, variant: roleVariant } = staff ? roleBadge(staff) : { label: "", variant: "default" as const };
@@ -186,6 +429,18 @@ export default function StaffProfileDrawer({
                   </span>
                 }
               />
+
+              {staff.designation && (
+                <InfoRow
+                  icon={<ShieldCheck className="h-3.5 w-3.5" />}
+                  label="Designation"
+                  value={
+                    <span className="inline-flex items-center rounded-full bg-teal/10 text-teal text-xs font-medium px-2.5 py-0.5">
+                      {staff.designation}
+                    </span>
+                  }
+                />
+              )}
 
               {staff.email && (
                 <InfoRow
@@ -305,6 +560,11 @@ export default function StaffProfileDrawer({
                 ))}
               </div>
             </div>
+          )}
+
+          {/* ── Role assignment (principal only) ── */}
+          {staff.user && (
+            <RoleAssignmentCard staff={staff} onMutate={fetchStaff} />
           )}
 
           {/* ── Quick links ── */}

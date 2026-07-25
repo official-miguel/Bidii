@@ -138,11 +138,10 @@ export default async function TeacherMarksheetPage({
   }
 
   // ── 8-4-4 path ───────────────────────────────────────────────────────────
+  // Fetch all subjects viewable by this teacher — ExamFilterBar filters by
+  // applicableForms internally, so no pre-filtering by form here.
   const allSubjects = await prisma.subject.findMany({
-    where: {
-      schoolId: user.schoolId,
-      ...(selectedClass ? { applicableForms: { has: selectedClass.form } } : {}),
-    },
+    where: { schoolId: user.schoolId },
     orderBy: { name: "asc" },
     select: { id: true, name: true, code: true, applicableForms: true, departmentId: true },
   });
@@ -154,7 +153,7 @@ export default async function TeacherMarksheetPage({
     (s) => canViewMarksheet(actor, s.id) || deptSubjectIds.has(s.id)
   );
 
-  const defaultSubjectId = searchParams.subjectId ?? viewableSubjects[0]?.id ?? "";
+  const defaultSubjectId = searchParams.subjectId ?? "";
 
   // Can EDIT: auth844 canEnterMarks, OR HOD of the subject's department
   const editAllowed = defaultSubjectId
@@ -189,7 +188,7 @@ export default async function TeacherMarksheetPage({
         </p>
       </div>
       <MarksheetGrid
-        classes={classes.map((c) => ({ id: c.id, name: c.name }))}
+        classes={classes.map((c) => ({ id: c.id, name: c.name, form: c.form }))}
         subjects={viewableSubjects}
         defaultClassId={defaultClassId}
         defaultSubjectId={defaultSubjectId}

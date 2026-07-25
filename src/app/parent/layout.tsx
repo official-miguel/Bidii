@@ -21,7 +21,7 @@ export default async function ParentLayout({
 
   const school = await prisma.school.findUnique({
     where: { id: user.schoolId },
-    select: { name: true },
+    select: { name: true, motto: true },
   });
 
   const roleLabel = user.role === "STUDENT" ? "Student" : "Parent";
@@ -32,6 +32,7 @@ export default async function ParentLayout({
       roleLabel={roleLabel}
       userEmail={user.email}
       schoolName={school?.name}
+      motto={school?.motto}
       visibleHubs={PARENT_HUBS}
     >
       {children}

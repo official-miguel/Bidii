@@ -25,6 +25,8 @@ import ContextNavigation from "@/components/ContextNavigation";
 import WorkspaceToolbar from "@/components/workspace/WorkspaceToolbar";
 import { Pencil, ExternalLink, UserPlus, UserMinus } from "lucide-react";
 import RemoveStudentDialog, { type RemoveStudentTarget } from "@/components/students/RemoveStudentDialog";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
+import ClassWorkspaceDrawer from "@/components/entity-drawers/ClassWorkspaceDrawer";
 
 // ---------------------------------------------------------------------------
 // Debounce hook
@@ -45,11 +47,14 @@ function useDebounced<T>(value: T, ms: number): T {
 
 type SchoolClass = { id: string; name: string; form: number; frameworkType?: "EIGHT_FOUR_FOUR" | "CBC" | "CBE" };
 type Subject     = { id: string; name: string; code: string; type: "CORE" | "ELECTIVE"; applicableForms: number[] };
+type SchoolPolicy = { genderPolicy: string; boardingType: string; autoAllocateDorms: boolean };
 type Student     = {
   id: string;
   fullName: string;
   admissionNumber: string;
   dateOfBirth: string | null;
+  gender: string | null;
+  boardingStatus: string | null;
   parentName: string | null;
   parentContact: string | null;
   classId: string;
@@ -100,6 +105,7 @@ type StudentRowProps = {
   onEdit: (s: Student) => void;
   onRemove: (s: Student) => void;
   onNavigate: (id: string) => void;
+  onOpenClass: (id: string) => void;
 };
 
 const StudentRow = React.memo(function StudentRow({
@@ -109,6 +115,7 @@ const StudentRow = React.memo(function StudentRow({
   onEdit,
   onRemove,
   onNavigate,
+  onOpenClass,
 }: StudentRowProps) {
   const electives = s.electiveIds
     .map((id) => subjectMap.get(id)?.code)
@@ -144,10 +151,18 @@ const StudentRow = React.memo(function StudentRow({
 
       {/* Class + framework badge */}
       <td className="px-5 py-3.5">
-        <div className="flex items-center gap-1.5">
-          <span className="text-sm text-ink">{cls?.name ?? "—"}</span>
-          {cls && <FrameworkChip type={cls.frameworkType} />}
-        </div>
+        {cls ? (
+          <button
+            type="button"
+            onClick={() => onOpenClass(cls.id)}
+            className="flex items-center gap-1.5 group/cls text-left"
+          >
+            <span className="text-sm text-ink group-hover/cls:text-teal transition-colors">{cls.name}</span>
+            <FrameworkChip type={cls.frameworkType} />
+          </button>
+        ) : (
+          <span className="text-sm text-ink">—</span>
+        )}
       </td>
 
       {/* Electives */}
@@ -199,6 +214,7 @@ type MobileStudentCardProps = {
   onNavigate: (id: string) => void;
   onEdit: (s: Student) => void;
   onRemove: (s: Student) => void;
+  onOpenClass: (id: string) => void;
 };
 
 const MobileStudentCard = React.memo(function MobileStudentCard({
@@ -208,6 +224,7 @@ const MobileStudentCard = React.memo(function MobileStudentCard({
   onNavigate,
   onEdit,
   onRemove,
+  onOpenClass,
 }: MobileStudentCardProps) {
   return (
     <div className="rounded-xl border border-line bg-white shadow-xs overflow-hidden">
@@ -246,8 +263,18 @@ const MobileStudentCard = React.memo(function MobileStudentCard({
             Class
           </dt>
           <dd className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-sm text-ink">{cls?.name ?? "—"}</span>
-            {cls && <FrameworkChip type={cls.frameworkType} />}
+            {cls ? (
+              <button
+                type="button"
+                onClick={() => onOpenClass(cls.id)}
+                className="flex items-center gap-1.5 flex-wrap text-left"
+              >
+                <span className="text-sm text-ink hover:text-teal transition-colors">{cls.name}</span>
+                <FrameworkChip type={cls.frameworkType} />
+              </button>
+            ) : (
+              <span className="text-sm text-ink">—</span>
+            )}
           </dd>
         </div>
         {electives.length > 0 && (
@@ -340,10 +367,44 @@ export default function StudentsPage() {
   const [modalOpen, setModalOpen]     = useState(false);
   const [editing, setEditing]         = useState<Student | null>(null);
   const [error, setError]             = useState<string | null>(null);
-  const [selectedClassId, setSelectedClassId] = useState("");
-  const [selectedForm, setSelectedForm]       = useState("");
-  const [selectedElectives, setSelectedElectives] = useState<string[]>([]);
+
+  // Draft for the "new student" form — only the controlled-state fields
+  // (text inputs use defaultValue/FormData and survive within the session).
+  // Key is "new" for creates; edit drafts are scoped to student id.
+  const newStudentDraftKey = editing ? `bidii_draft_student_${editing.id}` : "bidii_draft_student_new";
+  const [studentDraft, setStudentDraft, clearStudentDraft] = useFormDraft(newStudentDraftKey, {
+    selectedForm:     "",
+    selectedClassId:  "",
+    selectedGender:   "",
+    selectedBoarding: "",
+    selectedElectives: [] as string[],
+  });
+
+  const [selectedClassId, setSelectedClassId] = useState(studentDraft.selectedClassId);
+  const [selectedForm, setSelectedForm]       = useState(studentDraft.selectedForm);
+  const [selectedElectives, setSelectedElectives] = useState<string[]>(studentDraft.selectedElectives);
   const [nextAdmissionNumber, setNextAdmissionNumber] = useState<string | null>(null);
+  const [schoolPolicy, setSchoolPolicy] = useState<SchoolPolicy>({
+    genderPolicy: "MIXED",
+    boardingType: "DAY_AND_BOARDING",
+    autoAllocateDorms: false,
+  });
+  const [selectedGender, setSelectedGender]         = useState(studentDraft.selectedGender);
+  const [selectedBoarding, setSelectedBoarding]     = useState(studentDraft.selectedBoarding);
+
+  // Persist controlled modal fields on every change
+  useEffect(() => {
+    if (!modalOpen) return;
+    setStudentDraft({ selectedForm, selectedClassId, selectedGender, selectedBoarding, selectedElectives });
+  }, [selectedForm, selectedClassId, selectedGender, selectedBoarding, selectedElectives, modalOpen, setStudentDraft]);
+
+  // Fetch school policy once on mount
+  useEffect(() => {
+    fetch("/api/school/settings")
+      .then((r) => r.ok ? r.json() : null)
+      .then((d: SchoolPolicy | null) => { if (d) setSchoolPolicy(d); })
+      .catch(() => {});
+  }, []);
 
   // ── Search / filter ───────────────────────────────────────────────────────
   const [search, setSearch]           = useState("");
@@ -384,15 +445,17 @@ export default function StudentsPage() {
     () => rawStudents
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .filter((s: any) => !s.archivedAt)
-      .map((s) => ({
+      .map((s: any) => ({
         id:              s.id,
         fullName:        s.fullName,
         admissionNumber: s.admissionNumber,
         dateOfBirth:     s.dateOfBirth,
+        gender:          s.gender ?? null,
+        boardingStatus:  s.boardingStatus ?? null,
         parentName:      s.parentName,
         parentContact:   s.parentContact,
         classId:         s.classId,
-        electiveIds:     [],
+        electiveIds:     (s.electives ?? []).map((e: { subjectId: string }) => e.subjectId),
       })),
     [rawStudents]
   );
@@ -424,13 +487,22 @@ export default function StudentsPage() {
     setSelectedForm("");
     setSelectedElectives([]);
     setError(null);
+    // Pre-set gender from school policy
+    setSelectedGender(
+      schoolPolicy.genderPolicy === "BOYS_ONLY" ? "MALE" :
+      schoolPolicy.genderPolicy === "GIRLS_ONLY" ? "FEMALE" : ""
+    );
+    // Pre-set boarding from school policy
+    setSelectedBoarding(
+      schoolPolicy.boardingType === "BOARDING_ONLY" ? "BOARDING" :
+      schoolPolicy.boardingType === "DAY_ONLY" ? "DAY" : ""
+    );
     fetch("/api/students/next-admission-number")
       .then((r) => r.json())
       .then((d) => setNextAdmissionNumber(d.nextAdmissionNumber ? String(d.nextAdmissionNumber) : null))
       .catch(() => setNextAdmissionNumber(null));
     setModalOpen(true);
-  }, []);
-
+  }, [schoolPolicy]);
   const openEdit = useCallback(async (s: Student) => {
     let electiveIds: string[] = [];
     try {
@@ -443,6 +515,8 @@ export default function StudentsPage() {
     setEditing({ ...s, electiveIds });
     setSelectedClassId(s.classId);
     setSelectedElectives(electiveIds);
+    setSelectedGender(s.gender ?? "");
+    setSelectedBoarding(s.boardingStatus ?? "");
     setNextAdmissionNumber(null);
     setError(null);
     setModalOpen(true);
@@ -471,6 +545,9 @@ export default function StudentsPage() {
     router.push(`/principal/students/${id}`);
   }, [router]);
 
+  const [drawerClassId, setDrawerClassId] = useState<string | null>(null);
+  const handleOpenClass = useCallback((id: string) => setDrawerClassId(id), []);
+
   const toggleElective = useCallback((id: string) => {
     setSelectedElectives((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
@@ -487,6 +564,8 @@ export default function StudentsPage() {
         fullName:           form.get("fullName") as string,
         dateOfBirth:        (form.get("dateOfBirth") as string) || "",
         classId:            selectedClassId,
+        gender:             selectedGender || null,
+        boardingStatus:     selectedBoarding || null,
         parentName:         (form.get("parentName") as string) || "",
         parentContact:      (form.get("parentContact") as string) || "",
         electiveSubjectIds: selectedElectives,
@@ -504,6 +583,8 @@ export default function StudentsPage() {
         startingAdmissionNumber: (form.get("startingAdmissionNumber") as string) || undefined,
         form:                    selectedForm,
         dateOfBirth:             (form.get("dateOfBirth") as string) || "",
+        gender:                  selectedGender || null,
+        boardingStatus:          selectedBoarding || null,
         parentName:              (form.get("parentName") as string) || "",
         parentContact:           (form.get("parentContact") as string) || "",
         electiveSubjectIds:      selectedElectives,
@@ -519,8 +600,9 @@ export default function StudentsPage() {
     }
 
     setModalOpen(false);
+    clearStudentDraft();
     useStudentsStore.getState().fetch().catch(console.error);
-  }, [editing, selectedClassId, selectedElectives, selectedForm]);
+  }, [editing, selectedClassId, selectedElectives, selectedForm, selectedGender, selectedBoarding]);
 
   // ── Render ────────────────────────────────────────────────────────────────
   const showLoading = storeLoading && students.length === 0;
@@ -618,6 +700,7 @@ export default function StudentsPage() {
                   onNavigate={handleNavigate}
                   onEdit={openEdit}
                   onRemove={openRemove}
+                  onOpenClass={handleOpenClass}
                 />
               );
             })}
@@ -664,6 +747,7 @@ export default function StudentsPage() {
                           onEdit={openEdit}
                           onRemove={openRemove}
                           onNavigate={handleNavigate}
+                          onOpenClass={handleOpenClass}
                         />
                       </tbody>
                     </table>
@@ -692,6 +776,7 @@ export default function StudentsPage() {
                   onNavigate={handleNavigate}
                   onEdit={openEdit}
                   onRemove={openRemove}
+                  onOpenClass={handleOpenClass}
                 />
               );
             })}
@@ -715,6 +800,7 @@ export default function StudentsPage() {
                         onEdit={openEdit}
                         onRemove={openRemove}
                         onNavigate={handleNavigate}
+                        onOpenClass={handleOpenClass}
                       />
                     );
                   })}
@@ -734,14 +820,14 @@ export default function StudentsPage() {
               ? "Update student information, class placement, and elective subjects."
               : "Add a new student to the school register."
           }
-          onClose={() => setModalOpen(false)}
+          onClose={() => { setModalOpen(false); clearStudentDraft(); }}
           size="xl"
           footer={
             <div className="flex flex-col-reverse xs:flex-row xs:justify-end gap-2 xs:gap-3">
               <button
                 type="button"
                 className={`${secondaryButtonClass} w-full xs:w-auto`}
-                onClick={() => setModalOpen(false)}
+                onClick={() => { setModalOpen(false); clearStudentDraft(); }}
               >
                 Cancel
               </button>
@@ -838,6 +924,72 @@ export default function StudentsPage() {
                     </p>
                   </div>
                   <div /> {/* spacer */}
+                </div>
+
+                {/* Gender + Boarding */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Gender */}
+                  <div>
+                    <label className={labelClass}>Gender</label>
+                    {schoolPolicy.genderPolicy !== "MIXED" ? (
+                      <>
+                        <input
+                          readOnly
+                          value={schoolPolicy.genderPolicy === "BOYS_ONLY" ? "Male" : "Female"}
+                          className={`${inputClass} bg-paper cursor-not-allowed`}
+                        />
+                        <p className="text-xs text-slate mt-1.5">
+                          Fixed by the school gender policy.
+                        </p>
+                      </>
+                    ) : (
+                      <select
+                        value={selectedGender}
+                        onChange={(e) => setSelectedGender(e.target.value)}
+                        className={inputClass}
+                      >
+                        <option value="">— Select —</option>
+                        <option value="MALE">Male</option>
+                        <option value="FEMALE">Female</option>
+                      </select>
+                    )}
+                  </div>
+
+                  {/* Boarding status */}
+                  {schoolPolicy.boardingType !== "DAY_ONLY" && (
+                    <div>
+                      <label className={labelClass}>Boarding status</label>
+                      {schoolPolicy.boardingType === "BOARDING_ONLY" ? (
+                        <>
+                          <input
+                            readOnly
+                            value="Boarding"
+                            className={`${inputClass} bg-paper cursor-not-allowed`}
+                          />
+                          <p className="text-xs text-slate mt-1.5">
+                            All students board — set by school policy.
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <select
+                            value={selectedBoarding}
+                            onChange={(e) => setSelectedBoarding(e.target.value)}
+                            className={inputClass}
+                          >
+                            <option value="">— Select —</option>
+                            <option value="DAY">Day</option>
+                            <option value="BOARDING">Boarding</option>
+                          </select>
+                          {schoolPolicy.autoAllocateDorms && selectedBoarding === "BOARDING" && (
+                            <p className="text-xs text-success mt-1.5 font-medium">
+                              ✓ Dorm will be auto-assigned on registration.
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1006,6 +1158,13 @@ export default function StudentsPage() {
           onSuccess={handleRemoveSuccess}
         />
       )}
+
+      {/* ── Class workspace drawer ── */}
+      <ClassWorkspaceDrawer
+        classId={drawerClassId}
+        open={!!drawerClassId}
+        onClose={() => setDrawerClassId(null)}
+      />
     </div>
   );
 }

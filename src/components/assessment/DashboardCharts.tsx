@@ -1,21 +1,17 @@
 "use client";
 
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, ReferenceLine,
+} from "recharts";
 import { gradeColour, ALL_GRADES, type KcseGrade } from "@/lib/assessment/grading844";
-import { ErrorBanner, EmptyState, inputClass, labelClass } from "@/components/ui";
-import AssessmentAiPanel from "@/components/assessment/AssessmentAiPanel";
+import { ErrorBanner, EmptyState } from "@/components/ui";
+import ExamFilterBar, { type FilterSelection } from "@/components/assessment/ExamFilterBar";
 
 // ---------------------------------------------------------------------------
 // Types (mirrors the /api/assessments/dashboard response shape)
 // ---------------------------------------------------------------------------
-
-type Period = {
-  id: string;
-  name: string;
-  academicYear: string;
-  term: number | null;
-  isCurrent?: boolean;
-};
 
 type SubjectPerformance = {
   subject: { id: string; name: string; code: string };
@@ -36,15 +32,35 @@ type ClassComparison = {
   studentCount: number;
 };
 
+// Per-student subject scorecard (loaded when a single class is selected)
+type ScorecardSubject = { id: string; name: string; code: string };
+type ScorecardCell    = { pct: number | null; grade: KcseGrade | null; points: number | null };
+type ScorecardRow     = {
+  admissionNumber: string;
+  fullName: string;
+  className: string;          // populated for form-wide view
+  subjects: ScorecardCell[];
+  meanPoints: number | null;
+  meanGrade: KcseGrade | null;
+};
+type ScorecardData    = {
+  scopeLabel: string;         // e.g. "1 East" or "Form 1"
+  subjects: ScorecardSubject[];
+  rows: ScorecardRow[];
+  meanFlagThreshold: number | null;
+  multiClass: boolean;        // true when form filter used (no classId)
+};
+
 type TrendEntry = {
-  period: { id: string; name: string; academicYear: string };
+  period: { id: string; name: string; academicYear: string; term?: number | null };
   meanPoints: number | null;
 };
 
 type HeatmapRow = {
   subjectId: string;
   subjectName: string;
-  classes: { classId: string; className: string; meanScore: number | null }[];
+  classes: { classId: string; className: string; meanScore: number | null; meanPoints: number | null }[];
+  totalMeanPoints: number | null;
 };
 
 type DashboardData = {
@@ -64,6 +80,13 @@ type DashboardData = {
   classComparison: ClassComparison[];
   trendData: TrendEntry[];
   subjectClassHeatmap: HeatmapRow[];
+  heatmapClassSummary: {
+    classId: string;
+    className: string;
+    meanScore: number | null;
+    meanPoints: number | null;
+  }[];
+  heatmapTotalSummary: { meanScore: number | null; meanPoints: number } | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -72,7 +95,7 @@ type DashboardData = {
 
 type Props = {
   classes: { id: string; name: string; form: number }[];
-  subjects: { id: string; name: string }[];
+  subjects: { id: string; name: string; applicableForms: number[] }[];
 };
 
 // ---------------------------------------------------------------------------
@@ -97,7 +120,6 @@ function HBar({
           style={{ width: `${pct}%` }}
         />
       </div>
-      <span className="text-xs tabular-nums text-slate w-8 text-right">{value}</span>
     </div>
   );
 }
@@ -174,16 +196,33 @@ function heatColour(score: number | null): string {
   return "bg-red-100 text-red-800";
 }
 
+// Heat colour keyed on KCSE points (1–12 scale).
+function heatColourPts(pts: number | null): string {
+  if (pts === null) return "bg-paper text-slate";
+  if (pts >= 9)  return "bg-green-100 text-green-800";  // B and above
+  if (pts >= 7)  return "bg-blue-100 text-blue-800";    // C+ / B-
+  if (pts >= 5)  return "bg-amber-100 text-amber-800";  // C / C-
+  if (pts >= 3)  return "bg-orange-100 text-orange-800"; // D / D+
+  return "bg-red-100 text-red-800";                      // D- / E
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
 export default function DashboardCharts({ classes, subjects }: Props) {
-  const [periods, setPeriods] = useState<Period[]>([]);
-  const [periodId, setPeriodId] = useState("");
-  const [classId, setClassId] = useState("");
+  // ── Filter state — driven entirely by ExamFilterBar ───────────────────────
+  const [periodId,  setPeriodId]  = useState("");
+  const [classId,   setClassId]   = useState("");
   const [subjectId, setSubjectId] = useState("");
-  const [form, setForm] = useState("");
+  const [form,      setForm]      = useState(0);
+
+  const handleFilterChange = useCallback((sel: FilterSelection) => {
+    setPeriodId(sel.periodId);
+    setClassId(sel.classId);
+    setSubjectId(sel.subjectId);
+    setForm(sel.form);
+  }, []);
 
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -202,23 +241,10 @@ export default function DashboardCharts({ classes, subjects }: Props) {
   const [drillLoading, setDrillLoading] = useState(false);
   const [drillError, setDrillError] = useState<string | null>(null);
 
-  // ---- Load periods on mount ----
-  useEffect(() => {
-    async function load() {
-      try {
-        const res = await fetch("/api/assessments/periods");
-        const json = await res.json();
-        if (res.ok && json.periods?.length) {
-          setPeriods(json.periods);
-          const current = json.periods.find((p: Period) => p.isCurrent) ?? json.periods[0];
-          setPeriodId(current.id);
-        }
-      } catch {
-        // silently handled below
-      }
-    }
-    load();
-  }, []);
+  // ---- Per-class scorecard (loaded when a single class is selected) ----
+  const [scorecard, setScorecard]           = useState<ScorecardData | null>(null);
+  const [scorecardLoading, setScorecardLoading] = useState(false);
+  const [scorecardError, setScorecardError]     = useState<string | null>(null);
 
   // ---- Load dashboard data whenever filters change ----
   useEffect(() => {
@@ -227,26 +253,77 @@ export default function DashboardCharts({ classes, subjects }: Props) {
     const params = new URLSearchParams({ periodId });
     if (classId) params.set("classId", classId);
     if (subjectId) params.set("subjectId", subjectId);
-    if (form) params.set("form", form);
+    // When classId is empty (All streams) and form is set, pass form to API.
+    if (!classId && form) params.set("form", String(form));
+
+    const controller = new AbortController();
 
     setLoading(true);
     setError(null);
-    setData(null);
+    // Do NOT wipe data here — keep the previous result visible while loading
+    // so the page doesn't flash empty on every filter change.
     setSelectedGrade(null);
     setDrillStudents([]);
 
-    fetch(`/api/assessments/dashboard?${params}`)
-      .then((r) => r.json())
-      .then((json) => {
-        if (json.error) {
-          setError(json.error);
-        } else {
-          setData(json);
+    fetch(`/api/assessments/dashboard?${params}`, { signal: controller.signal, cache: "no-store" })
+      .then(async (r) => {
+        const text = await r.text();
+        let json: Record<string, unknown>;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          throw new Error(`Server error ${r.status}: ${text.slice(0, 200)}`);
         }
+        if (!r.ok || json.error) {
+          throw new Error(String(json.error ?? `HTTP ${r.status}`));
+        }
+        return json;
       })
-      .catch(() => setError("Couldn't load dashboard data."))
+      .then((json) => {
+        setData(json as DashboardData);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof Error && err.name === "AbortError") return; // stale request, ignore
+        setError(err instanceof Error ? err.message : "Couldn't load dashboard data.");
+      })
       .finally(() => setLoading(false));
+
+    return () => controller.abort();
   }, [periodId, classId, subjectId, form]);
+
+  // ---- Load per-class scorecard when a class or form is selected ----
+  useEffect(() => {
+    if (!periodId || (!classId && !form)) {
+      setScorecard(null);
+      return;
+    }
+    const controller = new AbortController();
+    setScorecardLoading(true);
+    setScorecardError(null);
+
+    const p = new URLSearchParams({ periodId });
+    if (classId) p.set("classId", classId);
+    else if (form) p.set("form", form);
+
+    fetch(`/api/assessments/dashboard/class-scorecard?${p}`, { signal: controller.signal, cache: "no-store" })
+      .then(async (r) => {
+        const text = await r.text();
+        let json: Record<string, unknown>;
+        try { json = JSON.parse(text); }
+        catch { throw new Error(`Server error ${r.status}`); }
+        if (!r.ok || json.error) throw new Error(String(json.error ?? `HTTP ${r.status}`));
+        return json as unknown as ScorecardData;
+      })
+      .then((d) => { setScorecard(d); setScorecardError(null); })
+      .catch((err: unknown) => {
+        if (err instanceof Error && err.name === "AbortError") return;
+        setScorecardError(err instanceof Error ? err.message : "Couldn't load scorecard.");
+      })
+      .finally(() => setScorecardLoading(false));
+
+    return () => controller.abort();
+  }, [periodId, classId, form]);
 
   // ---- Grade bar click ----
   async function handleGradeClick(grade: KcseGrade) {
@@ -264,8 +341,8 @@ export default function DashboardCharts({ classes, subjects }: Props) {
       const params = new URLSearchParams({ periodId, grade });
       if (classId) params.set("classId", classId);
       if (subjectId) params.set("subjectId", subjectId);
-      if (form) params.set("form", form);
-      const res = await fetch(`/api/assessments/dashboard/grade-students?${params}`);
+      if (!classId && form) params.set("form", String(form));
+      const res = await fetch(`/api/assessments/dashboard/grade-students?${params}`, { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) { setDrillError(json.error ?? "Couldn't load students."); }
       else { setDrillStudents(json.students ?? []); }
@@ -280,11 +357,6 @@ export default function DashboardCharts({ classes, subjects }: Props) {
   const gradeDist = data?.gradeDistribution ?? [];
   const maxGradeCount = Math.max(...gradeDist.map((g) => g.count), 1);
   const totalStudents = data?.summary.studentCount ?? 0;
-
-  const trendMax = Math.max(
-    ...(data?.trendData.map((t) => t.meanPoints ?? 0) ?? []),
-    1
-  );
 
   const sortedSubjectPerformance = useMemo(
     () => data ? [...data.subjectPerformance].sort((a, b) => (b.meanScore ?? 0) - (a.meanScore ?? 0)) : [],
@@ -302,90 +374,48 @@ export default function DashboardCharts({ classes, subjects }: Props) {
       handlers[grade] = () => handleGradeClick(grade);
     }
     return handlers;
-    // handleGradeClick is defined inside the component and stable across renders
-    // since it only reads from state values that change data anyway
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodId, classId, subjectId, form]);
 
   return (
     <div>
-      {/* ---- Filters ---- */}
-      <div className="flex flex-wrap items-end gap-4 mb-6">
-        {periods.length > 0 && (
-          <div>
-            <label className={labelClass}>Period</label>
-            <select
-              className={inputClass}
-              value={periodId}
-              onChange={(e) => setPeriodId(e.target.value)}
-            >
-              {periods.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} — {p.academicYear}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        <div>
-          <label className={labelClass}>Class</label>
-          <select
-            className={inputClass}
-            value={classId}
-            onChange={(e) => setClassId(e.target.value)}
-          >
-            <option value="">All classes</option>
-            {classes.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className={labelClass}>Subject</label>
-          <select
-            className={inputClass}
-            value={subjectId}
-            onChange={(e) => setSubjectId(e.target.value)}
-          >
-            <option value="">All subjects</option>
-            {subjects.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className={labelClass}>Form</label>
-          <select
-            className={inputClass}
-            value={form}
-            onChange={(e) => setForm(e.target.value)}
-          >
-            <option value="">All forms</option>
-            {[1, 2, 3, 4].map((f) => (
-              <option key={f} value={f}>
-                Form {f}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
+      {/* ---- Filter bar ---- */}
+      <ExamFilterBar
+        classes={classes}
+        subjects={subjects}
+        hideSubject={true}
+        onChange={handleFilterChange}
+      />
 
       {error && <ErrorBanner message={error} />}
 
-      {loading && (
-        <p className="text-slate text-sm">Loading analytics…</p>
+      {/* ── First load skeleton ── */}
+      {loading && !data && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="bg-white border border-line rounded-xl p-5 space-y-3">
+              <div className="h-4 w-32 rounded bg-line animate-pulse" />
+              <div className="h-24 rounded-lg bg-line animate-pulse" />
+              <div className="h-3 w-48 rounded bg-line animate-pulse" />
+            </div>
+          ))}
+        </div>
       )}
 
-      {!loading && data && totalStudents === 0 && (
+      {/* ── Filter-change pill — shown over existing data while reloading ── */}
+      {loading && data && (
+        <div className="flex items-center gap-1.5 mb-3">
+          <span className="w-2 h-2 rounded-full bg-teal animate-pulse" />
+          <span className="text-xs text-slate">Loading…</span>
+        </div>
+      )}
+
+      {data && totalStudents === 0 && !loading && (
         <EmptyState message="No marks entered for this period yet." />
       )}
 
-      {!loading && data && totalStudents > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      {data && totalStudents > 0 && (
+        <div className={`grid grid-cols-1 md:grid-cols-2 gap-5 transition-opacity duration-200 ${loading ? "opacity-50 pointer-events-none" : "opacity-100"}`}>
 
           {/* ---- Summary card ---- */}
           <Section title="Overall summary">
@@ -508,142 +538,323 @@ export default function DashboardCharts({ classes, subjects }: Props) {
             </div>
           )}
 
-          {/* ---- Subject performance ---- */}
-          <Section title="Subject mean grades">
-            {data.subjectPerformance.length === 0 ? (
-              <p className="text-sm text-slate">No subject data yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {sortedSubjectPerformance.map((sp) => {
-                    const { bg, text } =
-                      sp.meanGrade ? gradeColour(sp.meanGrade) : { bg: "bg-paper", text: "text-slate" };
-                    return (
-                      <div key={sp.subject.id} className="flex items-center gap-3">
-                        <span
-                          className={`inline-flex items-center justify-center rounded w-7 h-6 text-xs font-semibold shrink-0 ${bg} ${text}`}
-                        >
-                          {sp.meanGrade ?? "—"}
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-ink truncate">
-                            {sp.subject.name}
-                          </p>
-                          <HBar
-                            value={Math.round(sp.meanScore ?? 0)}
-                            max={100}
-                            colour="bg-royal"
-                          />
-                        </div>
-                        <span className="text-xs tabular-nums text-slate w-10 text-right shrink-0">
-                          {sp.meanScore !== null ? `${sp.meanScore.toFixed(1)}%` : "—"}
-                        </span>
-                      </div>
-                    );
-                  })}
-              </div>
-            )}
-          </Section>
-
-          {/* ---- Class comparison ---- */}
-          <Section title="Class comparison">
-            {data.classComparison.length === 0 ? (
-              <p className="text-sm text-slate">No class data yet.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-line text-slate text-left">
-                      <th className="pb-2 font-medium">Class</th>
-                      <th className="pb-2 font-medium text-center">Students</th>
-                      <th className="pb-2 font-medium text-center">Mean pts</th>
-                      <th className="pb-2 font-medium text-center">Grade</th>
-                      <th className="pb-2 font-medium text-center text-success">A/A-</th>
-                      <th className="pb-2 font-medium text-center text-danger">E</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedClassComparison.map((cc) => {
-                        const { bg, text } =
-                          cc.meanGrade
-                            ? gradeColour(cc.meanGrade)
-                            : { bg: "bg-paper", text: "text-slate" };
+          {/* ---- Class comparison / per-student scorecard ---- */}
+          {(classId || form) ? (
+            <Section title={`${form && !classId ? "Form scorecard" : "Class scorecard"}${scorecard ? ` — ${scorecard.scopeLabel}` : ""}`}>
+              {scorecardLoading && !scorecard && (
+                <div className="space-y-2">
+                  {[...Array(5)].map((_, i) => (
+                    <div key={i} className="h-7 rounded bg-line animate-pulse" style={{ opacity: 1 - i * 0.15 }} />
+                  ))}
+                </div>
+              )}
+              {scorecardLoading && scorecard && (
+                <div className="flex items-center gap-1.5 mb-2">
+                  <span className="w-2 h-2 rounded-full bg-teal animate-pulse" />
+                  <span className="text-xs text-slate">Loading…</span>
+                </div>
+              )}
+              {scorecardError && (
+                <p className="text-xs text-danger">{scorecardError}</p>
+              )}
+              {!scorecardLoading && !scorecardError && scorecard && scorecard.rows.length === 0 && (
+                <p className="text-sm text-slate">No students found in this class.</p>
+              )}
+              {scorecard && scorecard.rows.length > 0 && scorecard.subjects.length === 0 && (
+                <p className="text-sm text-slate">No marks entered for this class yet.</p>
+              )}
+              {scorecard && scorecard.rows.length > 0 && scorecard.subjects.length > 0 && (
+                <div className="overflow-x-auto overflow-y-auto" style={{ maxHeight: 420 }}>
+                  <table className="text-xs w-full border-collapse">
+                    <thead className="sticky top-0 z-30">
+                      <tr className="border-b-2 border-line text-slate text-left bg-white">
+                        <th className="pb-2 font-medium pr-1 text-center sticky left-0 z-20 bg-white" style={{ minWidth: 24 }}>#</th>
+                        <th className="pb-2 font-medium pr-4 whitespace-nowrap sticky z-20 bg-white shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]" style={{ left: 24, minWidth: 140 }}>
+                          Student
+                        </th>
+                        {scorecard.multiClass && (
+                          <th className="pb-2 font-medium text-center px-2 whitespace-nowrap">Class</th>
+                        )}
+                        {scorecard.subjects.map((s) => (
+                          <th key={s.id} className="pb-2 font-medium text-center px-1 whitespace-nowrap" title={s.name}>
+                            {s.code || s.name.slice(0, 6)}
+                          </th>
+                        ))}
+                        <th className="pb-2 font-medium text-center px-1 border-l border-line whitespace-nowrap">Mean pts</th>
+                        <th className="pb-2 font-medium text-center px-1 whitespace-nowrap">Grade</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scorecard.rows.map((row, idx) => {
+                        const { bg, text } = row.meanGrade ? gradeColour(row.meanGrade) : { bg: "bg-paper", text: "text-slate" };
+                        const isFlagged = scorecard.meanFlagThreshold !== null
+                          && row.meanPoints !== null
+                          && row.meanPoints < scorecard.meanFlagThreshold;
                         return (
-                          <tr
-                            key={cc.schoolClass.id}
-                            className="border-b border-line last:border-0"
-                          >
-                            <td className="py-1.5 pr-2 font-medium text-ink">
-                              {cc.schoolClass.name}
+                          <tr key={row.admissionNumber} className={`border-b border-line last:border-0 group ${isFlagged ? "bg-red-50 hover:bg-red-100" : "hover:bg-slate-50"}`}>
+                            <td className={`py-1 pr-1 text-center tabular-nums sticky left-0 z-10 ${isFlagged ? "bg-red-50 group-hover:bg-red-100 text-red-500" : "bg-white group-hover:bg-slate-50 text-slate"}`} style={{ minWidth: 24 }}>
+                              {idx + 1}
                             </td>
-                            <td className="py-1.5 text-center text-slate">
-                              {cc.studentCount}
-                            </td>
-                            <td className="py-1.5 text-center tabular-nums text-ink">
-                              {cc.meanPoints?.toFixed(2) ?? "—"}
-                            </td>
-                            <td className="py-1.5 text-center">
-                              <span
-                                className={`inline-block rounded px-1 py-0.5 text-[11px] font-semibold ${bg} ${text}`}
-                              >
-                                {cc.meanGrade ?? "—"}
+                            <td className={`py-1 pr-4 font-medium whitespace-nowrap sticky z-10 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)] ${isFlagged ? "bg-red-50 group-hover:bg-red-100 text-red-700" : "bg-white group-hover:bg-slate-50 text-ink"}`} style={{ left: 24, minWidth: 140 }}>
+                              <span className="flex items-center gap-1">
+                                {isFlagged && <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />}
+                                {row.fullName}
                               </span>
+                              <span className={`block text-[10px] font-normal ${isFlagged ? "text-red-400" : "text-slate"}`}>{row.admissionNumber}</span>
                             </td>
-                            <td className="py-1.5 text-center text-success tabular-nums">
-                              {cc.countA}
+                            {scorecard.multiClass && (
+                              <td className="py-1 px-2 text-center text-slate whitespace-nowrap">{row.className}</td>
+                            )}
+                            {row.subjects.map((cell, si) => (
+                              <td key={scorecard.subjects[si].id} className="py-1 px-1 text-center">
+                                {cell.pct !== null ? (
+                                  <div className="flex flex-col items-center leading-tight">
+                                    <span className="tabular-nums text-ink font-medium">{cell.pct.toFixed(0)}%</span>
+                                    <span className={`text-[10px] font-semibold ${cell.grade ? gradeColour(cell.grade).text : "text-slate"}`}>
+                                      {cell.grade ?? "—"}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-slate">—</span>
+                                )}
+                              </td>
+                            ))}
+                            <td className={`py-1 px-1 text-center tabular-nums font-semibold border-l border-line ${isFlagged ? "text-red-600" : "text-ink"}`}>
+                              {row.meanPoints !== null ? row.meanPoints.toFixed(2) : "—"}
                             </td>
-                            <td className="py-1.5 text-center text-danger tabular-nums">
-                              {cc.countE}
+                            <td className="py-1 px-1 text-center">
+                              {row.meanGrade ? (
+                                <span className={`inline-block rounded px-1 py-0.5 text-[11px] font-bold ${bg} ${text}`}>{row.meanGrade}</span>
+                              ) : (
+                                <span className="text-slate">—</span>
+                              )}
                             </td>
                           </tr>
                         );
                       })}
-                  </tbody>
-                </table>
+                    </tbody>
+                    {scorecard.subjects.some((s) => s.code) && (
+                      <tfoot>
+                        <tr>
+                          <td colSpan={2 + (scorecard.multiClass ? 1 : 0) + scorecard.subjects.length + 2} className="pt-3 text-[10px] text-slate leading-relaxed">
+                            {scorecard.subjects.map((s) => (
+                              <span key={s.id} className="mr-3">
+                                <span className="font-semibold">{s.code || s.name.slice(0, 6)}</span>{" = "}{s.name}
+                              </span>
+                            ))}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              )}
+            </Section>
+          ) : (
+            <Section title="Class comparison">              {data.classComparison.length === 0 ? (
+                <p className="text-sm text-slate">No class data yet.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-line text-slate text-left">
+                        <th className="pb-2 font-medium">Class</th>
+                        <th className="pb-2 font-medium text-center">Students</th>
+                        <th className="pb-2 font-medium text-center">Mean pts</th>
+                        <th className="pb-2 font-medium text-center">Grade</th>
+                        <th className="pb-2 font-medium text-center text-success">A/A-</th>
+                        <th className="pb-2 font-medium text-center text-danger">E</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedClassComparison.map((cc) => {
+                          const { bg, text } = cc.meanGrade ? gradeColour(cc.meanGrade) : { bg: "bg-paper", text: "text-slate" };
+                          return (
+                            <tr key={cc.schoolClass.id} className="border-b border-line last:border-0">
+                              <td className="py-1.5 pr-2 font-medium text-ink">{cc.schoolClass.name}</td>
+                              <td className="py-1.5 text-center text-slate">{cc.studentCount}</td>
+                              <td className="py-1.5 text-center tabular-nums text-ink">{cc.meanPoints?.toFixed(2) ?? "—"}</td>
+                              <td className="py-1.5 text-center">
+                                <span className={`inline-block rounded px-1 py-0.5 text-[11px] font-semibold ${bg} ${text}`}>{cc.meanGrade ?? "—"}</span>
+                              </td>
+                              <td className="py-1.5 text-center text-success tabular-nums">{cc.countA}</td>
+                              <td className="py-1.5 text-center text-danger tabular-nums">{cc.countE}</td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Section>
+          )}
+
+          {/* ---- Subject performance ---- */}
+          <Section title="Subject mean points">
+            {data.subjectPerformance.length === 0 ? (
+              <p className="text-sm text-slate">No subject data yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {sortedSubjectPerformance.map((sp) => (
+                  <div key={sp.subject.id} className="flex items-center gap-3">
+                    <span className="inline-flex items-center justify-center rounded w-9 h-6 text-xs font-semibold shrink-0 bg-royal/10 text-royal tabular-nums">
+                      {sp.meanPoints !== null ? sp.meanPoints.toFixed(2) : "—"}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-ink truncate">{sp.subject.name}</p>
+                      <HBar value={sp.meanPoints !== null ? Math.round(sp.meanPoints * 100) / 100 : 0} max={12} colour="bg-royal" />
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </Section>
 
-          {/* ---- Trend ---- */}
-          {data.trendData.length > 1 && (
-            <Section title="Mean grade trend (all periods)">
-              <div className="flex items-end gap-2 h-16">
-                {data.trendData.map((t) => {
-                  const pts = t.meanPoints ?? 0;
-                  const pct = trendMax > 0 ? (pts / trendMax) * 100 : 0;
-                  return (
-                    <div key={t.period.id} className="flex flex-col items-center gap-1 flex-1">
-                      <span className="text-[10px] tabular-nums text-slate">
-                        {pts > 0 ? pts.toFixed(1) : ""}
-                      </span>
-                      <div
-                        className="w-full bg-line rounded-sm overflow-hidden"
-                        style={{ height: 36 }}
-                      >
-                        <div
-                          className="w-full bg-royal/70 rounded-sm transition-all"
-                          style={{
-                            height: `${pct}%`,
-                            marginTop: `${100 - pct}%`,
-                          }}
-                        />
-                      </div>
-                      <span
-                        className="text-[10px] text-slate text-center leading-tight"
-                        style={{ maxWidth: 40, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}
-                        title={t.period.name}
-                      >
-                        {t.period.name}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </Section>
-          )}
+          {/* ---- Performance trend line chart ---- */}
+          {data.trendData.length > 1 && (() => {
+            const GRADE_LABELS: Record<number, string> = {
+              12: "A", 11: "A-", 10: "B+", 9: "B", 8: "B-",
+              7: "C+", 6: "C", 5: "C-", 4: "D+", 3: "D", 2: "D-", 1: "E",
+            };
+            const chartData = data.trendData.map((t) => ({
+              label: t.period.term
+                ? `T${t.period.term} ${t.period.academicYear}`
+                : t.period.name,
+              pts: t.period.id === periodId
+                ? null               // highlighted separately
+                : (t.meanPoints ?? null),
+              ptsSelected: t.period.id === periodId
+                ? (t.meanPoints ?? null)
+                : null,
+              periodId: t.period.id,
+            }));
+            // Merge into one series so the line is unbroken
+            const lineData = data.trendData.map((t) => ({
+              label: t.period.term
+                ? `T${t.period.term} ${t.period.academicYear}`
+                : t.period.name,
+              mean: t.meanPoints ?? null,
+              isCurrent: t.period.id === periodId,
+            }));
+            const currentEntry = lineData.find((d) => d.isCurrent);
+            return (
+              <Section title="Mean points trend (all periods)">
+                {currentEntry && (
+                  <p className="text-xs text-slate mb-3">
+                    Current selection:{" "}
+                    <span className="font-semibold text-ink">
+                      {currentEntry.label}
+                    </span>
+                    {currentEntry.mean !== null && (
+                      <>
+                        {" — "}
+                        <span className="font-semibold text-royal tabular-nums">
+                          {currentEntry.mean.toFixed(2)} pts
+                        </span>
+                        {" "}
+                        <span className="text-slate">
+                          ({GRADE_LABELS[Math.round(currentEntry.mean)] ?? ""})
+                        </span>
+                      </>
+                    )}
+                  </p>
+                )}
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart
+                    data={lineData}
+                    margin={{ top: 8, right: 16, bottom: 0, left: 0 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fontSize: 10, fill: "#64748b" }}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis
+                      domain={[1, 12]}
+                      ticks={[1, 3, 5, 7, 9, 11, 12]}
+                      tick={{ fontSize: 10, fill: "#64748b" }}
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={(v: number) => GRADE_LABELS[v] ? `${v} (${GRADE_LABELS[v]})` : String(v)}
+                      width={52}
+                    />
+                    <Tooltip
+                      content={({ active, payload }) => {
+                        if (!active || !payload?.length) return null;
+                        const d = payload[0].payload as typeof lineData[number];
+                        if (d.mean === null) return null;
+                        return (
+                          <div className="bg-white border border-line rounded-lg shadow-md px-3 py-2 text-xs">
+                            <p className="font-semibold text-ink mb-0.5">{d.label}</p>
+                            <p className="text-slate">
+                              Mean:{" "}
+                              <span className="font-semibold text-royal tabular-nums">
+                                {d.mean.toFixed(2)} pts
+                              </span>
+                            </p>
+                            {GRADE_LABELS[Math.round(d.mean)] && (
+                              <p className="text-slate">
+                                Grade:{" "}
+                                <span className="font-semibold text-ink">
+                                  {GRADE_LABELS[Math.round(d.mean)]}
+                                </span>
+                              </p>
+                            )}
+                            {d.isCurrent && (
+                              <p className="text-[10px] text-royal mt-1 font-medium">
+                                ◆ Selected period
+                              </p>
+                            )}
+                          </div>
+                        );
+                      }}
+                    />
+                    {/* Vertical reference line for the selected period */}
+                    {currentEntry && (
+                      <ReferenceLine
+                        x={currentEntry.label}
+                        stroke="#1d4ed8"
+                        strokeDasharray="4 3"
+                        strokeWidth={1.5}
+                      />
+                    )}
+                    <Line
+                      type="monotone"
+                      dataKey="mean"
+                      stroke="#1d4ed8"
+                      strokeWidth={2}
+                      dot={(props) => {
+                        const entry = props.payload as typeof lineData[number];
+                        const r = entry.isCurrent ? 5 : 3;
+                        const fill = entry.isCurrent ? "#1d4ed8" : "#fff";
+                        const stroke = "#1d4ed8";
+                        return (
+                          <circle
+                            key={props.key}
+                            cx={props.cx}
+                            cy={props.cy}
+                            r={r}
+                            fill={fill}
+                            stroke={stroke}
+                            strokeWidth={2}
+                          />
+                        );
+                      }}
+                      activeDot={{ r: 6, fill: "#1d4ed8" }}
+                      connectNulls
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </Section>
+            );
+          })()}
 
           {/* ---- Subject × class heat-map ---- */}
           {data.subjectClassHeatmap.length > 0 &&
-            data.subjectClassHeatmap[0].classes.length > 1 && (
+            (data.subjectClassHeatmap[0].classes.length > 1 ||
+              data.subjectClassHeatmap[0].totalMeanPoints !== null) && (
               <Section title="Subject × class heat-map (mean %)">
                 <div className="overflow-x-auto">
                   <table className="text-xs w-full">
@@ -658,6 +869,11 @@ export default function DashboardCharts({ classes, subjects }: Props) {
                             {c.className}
                           </th>
                         ))}
+                        {data.subjectClassHeatmap[0].totalMeanPoints !== null && (
+                          <th className="pb-2 font-medium text-center px-1 border-l border-line text-slate">
+                            Total
+                          </th>
+                        )}
                       </tr>
                     </thead>
                     <tbody>
@@ -672,32 +888,58 @@ export default function DashboardCharts({ classes, subjects }: Props) {
                           {row.classes.map((c) => (
                             <td key={c.classId} className="py-1 px-1 text-center">
                               <span
-                                className={`inline-block rounded px-1.5 py-0.5 tabular-nums font-medium ${heatColour(c.meanScore)}`}
+                                className={`inline-block rounded px-1.5 py-0.5 tabular-nums font-medium ${heatColourPts(c.meanPoints)}`}
                               >
-                                {c.meanScore !== null
-                                  ? `${c.meanScore.toFixed(0)}%`
-                                  : "—"}
+                                {c.meanPoints !== null ? c.meanPoints.toFixed(2) : "—"}
                               </span>
                             </td>
                           ))}
+                          {row.totalMeanPoints !== null && (
+                            <td className="py-1 px-1 text-center border-l border-line">
+                              <span
+                                className={`inline-block rounded px-1.5 py-0.5 tabular-nums font-medium ${heatColourPts(row.totalMeanPoints)}`}
+                              >
+                                {row.totalMeanPoints.toFixed(2)}
+                              </span>
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
+                    {/* ---- Mean points footer row ---- */}
+                    {data.heatmapClassSummary?.length > 0 && (
+                      <tfoot>
+                        <tr className="border-t-2 border-line bg-paper">
+                          <td className="py-2 pr-3 text-xs font-semibold text-ink whitespace-nowrap">
+                            Mean points
+                          </td>
+                          {data.heatmapClassSummary.map((c) => (
+                            <td key={c.classId} className="py-2 px-1 text-center">
+                              <span
+                                className={`inline-block rounded px-1.5 py-0.5 tabular-nums font-bold text-xs ${heatColourPts(c.meanPoints)}`}
+                              >
+                                {c.meanPoints !== null ? c.meanPoints.toFixed(2) : "—"}
+                              </span>
+                            </td>
+                          ))}
+                          {data.heatmapTotalSummary && (
+                            <td className="py-2 px-1 text-center border-l border-line">
+                              <span
+                                className={`inline-block rounded px-1.5 py-0.5 tabular-nums font-bold text-xs ${heatColourPts(data.heatmapTotalSummary.meanPoints)}`}
+                              >
+                                {data.heatmapTotalSummary.meanPoints.toFixed(2)}
+                              </span>
+                            </td>
+                          )}
+                        </tr>
+                      </tfoot>
+                    )}
                   </table>
                 </div>
               </Section>
             )}
 
         </div>
-      )}
-
-      {/* ---- AI Insights panel — lazy-mounted once a period is selected ---- */}
-      {periodId && (
-        <AssessmentAiPanel
-          periodId={periodId}
-          classId={classId}
-          framework="8-4-4"
-        />
       )}
     </div>
   );

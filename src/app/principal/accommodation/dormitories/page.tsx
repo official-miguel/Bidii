@@ -12,9 +12,11 @@ import {
   inputClass, labelClass, primaryButtonClass, secondaryButtonClass,
   FormField,
 } from "@/components/ui";
+import SearchableSelect from "@/components/SearchableSelect";
 import Modal from "@/components/Modal";
 import ContextNavigation from "@/components/ContextNavigation";
 import WorkspaceToolbar from "@/components/workspace/WorkspaceToolbar";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -117,23 +119,23 @@ function Step1Basics({
       </div>
 
       <FormField label="Boarding master / matron" helper="The teacher responsible for this dormitory.">
-        <select className={inputClass} value={data.boardingMasterId}
-          onChange={(e) => onChange({ boardingMasterId: e.target.value })}>
-          <option value="">— None assigned —</option>
-          {staffList.map((s) => (
-            <option key={s.id} value={s.id}>{s.fullName} ({s.staffId})</option>
-          ))}
-        </select>
+        <SearchableSelect
+          value={data.boardingMasterId}
+          onChange={(id) => onChange({ boardingMasterId: id })}
+          options={staffList.map((s) => ({ id: s.id, label: s.fullName, sub: s.staffId }))}
+          placeholder="— None assigned —"
+          searchPlaceholder="Search staff by name or ID…"
+        />
       </FormField>
 
       <FormField label="Dorm captain" helper="An optional student leader for this dorm.">
-        <select className={inputClass} value={data.dormCaptainId}
-          onChange={(e) => onChange({ dormCaptainId: e.target.value })}>
-          <option value="">— None assigned —</option>
-          {studentList.map((s) => (
-            <option key={s.id} value={s.id}>{s.fullName} ({s.admissionNumber}) · {s.className}</option>
-          ))}
-        </select>
+        <SearchableSelect
+          value={data.dormCaptainId}
+          onChange={(id) => onChange({ dormCaptainId: id })}
+          options={studentList.map((s) => ({ id: s.id, label: s.fullName, sub: `${s.admissionNumber} · ${s.className}` }))}
+          placeholder="— None assigned —"
+          searchPlaceholder="Search students by name or admission no…"
+        />
       </FormField>
 
       <FormField label="Description" helper="Optional notes about this dormitory.">
@@ -294,23 +296,40 @@ function DormWizard({
   staffList: StaffOption[];
   studentList: StudentOption[];
 }) {
+  // Draft key scoped to the record: edits use dorm id, creates use "new"
+  const dormWizardDraftKey = `bidii_draft_dorm_wizard_${editDorm?.id ?? "new"}`;
+  const defaultData: WizardData = editDorm
+    ? {
+        name: editDorm.name, genderPolicy: editDorm.genderPolicy,
+        status: editDorm.status, boardingMasterId: editDorm.boardingMaster?.id ?? "",
+        dormCaptainId: editDorm.dormCaptain?.id ?? "", description: editDorm.description ?? "",
+        structure: editDorm.structure, allocationPolicy: editDorm.allocationPolicy,
+        cubiclesInheritPolicy: editDorm.cubiclesInheritPolicy,
+        permittedForms: editDorm.permittedForms,
+      }
+    : { ...EMPTY_WIZARD };
+
+  const [wizDraft, setWizDraft, clearWizDraft] = useFormDraft(
+    dormWizardDraftKey,
+    defaultData as unknown as Record<string, unknown>,
+  );
+
   const [step, setStep] = useState(0);
   const [data, setData] = useState<WizardData>(
-    editDorm
-      ? {
-          name: editDorm.name, genderPolicy: editDorm.genderPolicy,
-          status: editDorm.status, boardingMasterId: editDorm.boardingMaster?.id ?? "",
-          dormCaptainId: editDorm.dormCaptain?.id ?? "", description: editDorm.description ?? "",
-          structure: editDorm.structure, allocationPolicy: editDorm.allocationPolicy,
-          cubiclesInheritPolicy: editDorm.cubiclesInheritPolicy,
-          permittedForms: editDorm.permittedForms,
-        }
-      : { ...EMPTY_WIZARD }
+    // For new dorms, restore draft; for edits always use the server data
+    editDorm ? defaultData : (wizDraft as unknown as WizardData)
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const patch = (p: Partial<WizardData>) => setData((d) => ({ ...d, ...p }));
+  const patch = (p: Partial<WizardData>) => {
+    setData((d) => {
+      const next = { ...d, ...p };
+      // Persist after every change (only for new dorms — edits always start fresh)
+      if (!editDorm) setWizDraft(next as unknown as Record<string, unknown>);
+      return next;
+    });
+  };
 
   const canNext = () => {
     if (step === 0) return data.name.trim().length > 0;
@@ -341,6 +360,7 @@ function DormWizard({
           });
       const json = await res.json();
       if (!res.ok) { setError(json.error ?? "Failed to save."); return; }
+      clearWizDraft();
       onSaved(json);
     } catch { setError("Network error. Please try again."); }
     finally { setSaving(false); }
@@ -350,10 +370,10 @@ function DormWizard({
     <Modal
       title={editDorm ? `Edit ${editDorm.name}` : "Register Dormitory"}
       description={editDorm ? "Update dormitory details." : `Step ${step + 1} of ${STEP_LABELS.length} — ${STEP_LABELS[step]}`}
-      onClose={onClose} size="md"
+      onClose={() => { if (!editDorm) clearWizDraft(); onClose(); }} size="md"
       footer={
         <div className="flex items-center justify-between gap-3">
-          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
+          <button type="button" onClick={() => { if (!editDorm) clearWizDraft(); onClose(); }} className={secondaryButtonClass}>Cancel</button>
           <div className="flex items-center gap-2">
             {step > 0 && (
               <button type="button" onClick={() => setStep((s) => s - 1)} className={secondaryButtonClass}>
@@ -534,7 +554,10 @@ export default function DormitoriesPage() {
                           {dorm.name}
                         </Link>
                         {dorm.boardingMaster && (
-                          <p className="text-xs text-slate dark:text-dark-muted">{dorm.boardingMaster.fullName}</p>
+                          <Link href={`/principal/staff/${dorm.boardingMaster.id}`}
+                            className="text-xs text-slate hover:text-teal transition-colors dark:text-dark-muted dark:hover:text-teal block w-fit">
+                            {dorm.boardingMaster.fullName}
+                          </Link>
                         )}
                       </td>
                       <td className="px-5 py-3.5">

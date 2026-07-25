@@ -21,7 +21,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const [role, targetUser] = await Promise.all([
     prisma.staffRole.findFirst({ where: { id: params.id, schoolId: user.schoolId } }),
-    prisma.user.findFirst({ where: { id: userId, schoolId: user.schoolId, role: "ADMIN_STAFF" } }),
+    // Accept both ADMIN_STAFF and TEACHER — teachers can be granted extra
+    // module permissions on top of their built-in capabilities.
+    prisma.user.findFirst({
+      where: { id: userId, schoolId: user.schoolId, role: { in: ["ADMIN_STAFF", "TEACHER"] } },
+    }),
   ]);
 
   if (!role) return NextResponse.json({ error: "Role not found." }, { status: 404 });

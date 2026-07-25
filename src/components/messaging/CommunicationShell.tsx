@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { MessageSquare, Users, FileText, BarChart2, Plus } from "lucide-react";
 import OfflineQueueBanner from "./OfflineQueueBanner";
 
 const TABS = [
-  { label: "Messages",  icon: "💬", href: (base: string) => base },
-  { label: "Groups",    icon: "👥", href: (base: string) => `${base}/groups` },
-  { label: "Templates", icon: "📋", href: (base: string) => `${base}/templates` },
-];
+  { label: "Messages",  Icon: MessageSquare, href: (base: string) => base },
+  { label: "Groups",    Icon: Users,         href: (base: string) => `${base}/groups` },
+  { label: "Templates", Icon: FileText,      href: (base: string) => `${base}/templates` },
+] as const;
 
 interface Props {
   base:          string;
@@ -34,16 +35,14 @@ export default function CommunicationShell({ base, canManage, children, onNewMes
               href={`${base}/exam-results`}
               className="hidden sm:flex items-center gap-1.5 rounded-lg border border-line text-sm font-medium px-3 py-2 text-ink hover:bg-paper transition-colors"
             >
-              <span className="text-base">📊</span>
+              <BarChart2 className="w-4 h-4" aria-hidden />
               <span>Exam Results</span>
             </Link>
             <button
               onClick={onNewMessage}
               className="flex items-center gap-2 rounded-lg bg-royal text-white text-sm font-semibold px-4 py-2.5 hover:bg-royal-light transition-colors shadow-sm"
             >
-              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z"/>
-              </svg>
+              <Plus className="w-4 h-4" aria-hidden />
               New Message
             </button>
           </div>
@@ -58,6 +57,7 @@ export default function CommunicationShell({ base, canManage, children, onNewMes
           const href    = tab.href(base);
           const isExact = tab.label === "Messages";
           const active  = isExact ? pathname === href : pathname.startsWith(href);
+          const { Icon } = tab;
           return (
             <Link
               key={tab.label}
@@ -68,7 +68,7 @@ export default function CommunicationShell({ base, canManage, children, onNewMes
                   : "border-transparent text-slate hover:text-ink hover:bg-paper"
               }`}
             >
-              <span className="text-base leading-none">{tab.icon}</span>
+              <Icon className="w-4 h-4" aria-hidden />
               {tab.label}
             </Link>
           );
@@ -83,7 +83,7 @@ export default function CommunicationShell({ base, canManage, children, onNewMes
                 : "border-transparent text-slate hover:text-ink hover:bg-paper"
             }`}
           >
-            <span className="text-base leading-none">📊</span>
+            <BarChart2 className="w-4 h-4" aria-hidden />
             Results
           </Link>
         )}

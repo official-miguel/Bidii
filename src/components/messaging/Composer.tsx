@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import RecipientPicker from "./RecipientPicker";
 import TemplateSelector from "./TemplateSelector";
-import { applyPlaceholders } from "@/lib/messaging/placeholders";
+import { applyPlaceholders, groupToken } from "@/lib/messaging/placeholders";
 import type { RecipientDescriptor } from "@/lib/messaging/resolve";
 import { X, ChevronRight, ChevronLeft, Send, Clock, AlertTriangle, Loader2, Paperclip } from "lucide-react";
 import { ErrorBanner, inputClass, labelClass } from "@/components/ui";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 
 interface Group       { id: string; name: string }
 interface SchoolClass { id: string; name: string; form: number; stream: string | null }
@@ -127,15 +128,27 @@ export default function Composer({
   classes = [],
   maxForms = 4,
 }: Props) {
+  // ── Draft persistence ────────────────────────────────────────────────────
+  const [draft, setDraft, clearDraft] = useFormDraft("bidii_draft_composer", {
+    channel:       "SMS" as "SMS" | "WHATSAPP",
+    body:          "",
+    scheduledAt:   "",
+    useSchedule:   false,
+    attachmentUrl:  "",
+    attachmentName: "",
+    // Descriptors are serialisable objects — safe to persist
+    descriptors:   [] as RecipientDescriptor[],
+  });
+
   const [step, setStep]           = useState<1 | 2>(1);
-  const [descriptors, setDescriptors] = useState<RecipientDescriptor[]>([]);
-  const [channel, setChannel]     = useState<"SMS" | "WHATSAPP">("SMS");
-  const [body, setBody]           = useState("");
-  const [scheduledAt, setScheduledAt] = useState("");
-  const [useSchedule, setUseSchedule] = useState(false);
+  const [descriptors, setDescriptors] = useState<RecipientDescriptor[]>(draft.descriptors);
+  const [channel, setChannel]     = useState<"SMS" | "WHATSAPP">(draft.channel);
+  const [body, setBody]           = useState(draft.body);
+  const [scheduledAt, setScheduledAt] = useState(draft.scheduledAt);
+  const [useSchedule, setUseSchedule] = useState(draft.useSchedule);
   const [showExtras, setShowExtras]   = useState(false);
-  const [attachmentUrl, setAttachmentUrl]   = useState("");
-  const [attachmentName, setAttachmentName] = useState("");
+  const [attachmentUrl, setAttachmentUrl]   = useState(draft.attachmentUrl);
+  const [attachmentName, setAttachmentName] = useState(draft.attachmentName);
   const [preview, setPreview]     = useState("");
   const [resolvedCount, setResolvedCount] = useState(0);
   const [skippedCount, setSkippedCount]   = useState(0);
@@ -144,6 +157,24 @@ export default function Composer({
   const [error, setError]         = useState("");
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Persist draft whenever meaningful fields change
+  useEffect(() => {
+    setDraft({ channel, body, scheduledAt, useSchedule, attachmentUrl, attachmentName, descriptors });
+  }, [channel, body, scheduledAt, useSchedule, attachmentUrl, attachmentName, descriptors, setDraft]);
+
+  function insertToken(token: string) {
+    const ta = bodyRef.current;
+    if (!ta) { setBody((b) => b + token); return; }
+    const start = ta.selectionStart;
+    const end   = ta.selectionEnd;
+    const next  = body.slice(0, start) + token + body.slice(end);
+    setBody(next);
+    setTimeout(() => {
+      ta.focus();
+      ta.setSelectionRange(start + token.length, start + token.length);
+    }, 0);
+  }
 
   useEffect(() => {
     fetch("/api/integrations")
@@ -196,7 +227,7 @@ export default function Composer({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (res.ok || res.status === 202) { onSent(); onClose(); }
+      if (res.ok || res.status === 202) { clearDraft(); onSent(); onClose(); }
       else {
         const d = await res.json() as { error?: string };
         setError(d.error ?? "Failed to send message.");
@@ -358,6 +389,29 @@ export default function Composer({
                   <span>Message</span>
                   <TemplateSelector onSelect={(t) => setBody(t.body)} />
                 </div>
+
+                {/* Group token chips — one row per group */}
+                {groups.length > 0 && (
+                  <div className="mb-2 space-y-1">
+                    {groups.map((g) => {
+                      const token = groupToken(g.name);
+                      return (
+                        <div key={g.id} className="flex flex-wrap items-center gap-1">
+                          <span className="text-[10px] font-semibold text-slate uppercase tracking-wide mr-1 shrink-0 max-w-[80px] truncate" title={g.name}>
+                            {g.name}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => insertToken(token)}
+                            className="rounded-full px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-700 hover:opacity-80 transition-opacity"
+                          >
+                            {token}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 <textarea
                   ref={bodyRef}
                   value={body}

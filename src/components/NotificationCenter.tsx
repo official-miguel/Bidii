@@ -142,6 +142,7 @@ function NotifCard({
             type="button"
             onClick={(e) => {
               e.stopPropagation();
+              onRead(); // mark as read when navigating via action link
               onAction(notif.action!.href);
             }}
             className="mt-1.5 text-xs font-medium text-teal hover:underline"
@@ -224,7 +225,18 @@ export default function NotificationCenter({ isOpen, onClose }: Props) {
     ? notifications.filter((n) => n.category === notifFilter)
     : notifications;
 
+  /**
+   * Navigate to a notification action href.
+   *
+   * Guards:
+   *  - Ignores empty / missing hrefs so a bad notification config never
+   *    triggers an unintended navigation (which would hit the middleware
+   *    and bounce the user to /login).
+   *  - Only follows same-origin paths (starts with "/") — external URLs
+   *    are silently discarded to prevent open-redirect issues.
+   */
   function handleAction(href: string) {
+    if (!href || !href.startsWith("/")) return;
     router.push(href);
     onClose();
   }

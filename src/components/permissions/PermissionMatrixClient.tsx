@@ -7,16 +7,18 @@
  *  - Create / rename / delete custom roles
  *  - Granular per-module action toggles (View/Create/Edit/Delete/Approve/Export/Print/Configure/AI)
  *  - "Manage all" shorthand that sets all write flags at once
- *  - Assign / unassign staff members to roles
+ *  - Search any staff member (ADMIN_STAFF or TEACHER) by name / email / staff ID
+ *    and assign / remove extra permissions on top of their built-in role
  *  - Changes saved via PATCH /api/staff-roles/[id] and immediately active
  *  - Optimistic UI with server revalidation
  */
 
-import { useState, useTransition, useCallback } from "react";
+import { useState, useTransition, useCallback, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus, Trash2, ChevronDown, ChevronRight, Save, X,
   Shield, Eye, PenLine, CheckSquare, Printer, Download, Cog, Sparkles, ThumbsUp,
+  Search, UserCheck, GraduationCap,
 } from "lucide-react";
 
 // ── Types (must match server) ─────────────────────────────────────────────────
@@ -49,8 +51,14 @@ export interface ModuleData {
 interface StaffUser {
   id: string;
   email: string;
+  role: string;                       // "ADMIN_STAFF" | "TEACHER"
   staffRoleId: string | null;
   userStaffRoles: { staffRoleId: string }[];
+  teacher?: {
+    fullName:      string | null;
+    staffId:       string | null;
+    classTeacherOf: { name: string } | null;
+  } | null;
 }
 
 interface Props {
@@ -421,32 +429,77 @@ export default function PermissionMatrixClient({ roles: initialRoles, modules, s
 
 // ── Assign users panel ────────────────────────────────────────────────────────
 
+/** Shape returned by /api/staff-roles/search-users */
+interface SearchResult {
+  id:              string;
+  email:           string;
+  role:            string;
+  fullName:        string | null;
+  staffId:         string | null;
+  classTeacher:    string | null;   // class name if this teacher is a class teacher
+  alreadyAssigned: boolean;
+}
+
 function AssignUsersPanel({
   role, staffUsers, onToast, onRefresh,
 }: {
-  role: RoleData;
+  role:       RoleData;
   staffUsers: StaffUser[];
-  onToast: (msg: string, type: "ok" | "err") => void;
-  onRefresh: () => void;
+  onToast:    (msg: string, type: "ok" | "err") => void;
+  onRefresh:  () => void;
 }) {
-  const [busy, setBusy] = useState<string | null>(null);
+  const [query,       setQuery]       = useState("");
+  const [results,     setResults]     = useState<SearchResult[] | null>(null);
+  const [searching,   setSearching]   = useState(false);
+  const [busy,        setBusy]        = useState<string | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const assignedIds = new Set(
-    staffUsers
-      .filter((u) => u.staffRoleId === role.id || u.userStaffRoles.some((r) => r.staffRoleId === role.id))
-      .map((u) => u.id)
+  // ── Currently-assigned users (from initial server data) ───────────────────
+  const assigned = staffUsers.filter(
+    (u) =>
+      u.staffRoleId === role.id ||
+      u.userStaffRoles.some((r) => r.staffRoleId === role.id)
   );
 
-  async function toggle(userId: string, currently: boolean) {
+  // ── Debounced search ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const q = query.trim();
+    if (q.length < 1) { setResults(null); return; }
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await fetch(
+          `/api/staff-roles/search-users?q=${encodeURIComponent(q)}&roleId=${role.id}`
+        );
+        const data = await res.json();
+        setResults(data.users ?? []);
+      } catch {
+        setResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [query, role.id]);
+
+  // ── Assign / remove ────────────────────────────────────────────────────────
+  async function toggle(userId: string, currentlyAssigned: boolean) {
     setBusy(userId);
     const res = await fetch(`/api/staff-roles/${role.id}/assign`, {
-      method: "POST",
+      method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, assign: !currently }),
+      body:    JSON.stringify({ userId, assign: !currentlyAssigned }),
     });
     setBusy(null);
     if (res.ok) {
-      onToast(currently ? "Role unassigned." : "Role assigned.", "ok");
+      onToast(currentlyAssigned ? "Role removed." : "Role assigned.", "ok");
+      // Optimistically flip the flag in search results
+      setResults((prev) =>
+        prev?.map((u) =>
+          u.id === userId ? { ...u, alreadyAssigned: !currentlyAssigned } : u
+        ) ?? null
+      );
       onRefresh();
     } else {
       const j = await res.json().catch(() => ({}));
@@ -454,46 +507,198 @@ function AssignUsersPanel({
     }
   }
 
-  if (staffUsers.length === 0) {
-    return (
-      <p className="text-sm text-slate dark:text-dark-muted">
-        No ADMIN_STAFF accounts yet. Create staff logins from the Staff panel first.
+  return (
+    <div className="space-y-4">
+      {/* ── Search bar ─────────────────────────────────────────────────── */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate dark:text-dark-muted pointer-events-none" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by name, email, or staff ID…"
+          className="w-full h-10 pl-9 pr-4 rounded-lg border border-line text-sm text-ink bg-paper
+                     focus:outline-none focus:ring-2 focus:ring-teal/30
+                     dark:bg-dark-bg dark:border-dark-border dark:text-dark-text
+                     dark:placeholder:text-dark-muted"
+        />
+        {query && (
+          <button
+            onClick={() => { setQuery(""); setResults(null); }}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-slate hover:text-ink dark:text-dark-muted"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+
+      {/* ── Search results ─────────────────────────────────────────────── */}
+      {query.trim().length > 0 && (
+        <div className="rounded-xl border border-line dark:border-dark-border overflow-hidden">
+          {searching ? (
+            <div className="px-4 py-6 text-center text-sm text-slate dark:text-dark-muted animate-pulse">
+              Searching…
+            </div>
+          ) : results && results.length === 0 ? (
+            <div className="px-4 py-6 text-center text-sm text-slate dark:text-dark-muted">
+              No staff found matching &ldquo;{query}&rdquo;
+            </div>
+          ) : results ? (
+            <div>
+              <p className="px-4 py-2 text-[10px] font-semibold text-slate uppercase tracking-wider
+                            bg-paper border-b border-line dark:bg-dark-bg dark:border-dark-border dark:text-dark-muted">
+                Search results — {results.length} found
+              </p>
+              {results.map((u) => (
+                <SearchResultRow
+                  key={u.id}
+                  user={u}
+                  busy={busy === u.id}
+                  onToggle={() => toggle(u.id, u.alreadyAssigned)}
+                />
+              ))}
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      {/* ── Currently assigned ─────────────────────────────────────────── */}
+      <div>
+        <p className="text-[10px] font-semibold text-slate uppercase tracking-wider mb-2 dark:text-dark-muted">
+          Assigned to this role ({assigned.length})
+        </p>
+        {assigned.length === 0 ? (
+          <p className="text-sm text-slate dark:text-dark-muted py-2">
+            No one assigned yet. Use the search above to find and add staff or teachers.
+          </p>
+        ) : (
+          <div className="rounded-xl border border-line dark:border-dark-border overflow-hidden">
+            {assigned.map((u) => {
+              const displayName = u.teacher?.fullName ?? u.email;
+              const subtitle    = u.teacher?.classTeacherOf
+                ? `Class Teacher · ${u.teacher.classTeacherOf.name}`
+                : u.role === "TEACHER"
+                  ? "Teacher"
+                  : `Admin Staff${u.teacher?.staffId ? ` · ${u.teacher.staffId}` : ""}`;
+              return (
+                <div
+                  key={u.id}
+                  className="flex items-center justify-between gap-3 px-4 py-2.5
+                             border-b border-line/50 dark:border-dark-border/50 last:border-0"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-full bg-teal/10 text-teal text-xs font-semibold
+                                    flex items-center justify-center shrink-0">
+                      {displayName.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm text-ink dark:text-dark-text truncate font-medium">
+                        {displayName}
+                      </p>
+                      <p className="text-[10px] text-slate dark:text-dark-muted truncate">{subtitle}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => toggle(u.id, true)}
+                    disabled={busy === u.id}
+                    className="h-7 px-3 rounded-lg text-xs font-medium transition-colors shrink-0
+                               bg-teal/10 text-teal hover:bg-danger/10 hover:text-danger
+                               disabled:opacity-40"
+                  >
+                    {busy === u.id ? "…" : "Remove"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <p className="text-[11px] text-slate dark:text-dark-muted">
+        Staff can hold multiple roles. Permissions from all assigned roles are merged (union).
+        Teachers keep their built-in class access and gain the extra modules from this role on top.
       </p>
-    );
-  }
+    </div>
+  );
+}
+
+// ── Search result row ─────────────────────────────────────────────────────────
+
+function SearchResultRow({
+  user, busy, onToggle,
+}: {
+  user:     SearchResult;
+  busy:     boolean;
+  onToggle: () => void;
+}) {
+  const isTeacher     = user.role === "TEACHER";
+  const isClassTeacher = Boolean(user.classTeacher);
+  const displayName   = user.fullName ?? user.email;
 
   return (
-    <div className="space-y-2">
-      <p className="text-xs text-slate dark:text-dark-muted mb-3">
-        Staff members can hold multiple roles simultaneously. Permissions from all roles are combined.
-      </p>
-      {staffUsers.map((u) => {
-        const assigned = assignedIds.has(u.id);
-        return (
-          <div key={u.id} className="flex items-center justify-between gap-3 py-2 border-b border-line/40 dark:border-dark-border/40 last:border-0">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-full bg-teal/10 text-teal text-xs font-semibold flex items-center justify-center shrink-0">
-                {u.email.slice(0, 2).toUpperCase()}
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm text-ink dark:text-dark-text truncate">{u.email}</p>
-                {u.userStaffRoles.length > 1 && (
-                  <p className="text-[10px] text-slate dark:text-dark-muted">{u.userStaffRoles.length} roles assigned</p>
-                )}
-              </div>
-            </div>
-            <button
-              onClick={() => toggle(u.id, assigned)}
-              disabled={busy === u.id}
-              className={`h-8 px-3 rounded-lg text-xs font-medium transition-colors shrink-0
-                ${assigned
-                  ? "bg-teal/10 text-teal hover:bg-danger/10 hover:text-danger"
-                  : "bg-line text-slate hover:bg-teal/10 hover:text-teal dark:bg-dark-border dark:text-dark-muted"}`}>
-              {busy === u.id ? "…" : assigned ? "Remove" : "Assign"}
-            </button>
+    <div className="flex items-center justify-between gap-3 px-4 py-2.5
+                    border-b border-line/50 dark:border-dark-border/50 last:border-0
+                    hover:bg-teal-50/30 dark:hover:bg-teal/5 transition-colors">
+      <div className="flex items-center gap-2.5 min-w-0">
+        {/* Role icon badge */}
+        <div className={`w-8 h-8 rounded-full text-xs font-semibold flex items-center justify-center shrink-0
+          ${user.alreadyAssigned
+            ? "bg-teal/10 text-teal"
+            : isClassTeacher
+              ? "bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400"
+              : isTeacher
+                ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400"
+                : "bg-slate/10 text-slate dark:bg-dark-border dark:text-dark-muted"
+          }`}>
+          {isClassTeacher
+            ? <GraduationCap className="h-3.5 w-3.5" />
+            : isTeacher
+              ? <GraduationCap className="h-3.5 w-3.5" />
+              : <UserCheck className="h-3.5 w-3.5" />
+          }
+        </div>
+
+        <div className="min-w-0">
+          <p className="text-sm text-ink dark:text-dark-text truncate font-medium">{displayName}</p>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {user.email !== displayName && (
+              <span className="text-[10px] text-slate dark:text-dark-muted truncate">{user.email}</span>
+            )}
+            {user.staffId && (
+              <span className="text-[10px] text-slate/60 dark:text-dark-muted/60">· {user.staffId}</span>
+            )}
+            {isClassTeacher && (
+              <span className="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full
+                               dark:bg-amber-900/20 dark:text-amber-400">
+                Class Teacher · {user.classTeacher}
+              </span>
+            )}
+            {isTeacher && !isClassTeacher && (
+              <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full
+                               dark:bg-blue-900/20 dark:text-blue-400">
+                Teacher
+              </span>
+            )}
+            {!isTeacher && (
+              <span className="text-[10px] bg-slate/10 text-slate px-1.5 py-0.5 rounded-full
+                               dark:bg-dark-border dark:text-dark-muted">
+                Admin staff
+              </span>
+            )}
           </div>
-        );
-      })}
+        </div>
+      </div>
+
+      <button
+        onClick={onToggle}
+        disabled={busy}
+        className={`h-7 px-3 rounded-lg text-xs font-medium transition-colors shrink-0 disabled:opacity-40
+          ${user.alreadyAssigned
+            ? "bg-teal/10 text-teal hover:bg-danger/10 hover:text-danger"
+            : "bg-line text-slate hover:bg-teal/10 hover:text-teal dark:bg-dark-border dark:text-dark-muted"
+          }`}
+      >
+        {busy ? "…" : user.alreadyAssigned ? "Remove" : "Assign"}
+      </button>
     </div>
   );
 }

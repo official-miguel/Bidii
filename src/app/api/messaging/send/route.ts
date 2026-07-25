@@ -85,8 +85,15 @@ export async function POST(req: NextRequest) {
     for (let i = 0; i < resolved.length; i += batchSize) {
       const batch = resolved.slice(i, i + batchSize);
       await Promise.all(
-        batch.map(async ({ label, phone }) => {
-          const result = await dispatchMessage(user.schoolId, channel as MessageChannel, phone, body);
+        batch.map(async ({ label, phone, groupTokens }) => {
+          // Personalise body: substitute dynamic group tokens (e.g. /bomname → "Alice")
+          let personalBody = body;
+          if (groupTokens) {
+            for (const [token, name] of Object.entries(groupTokens)) {
+              personalBody = personalBody.split(token).join(name || "[unknown]");
+            }
+          }
+          const result = await dispatchMessage(user.schoolId, channel as MessageChannel, phone, personalBody);
           await prisma.messageLog.create({
             data: {
               messageId:      message.id,

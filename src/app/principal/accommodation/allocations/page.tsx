@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, FormEvent, useRef } from "react";
+import Link from "next/link";
 import {
   UserCheck, X, BedDouble, Building2,
   AlertTriangle, CheckCircle2, UserMinus, Plus,
@@ -11,6 +12,7 @@ import {
   PageHeader, ErrorBanner, SuccessBanner,
   inputClass, primaryButtonClass, secondaryButtonClass, FormField,
 } from "@/components/ui";
+import SearchableSelect from "@/components/SearchableSelect";
 import Modal from "@/components/Modal";
 import ContextNavigation from "@/components/ContextNavigation";
 import WorkspaceToolbar from "@/components/workspace/WorkspaceToolbar";
@@ -667,15 +669,19 @@ function QuickAssignRow({ student, dorms, onAssigned }: {
 
   return (
     <div className="flex items-center gap-2">
-      <select className={`${inputClass} py-1.5 text-xs`} value={dormId}
-        onChange={(e) => setDormId(e.target.value)}>
-        <option value="">— Quick assign —</option>
-        {dorms.filter((d) => d.availableCount > 0).map((d) => (
-          <option key={d.id} value={d.id}>{d.name} ({d.availableCount} free)</option>
-        ))}
-      </select>
+      <SearchableSelect
+        size="sm"
+        value={dormId}
+        onChange={setDormId}
+        options={dorms
+          .filter((d) => d.availableCount > 0)
+          .map((d) => ({ id: d.id, label: d.name, sub: `${d.availableCount} free` }))}
+        placeholder="— Quick assign —"
+        searchPlaceholder="Search dormitories…"
+        className="min-w-[180px]"
+      />
       <button onClick={assign} disabled={!dormId || saving}
-        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-teal text-white text-xs font-medium hover:bg-teal-dark transition-all disabled:opacity-40">
+        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-teal text-white text-xs font-medium hover:bg-teal-dark transition-all disabled:opacity-40 shrink-0">
         <Zap className="h-3 w-3" /> {saving ? "…" : "Assign"}
       </button>
     </div>
@@ -901,7 +907,10 @@ export default function AllocationsPage() {
                         className="h-4 w-4 rounded border-line text-teal" />
                     </td>
                     <td className="px-4 py-3">
-                      <p className="font-medium text-ink dark:text-dark-text">{s.fullName}</p>
+                      <Link href={`/principal/students/${s.id}`}
+                        className="font-medium text-ink hover:text-teal transition-colors dark:text-dark-text dark:hover:text-teal">
+                        {s.fullName}
+                      </Link>
                       <p className="text-xs text-slate dark:text-dark-muted">{s.admissionNumber} · {s.className}</p>
                     </td>
                     <td className="px-4 py-3 text-sm text-slate dark:text-dark-muted">Form {s.form}</td>
@@ -910,9 +919,10 @@ export default function AllocationsPage() {
                         <div>
                           <div className="flex items-center gap-1.5">
                             <BedDouble className="h-3.5 w-3.5 text-teal shrink-0" />
-                            <span className="text-sm font-medium text-ink dark:text-dark-text">
+                            <Link href={`/principal/accommodation/dormitories/${s.currentAllocation.dormId}`}
+                              className="text-sm font-medium text-ink hover:text-teal transition-colors dark:text-dark-text dark:hover:text-teal">
                               {s.currentAllocation.dorm.name}
-                            </span>
+                            </Link>
                             {s.currentAllocation.cubicle && (
                               <span className="text-xs text-slate dark:text-dark-muted">· {s.currentAllocation.cubicle.name}</span>
                             )}
@@ -975,13 +985,19 @@ export default function AllocationsPage() {
                 className="h-4 w-4 rounded border-line text-teal shrink-0" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-sm font-semibold text-ink dark:text-dark-text">{s.fullName}</p>
+                  <Link href={`/principal/students/${s.id}`}
+                    className="text-sm font-semibold text-ink hover:text-teal transition-colors dark:text-dark-text dark:hover:text-teal">
+                    {s.fullName}
+                  </Link>
                   <span className="text-xs text-slate dark:text-dark-muted">{s.admissionNumber} · {s.className}</span>
                 </div>
                 {s.currentAllocation ? (
                   <p className="text-xs text-teal mt-0.5">
                     <BedDouble className="inline h-3 w-3 mr-1" />
-                    {s.currentAllocation.dorm.name}
+                    <Link href={`/principal/accommodation/dormitories/${s.currentAllocation.dormId}`}
+                      className="hover:underline">
+                      {s.currentAllocation.dorm.name}
+                    </Link>
                     {s.currentAllocation.cubicle ? ` · ${s.currentAllocation.cubicle.name}` : ""}
                   </p>
                 ) : (

@@ -28,12 +28,17 @@ export async function GET(request: Request) {
   let frameworkId: string | null = frameworkIdParam;
 
   if (!frameworkId) {
-    // Legacy fallback: resolve the active 8-4-4 framework.
-    const framework = await db.assessmentFramework.findFirst({
+    const fw844 = await db.assessmentFramework.findFirst({
       where: { schoolId: user.schoolId, type: "EIGHT_FOUR_FOUR", isActive: true },
       select: { id: true },
     });
-    frameworkId = framework?.id ?? null;
+
+    const fwAny = fw844 ?? await db.assessmentFramework.findFirst({
+      where: { schoolId: user.schoolId, isActive: true },
+      orderBy: { academicYear: "desc" },
+      select: { id: true },
+    });
+    frameworkId = fwAny?.id ?? null;
   } else {
     // Verify this framework belongs to the user's school.
     const framework = await db.assessmentFramework.findUnique({

@@ -22,9 +22,9 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     where: { id: params.id, schoolId: user.schoolId },
     include: {
       student: { select: { id: true, fullName: true, admissionNumber: true, schoolClass: { select: { name: true } } } },
-      recordedBy: { select: { email: true } },
-      caseNotes: { orderBy: { createdAt: "desc" }, include: { createdBy: { select: { email: true } } } },
-      events: { orderBy: { createdAt: "asc" }, include: { createdBy: { select: { email: true } } } },
+      recordedBy: { select: { email: true, role: true, teacher: { select: { fullName: true } } } },
+      caseNotes: { orderBy: { createdAt: "desc" }, include: { createdBy: { select: { email: true, role: true, teacher: { select: { fullName: true } } } } } },
+      events: { orderBy: { createdAt: "asc" }, include: { createdBy: { select: { email: true, role: true, teacher: { select: { fullName: true } } } } } },
       files: {
         select: { id: true, fileName: true, mimeType: true, size: true, createdAt: true },
         orderBy: { createdAt: "desc" },

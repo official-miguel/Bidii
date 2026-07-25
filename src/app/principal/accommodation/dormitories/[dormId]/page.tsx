@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, BedDouble, LayoutGrid, Plus,
-  UserCheck, ChevronDown, ChevronUp,
+  UserCheck, ChevronDown, ChevronUp, Pencil, Info, Trash2,
 } from "lucide-react";
 import {
   ErrorBanner, SuccessBanner,
@@ -70,21 +70,68 @@ function OccupancyBar({ pct }: { pct: number }) {
 
 // ── BedCard ───────────────────────────────────────────────────────────────────
 
-function BedCard({ bed }: { bed: BedDetail }) {
+function BedCard({
+  bed, dormId, onDeleted,
+}: {
+  bed: BedDetail;
+  dormId: string;
+  onDeleted: (bedId: string) => void;
+}) {
+  const [deleting, setDeleting] = useState(false);
+  const [error,    setError]    = useState<string | null>(null);
+
+  const isOccupied = bed.positions.some((p) => p.isOccupied);
+
+  async function handleDelete() {
+    if (!confirm(`Remove "${bed.label}"? This cannot be undone.`)) return;
+    setDeleting(true); setError(null);
+    try {
+      const res = await fetch(
+        `/api/accommodation/dormitories/${dormId}/beds/${bed.id}`,
+        { method: "DELETE" }
+      );
+      const json = await res.json();
+      if (!res.ok) { setError(json.error ?? "Failed to delete bed."); return; }
+      onDeleted(bed.id);
+    } catch { setError("Network error."); }
+    finally { setDeleting(false); }
+  }
+
   const positionLabel = (p: Position) => {
     if (p.position === "UPPER") return "Upper";
     if (p.position === "LOWER") return "Lower";
     if (p.customLabel) return p.customLabel;
     return "Space";
   };
+
   return (
     <div className="rounded-lg border border-line dark:border-dark-border bg-card dark:bg-dark-surface p-3">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-semibold text-ink dark:text-dark-text">{bed.label}</span>
-        <span className="text-[10px] uppercase tracking-wide text-slate dark:text-dark-muted font-medium">
-          {bed.bedType === "DOUBLE_DECKER" ? "Bunk" : bed.bedType === "CUSTOM" ? "Custom" : "Single"}
-        </span>
+      {/* Header row */}
+      <div className="flex items-center justify-between mb-2 gap-1">
+        <span className="text-xs font-semibold text-ink dark:text-dark-text truncate">{bed.label}</span>
+        <div className="flex items-center gap-1 shrink-0">
+          <span className="text-[10px] uppercase tracking-wide text-slate dark:text-dark-muted font-medium">
+            {bed.bedType === "DOUBLE_DECKER" ? "Bunk" : bed.bedType === "CUSTOM" ? "Custom" : "Single"}
+          </span>
+          <button
+            onClick={handleDelete}
+            disabled={deleting || isOccupied}
+            title={isOccupied ? "Cannot delete — bed is occupied" : "Remove this bed"}
+            className="ml-1 p-1 rounded text-slate/50 hover:text-danger hover:bg-danger/10 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            {deleting
+              ? <span className="inline-block h-3 w-3 border border-danger border-t-transparent rounded-full animate-spin" />
+              : <Trash2 className="h-3 w-3" />}
+          </button>
+        </div>
       </div>
+
+      {/* Error inline */}
+      {error && (
+        <p className="text-[10px] text-danger mb-1.5 leading-tight">{error}</p>
+      )}
+
+      {/* Sleeping positions */}
       <div className="space-y-1">
         {bed.positions.map((pos) => {
           const alloc = pos.allocations[0];
@@ -208,23 +255,64 @@ function AddBedsModal({
   );
 }
 
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+/** Number of sleeping positions one bed of the given type provides. */
+function positionsPerBed(bedType: string, customOccupancy: number) {
+  if (bedType === "DOUBLE_DECKER") return 2;
+  if (bedType === "CUSTOM") return customOccupancy;
+  return 1; // SINGLE
+}
+
 // ── AddCubiclesModal ──────────────────────────────────────────────────────────
+//
+// "Auto-generate" mode  — create N uniform cubicles, each with the same bed
+//   count and bed type.  A live capacity pill shows total sleeping positions.
+//
+// "Single cubicle" mode — create one cubicle whose name and bed count can be
+//   set independently, useful when dorm sections vary in size.
 
 function AddCubiclesModal({ dormId, onClose, onAdded }: { dormId: string; onClose: () => void; onAdded: () => void }) {
-  const [mode, setMode] = useState<"auto" | "single">("auto");
-  const [count, setCount] = useState("8");
-  const [prefix, setPrefix] = useState("Cubicle ");
-  const [capacityEach, setCapacityEach] = useState("4");
-  const [singleName, setSingleName] = useState("");
+  const [mode,            setMode]            = useState<"auto" | "single">("auto");
+  // ── auto fields
+  const [count,           setCount]           = useState("8");
+  const [prefix,          setPrefix]          = useState("Cubicle ");
+  const [bedsEach,        setBedsEach]        = useState("4");
+  const [bedType,         setBedType]         = useState("SINGLE");
+  const [customOccupancy, setCustomOccupancy] = useState("3");
+  // ── single fields
+  const [singleName,      setSingleName]      = useState("");
+  const [singleBeds,      setSingleBeds]      = useState("4");
+  const [singleBedType,   setSingleBedType]   = useState("SINGLE");
+  const [singleCustomOcc, setSingleCustomOcc] = useState("3");
+
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error,  setError]  = useState<string | null>(null);
+
+  // ── live capacity derived values ──────────────────────────────────────────
+  const cubicleCount  = Math.max(1, parseInt(count)    || 0);
+  const bedsPerCubicle = Math.max(1, parseInt(bedsEach) || 0);
+  const posPerBed      = positionsPerBed(bedType, Math.max(1, parseInt(customOccupancy) || 1));
+  const totalCapacity  = cubicleCount * bedsPerCubicle * posPerBed;
+
+  const singleBedsNum    = Math.max(1, parseInt(singleBeds)  || 0);
+  const singlePosPerBed  = positionsPerBed(singleBedType, Math.max(1, parseInt(singleCustomOcc) || 1));
+  const singleCapacity   = singleBedsNum * singlePosPerBed;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault(); setSaving(true); setError(null);
     try {
       const payload = mode === "auto"
-        ? { mode: "auto", count: parseInt(count), prefix: prefix.trim() || "Cubicle ", capacityEach: parseInt(capacityEach) }
-        : { name: singleName.trim(), capacity: parseInt(capacityEach) };
+        ? {
+            mode: "auto",
+            count:        parseInt(count),
+            prefix:       prefix.trim() || "Cubicle ",
+            capacityEach: parseInt(bedsEach),
+          }
+        : {
+            name:     singleName.trim(),
+            capacity: parseInt(singleBeds),
+          };
       const res = await fetch(`/api/accommodation/dormitories/${dormId}/cubicles`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       });
@@ -236,47 +324,250 @@ function AddCubiclesModal({ dormId, onClose, onAdded }: { dormId: string; onClos
   }
 
   return (
-    <Modal title="Add Cubicles" description="Create one or more cubicles for this dormitory."
-      onClose={onClose} size="sm"
+    <Modal
+      title="Add Cubicles"
+      description="Create one or more cubicles for this dormitory."
+      onClose={onClose}
+      size="sm"
+      footer={
+        <div className="flex items-center justify-between gap-3">
+          {/* Capacity pill in footer for quick reference */}
+          <div className="flex items-center gap-1.5 rounded-lg bg-teal/8 border border-teal/20 px-3 py-1.5">
+            <BedDouble className="h-3.5 w-3.5 text-teal shrink-0" />
+            <span className="text-xs font-medium text-teal tabular-nums">
+              {mode === "auto" ? totalCapacity : singleCapacity} sleeping position{(mode === "auto" ? totalCapacity : singleCapacity) !== 1 ? "s" : ""}
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
+            <button type="submit" form="add-cubicles-form" disabled={saving} className={`${primaryButtonClass} disabled:opacity-40`}>
+              {saving ? "Adding…" : mode === "auto" ? `Add ${count || "?"} cubicles` : "Add cubicle"}
+            </button>
+          </div>
+        </div>
+      }
+    >
+      {error && <div className="mb-4"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
+
+      {/* Mode toggle */}
+      <div className="flex rounded-lg border border-line overflow-hidden dark:border-dark-border mb-4">
+        {(["auto", "single"] as const).map((m) => (
+          <button key={m} type="button" onClick={() => setMode(m)}
+            className={`flex-1 py-2 text-sm font-medium transition-colors ${
+              mode === m
+                ? "bg-teal text-white"
+                : "bg-white text-slate hover:bg-paper dark:bg-dark-surface dark:text-dark-muted dark:hover:bg-dark-border"
+            }`}>
+            {m === "auto" ? "Auto-generate" : "Single cubicle"}
+          </button>
+        ))}
+      </div>
+
+      <form id="add-cubicles-form" onSubmit={handleSubmit} className="space-y-4">
+        {mode === "auto" ? (
+          <>
+            {/* Row 1 — count + prefix */}
+            <div className="grid grid-cols-2 gap-3">
+              <FormField label="Number of cubicles" required>
+                <input className={inputClass} type="number" min="1" max="200" value={count}
+                  onChange={(e) => setCount(e.target.value)} />
+              </FormField>
+              <FormField label="Name prefix">
+                <input className={inputClass} value={prefix}
+                  onChange={(e) => setPrefix(e.target.value)} placeholder="Cubicle " />
+              </FormField>
+            </div>
+
+            {/* Row 2 — beds per cubicle + bed type */}
+            <div className="grid grid-cols-2 gap-3">
+              <FormField label="Beds per cubicle" required helper="How many beds each cubicle gets.">
+                <input className={inputClass} type="number" min="1" max="100" value={bedsEach}
+                  onChange={(e) => setBedsEach(e.target.value)} />
+              </FormField>
+              <FormField label="Bed type" required>
+                <select className={inputClass} value={bedType} onChange={(e) => setBedType(e.target.value)}>
+                  <option value="SINGLE">Single  (1 space)</option>
+                  <option value="DOUBLE_DECKER">Bunk  (2 spaces)</option>
+                  <option value="CUSTOM">Custom</option>
+                </select>
+              </FormField>
+            </div>
+
+            {bedType === "CUSTOM" && (
+              <FormField label="Spaces per bed" helper="Each bed creates this many sleeping positions.">
+                <input className={inputClass} type="number" min="1" max="20" value={customOccupancy}
+                  onChange={(e) => setCustomOccupancy(e.target.value)} />
+              </FormField>
+            )}
+
+            {/* Live capacity breakdown */}
+            <div className="rounded-lg border border-line dark:border-dark-border bg-paper dark:bg-dark-surface p-3 space-y-2">
+              <p className="text-xs font-semibold text-slate uppercase tracking-wide dark:text-dark-muted">Capacity preview</p>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                {[
+                  { label: "Cubicles",       value: cubicleCount },
+                  { label: `Beds / cubicle`, value: bedsPerCubicle },
+                  { label: `Spaces / bed`,   value: posPerBed },
+                ].map(({ label, value }) => (
+                  <div key={label} className="rounded-md bg-white dark:bg-dark-bg border border-line dark:border-dark-border py-2 px-1">
+                    <p className="text-base font-semibold text-ink dark:text-dark-text tabular-nums">{value}</p>
+                    <p className="text-[10px] text-slate dark:text-dark-muted leading-tight">{label}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between pt-1 border-t border-line dark:border-dark-border">
+                <span className="text-xs text-slate dark:text-dark-muted">Total sleeping positions</span>
+                <span className="text-sm font-semibold text-teal tabular-nums">{totalCapacity}</span>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Single cubicle */}
+            <FormField label="Cubicle name" required>
+              <input className={inputClass} value={singleName}
+                onChange={(e) => setSingleName(e.target.value)} placeholder="e.g. Room A, Bay 3" autoFocus />
+            </FormField>
+
+            <div className="grid grid-cols-2 gap-3">
+              <FormField label="Number of beds" required helper="Beds in this cubicle.">
+                <input className={inputClass} type="number" min="1" max="100" value={singleBeds}
+                  onChange={(e) => setSingleBeds(e.target.value)} />
+              </FormField>
+              <FormField label="Bed type" required>
+                <select className={inputClass} value={singleBedType} onChange={(e) => setSingleBedType(e.target.value)}>
+                  <option value="SINGLE">Single  (1 space)</option>
+                  <option value="DOUBLE_DECKER">Bunk  (2 spaces)</option>
+                  <option value="CUSTOM">Custom</option>
+                </select>
+              </FormField>
+            </div>
+
+            {singleBedType === "CUSTOM" && (
+              <FormField label="Spaces per bed" helper="Each bed creates this many sleeping positions.">
+                <input className={inputClass} type="number" min="1" max="20" value={singleCustomOcc}
+                  onChange={(e) => setSingleCustomOcc(e.target.value)} />
+              </FormField>
+            )}
+
+            {/* Capacity summary for single mode */}
+            <div className="flex items-center justify-between rounded-lg border border-line dark:border-dark-border bg-paper dark:bg-dark-surface px-4 py-2.5">
+              <div className="flex items-center gap-1.5 text-xs text-slate dark:text-dark-muted">
+                <Info className="h-3.5 w-3.5 shrink-0" />
+                <span>{singleBedsNum} bed{singleBedsNum !== 1 ? "s" : ""} × {singlePosPerBed} space{singlePosPerBed !== 1 ? "s" : ""}</span>
+              </div>
+              <span className="text-sm font-semibold text-teal tabular-nums">{singleCapacity} positions</span>
+            </div>
+          </>
+        )}
+      </form>
+    </Modal>
+  );
+}
+
+// ── EditCubicleModal ──────────────────────────────────────────────────────────
+//
+// Lets the user rename a cubicle and/or adjust its target bed count (capacity).
+// The capacity field here is the Cubicle.capacity informational field that
+// drives the preview — it does not create/delete beds automatically.
+
+function EditCubicleModal({
+  cubicle, dormId, onClose, onSaved,
+}: {
+  cubicle: CubicleDetail;
+  dormId: string;
+  onClose: () => void;
+  onSaved: (updated: CubicleDetail) => void;
+}) {
+  const [name,     setName]     = useState(cubicle.name);
+  const [capacity, setCapacity] = useState(String(cubicle.capacity));
+  const [saving,   setSaving]   = useState(false);
+  const [error,    setError]    = useState<string | null>(null);
+
+  const hasChanges =
+    name.trim() !== cubicle.name ||
+    parseInt(capacity) !== cubicle.capacity;
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!hasChanges) { onClose(); return; }
+    setSaving(true); setError(null);
+    try {
+      const res = await fetch(
+        `/api/accommodation/dormitories/${dormId}/cubicles/${cubicle.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name:     name.trim(),
+            capacity: parseInt(capacity),
+          }),
+        }
+      );
+      const json = await res.json();
+      if (!res.ok) { setError(json.error ?? "Failed to save."); return; }
+      onSaved(json);
+    } catch { setError("Network error."); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <Modal
+      title="Edit cubicle"
+      description={`Adjust the name or bed capacity for ${cubicle.name}.`}
+      onClose={onClose}
+      size="sm"
       footer={
         <div className="flex gap-3 justify-end">
           <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
-          <button type="submit" form="add-cubicles-form" disabled={saving} className={`${primaryButtonClass} disabled:opacity-40`}>
-            {saving ? "Adding…" : mode === "auto" ? `Add ${count || "?"} cubicles` : "Add cubicle"}
+          <button type="submit" form="edit-cubicle-form" disabled={saving || !name.trim()}
+            className={`${primaryButtonClass} disabled:opacity-40`}>
+            {saving ? "Saving…" : "Save changes"}
           </button>
         </div>
-      }>
+      }
+    >
       {error && <div className="mb-4"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
-      <form id="add-cubicles-form" onSubmit={handleSubmit} className="space-y-4">
-        <div className="flex rounded-lg border border-line overflow-hidden dark:border-dark-border">
-          {(["auto", "single"] as const).map((m) => (
-            <button key={m} type="button" onClick={() => setMode(m)}
-              className={`flex-1 py-2 text-sm font-medium transition-colors ${
-                mode === m ? "bg-teal text-white" : "bg-white text-slate hover:bg-paper dark:bg-dark-surface dark:text-dark-muted dark:hover:bg-dark-border"
-              }`}>
-              {m === "auto" ? "Auto-generate" : "Single cubicle"}
-            </button>
-          ))}
-        </div>
-        {mode === "auto" ? (
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Number of cubicles" required>
-              <input className={inputClass} type="number" min="1" max="200" value={count}
-                onChange={(e) => setCount(e.target.value)} />
-            </FormField>
-            <FormField label="Label prefix">
-              <input className={inputClass} value={prefix} onChange={(e) => setPrefix(e.target.value)} placeholder="Cubicle " />
-            </FormField>
-          </div>
-        ) : (
-          <FormField label="Cubicle name" required>
-            <input className={inputClass} value={singleName} onChange={(e) => setSingleName(e.target.value)} placeholder="e.g. Room A" />
-          </FormField>
-        )}
-        <FormField label="Capacity (beds per cubicle)" helper="Informational — actual spaces derive from beds you add.">
-          <input className={inputClass} type="number" min="1" max="100" value={capacityEach}
-            onChange={(e) => setCapacityEach(e.target.value)} />
+      <form id="edit-cubicle-form" onSubmit={handleSubmit} className="space-y-4">
+        <FormField label="Cubicle name" required>
+          <input
+            className={inputClass}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoFocus
+          />
         </FormField>
+        <FormField
+          label="Bed capacity"
+          helper="Target number of beds for this cubicle. Adjust beds independently via Add Beds."
+        >
+          <input
+            className={inputClass}
+            type="number"
+            min="1"
+            max="500"
+            value={capacity}
+            onChange={(e) => setCapacity(e.target.value)}
+          />
+        </FormField>
+        {/* Show current actual vs target */}
+        <div className="rounded-lg border border-line dark:border-dark-border bg-paper dark:bg-dark-surface px-4 py-3 space-y-1.5">
+          <p className="text-xs font-semibold text-slate uppercase tracking-wide dark:text-dark-muted">Current status</p>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-slate dark:text-dark-muted">Beds added</span>
+            <span className="font-medium text-ink dark:text-dark-text tabular-nums">{cubicle._count.beds}</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-slate dark:text-dark-muted">Sleeping positions</span>
+            <span className="font-medium text-ink dark:text-dark-text tabular-nums">{cubicle._count.sleepingPositions}</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-slate dark:text-dark-muted">Currently occupied</span>
+            <span className={`font-medium tabular-nums ${cubicle._count.allocations > 0 ? "text-teal" : "text-slate dark:text-dark-muted"}`}>
+              {cubicle._count.allocations}
+            </span>
+          </div>
+        </div>
       </form>
     </Modal>
   );
@@ -285,11 +576,18 @@ function AddCubiclesModal({ dormId, onClose, onAdded }: { dormId: string; onClos
 // ── CubicleSection ────────────────────────────────────────────────────────────
 
 function CubicleSection({
-  cubicle, dormId, onAddBeds,
-}: { cubicle: CubicleDetail; dormId: string; onAddBeds: (cubicleId: string) => void }) {
-  const [expanded, setExpanded] = useState(false);
-  const [beds, setBeds] = useState<BedDetail[]>([]);
-  const [loadingBeds, setLoadingBeds] = useState(false);
+  cubicle: initialCubicle, dormId, onAddBeds, onBedDeleted,
+}: {
+  cubicle: CubicleDetail;
+  dormId: string;
+  onAddBeds: (cubicleId: string) => void;
+  onBedDeleted: () => void;
+}) {
+  const [cubicle,      setCubicle]      = useState<CubicleDetail>(initialCubicle);
+  const [expanded,     setExpanded]     = useState(false);
+  const [beds,         setBeds]         = useState<BedDetail[]>([]);
+  const [loadingBeds,  setLoadingBeds]  = useState(false);
+  const [showEdit,     setShowEdit]     = useState(false);
 
   async function fetchBeds() {
     if (beds.length > 0) { setExpanded((e) => !e); return; }
@@ -299,60 +597,119 @@ function CubicleSection({
     setLoadingBeds(false);
   }
 
+  function refreshBeds() {
+    setBeds([]);
+    setLoadingBeds(true);
+    fetch(`/api/accommodation/dormitories/${dormId}/beds?cubicleId=${cubicle.id}`)
+      .then((r) => r.ok ? r.json() : [])
+      .then(setBeds)
+      .finally(() => setLoadingBeds(false));
+  }
+
   const pct = cubicle._count.sleepingPositions > 0
     ? Math.round((cubicle._count.allocations / cubicle._count.sleepingPositions) * 100) : 0;
 
+  const bedsVsTarget = cubicle._count.beds < cubicle.capacity
+    ? `${cubicle._count.beds}/${cubicle.capacity} beds`
+    : `${cubicle._count.beds} bed${cubicle._count.beds !== 1 ? "s" : ""}`;
+
   return (
-    <div className="rounded-xl border border-line dark:border-dark-border overflow-hidden">
-      <div className="flex items-center justify-between gap-3 px-4 py-3 bg-card dark:bg-dark-surface">
-        <button className="flex items-center gap-3 flex-1 text-left min-w-0" onClick={fetchBeds}>
-          <div className="rounded-md bg-teal/10 p-1.5 shrink-0">
-            <LayoutGrid className="h-3.5 w-3.5 text-teal" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-ink dark:text-dark-text">{cubicle.name}</p>
-            <p className="text-xs text-slate dark:text-dark-muted">
-              {cubicle._count.beds} bed{cubicle._count.beds !== 1 ? "s" : ""} · {cubicle._count.allocations}/{cubicle._count.sleepingPositions} occupied
-            </p>
-          </div>
-          <div className="w-24 shrink-0">
-            <div className="flex items-center gap-1.5">
-              <OccupancyBar pct={pct} />
-              <span className="text-xs tabular-nums text-slate dark:text-dark-muted">{pct}%</span>
+    <>
+      <div className="rounded-xl border border-line dark:border-dark-border overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-3 bg-card dark:bg-dark-surface">
+          {/* Expand / collapse trigger */}
+          <button className="flex items-center gap-3 flex-1 text-left min-w-0" onClick={fetchBeds}>
+            <div className="rounded-md bg-teal/10 p-1.5 shrink-0">
+              <LayoutGrid className="h-3.5 w-3.5 text-teal" />
             </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-ink dark:text-dark-text">{cubicle.name}</p>
+              <p className="text-xs text-slate dark:text-dark-muted">
+                {bedsVsTarget} · {cubicle._count.allocations}/{cubicle._count.sleepingPositions} occupied
+              </p>
+            </div>
+            <div className="w-24 shrink-0">
+              <div className="flex items-center gap-1.5">
+                <OccupancyBar pct={pct} />
+                <span className="text-xs tabular-nums text-slate dark:text-dark-muted">{pct}%</span>
+              </div>
+            </div>
+            {expanded
+              ? <ChevronUp   className="h-4 w-4 text-slate shrink-0" />
+              : <ChevronDown className="h-4 w-4 text-slate shrink-0" />}
+          </button>
+
+          {/* Action buttons */}
+          <button onClick={() => setShowEdit(true)}
+            className="p-1.5 rounded-md text-slate hover:text-teal hover:bg-teal/10 transition-all shrink-0"
+            aria-label="Edit cubicle">
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button onClick={() => onAddBeds(cubicle.id)}
+            className="p-1.5 rounded-md text-slate hover:text-teal hover:bg-teal/10 transition-all shrink-0"
+            aria-label="Add beds">
+            <Plus className="h-4 w-4" />
+          </button>
+        </div>
+
+        {expanded && (
+          <div className="border-t border-line dark:border-dark-border bg-paper/50 dark:bg-dark-bg/30 p-4">
+            {loadingBeds && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {[...Array(4)].map((_, i) => <div key={i} className="h-20 rounded-lg bg-line/40 animate-pulse" />)}
+              </div>
+            )}
+            {!loadingBeds && beds.length === 0 && (
+              <div className="text-center py-6">
+                <p className="text-slate text-sm dark:text-dark-muted">No beds in this cubicle yet.</p>
+                <button onClick={() => onAddBeds(cubicle.id)}
+                  className="mt-2 inline-flex items-center gap-1.5 text-sm text-teal font-medium hover:underline">
+                  <Plus className="h-3.5 w-3.5" /> Add beds
+                </button>
+              </div>
+            )}
+            {!loadingBeds && beds.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {beds.map((bed) => (
+                  <BedCard key={bed.id} bed={bed} dormId={dormId}
+                    onDeleted={(bedId) => {
+                      setBeds((prev) => prev.filter((b) => b.id !== bedId));
+                      setCubicle((prev) => ({
+                        ...prev,
+                        _count: {
+                          ...prev._count,
+                          beds: Math.max(0, prev._count.beds - 1),
+                          sleepingPositions: Math.max(
+                            0,
+                            prev._count.sleepingPositions -
+                              (beds.find((b) => b.id === bedId)?.positions.length ?? 1)
+                          ),
+                        },
+                      }));
+                      onBedDeleted();
+                    }}
+                  />
+                ))}
+              </div>
+            )}
           </div>
-          {expanded ? <ChevronUp className="h-4 w-4 text-slate shrink-0" /> : <ChevronDown className="h-4 w-4 text-slate shrink-0" />}
-        </button>
-        <button onClick={() => onAddBeds(cubicle.id)}
-          className="p-1.5 rounded-md text-slate hover:text-teal hover:bg-teal/10 transition-all shrink-0" aria-label="Add beds">
-          <Plus className="h-4 w-4" />
-        </button>
+        )}
       </div>
 
-      {expanded && (
-        <div className="border-t border-line dark:border-dark-border bg-paper/50 dark:bg-dark-bg/30 p-4">
-          {loadingBeds && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-              {[...Array(4)].map((_, i) => <div key={i} className="h-20 rounded-lg bg-line/40 animate-pulse" />)}
-            </div>
-          )}
-          {!loadingBeds && beds.length === 0 && (
-            <div className="text-center py-6">
-              <p className="text-slate text-sm dark:text-dark-muted">No beds in this cubicle yet.</p>
-              <button onClick={() => onAddBeds(cubicle.id)}
-                className="mt-2 inline-flex items-center gap-1.5 text-sm text-teal font-medium hover:underline">
-                <Plus className="h-3.5 w-3.5" /> Add beds
-              </button>
-            </div>
-          )}
-          {!loadingBeds && beds.length > 0 && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-              {beds.map((bed) => <BedCard key={bed.id} bed={bed} />)}
-            </div>
-          )}
-        </div>
+      {showEdit && (
+        <EditCubicleModal
+          cubicle={cubicle}
+          dormId={dormId}
+          onClose={() => setShowEdit(false)}
+          onSaved={(updated) => {
+            setCubicle(updated);
+            setShowEdit(false);
+            // If beds are visible, refresh them in case names changed
+            if (expanded) refreshBeds();
+          }}
+        />
       )}
-    </div>
+    </>
   );
 }
 
@@ -451,10 +808,22 @@ export default function DormDetailPage() {
             {dorm.description && <p className="text-sm text-slate dark:text-dark-muted mb-2">{dorm.description}</p>}
             <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate dark:text-dark-muted">
               {dorm.boardingMaster && (
-                <span><span className="font-medium text-ink dark:text-dark-text">{dorm.boardingMaster.fullName}</span> · Boarding master</span>
+                <span>
+                  <Link href={`/principal/staff/${dorm.boardingMaster.id}`}
+                    className="font-medium text-ink hover:text-teal transition-colors dark:text-dark-text dark:hover:text-teal">
+                    {dorm.boardingMaster.fullName}
+                  </Link>
+                  {" · Boarding master"}
+                </span>
               )}
               {dorm.dormCaptain && (
-                <span><span className="font-medium text-ink dark:text-dark-text">{dorm.dormCaptain.fullName}</span> · Dorm captain</span>
+                <span>
+                  <Link href={`/principal/students/${dorm.dormCaptain.id}`}
+                    className="font-medium text-ink hover:text-teal transition-colors dark:text-dark-text dark:hover:text-teal">
+                    {dorm.dormCaptain.fullName}
+                  </Link>
+                  {" · Dorm captain"}
+                </span>
               )}
             </div>
           </div>
@@ -511,7 +880,8 @@ export default function DormDetailPage() {
           <div className="space-y-3">
             {dorm.cubicles.map((c) => (
               <CubicleSection key={c.id} cubicle={c} dormId={dormId}
-                onAddBeds={(cId) => { setAddBedsCubicleId(cId); setShowAddBeds(true); }} />
+                onAddBeds={(cId) => { setAddBedsCubicleId(cId); setShowAddBeds(true); }}
+                onBedDeleted={load} />
             ))}
           </div>
         </>
@@ -539,7 +909,15 @@ export default function DormDetailPage() {
 
           {beds.length > 0 && (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-              {beds.map((bed) => <BedCard key={bed.id} bed={bed} />)}
+              {beds.map((bed) => (
+                <BedCard key={bed.id} bed={bed} dormId={dormId}
+                  onDeleted={(bedId) => {
+                    setBeds((prev) => prev.filter((b) => b.id !== bedId));
+                    // Reload the dorm header so totalCapacity / occupancy numbers update
+                    load();
+                  }}
+                />
+              ))}
             </div>
           )}
         </>

@@ -1,11 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { groupToken } from "@/lib/messaging/placeholders";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 
 interface Template { id: string; name: string; category: string | null; body: string }
+interface Group    { id: string; name: string }
 
 interface Props {
   initial?: Template;
+  groups?:  Group[];
   onSaved:  () => void;
   onCancel: () => void;
 }
@@ -32,12 +36,24 @@ const TOKEN_COLOURS: Record<string, string> = {
   "/results":   "bg-slate/10 text-slate",
 };
 
-export default function TemplateEditor({ initial, onSaved, onCancel }: Props) {
-  const [name, setName]         = useState(initial?.name     ?? "");
-  const [category, setCategory] = useState(initial?.category ?? "");
-  const [body, setBody]         = useState(initial?.body     ?? "");
+export default function TemplateEditor({ initial, groups = [], onSaved, onCancel }: Props) {
+  // Draft key is scoped to the record id so edit drafts don't bleed across templates.
+  // New templates use the key "new".
+  const draftKey = `bidii_draft_template_${initial?.id ?? "new"}`;
+  const [draft, setDraft, clearDraft] = useFormDraft(draftKey, {
+    name:     initial?.name     ?? "",
+    category: initial?.category ?? "",
+    body:     initial?.body     ?? "",
+  });
+
+  const [name, setName]         = useState(draft.name);
+  const [category, setCategory] = useState(draft.category);
+  const [body, setBody]         = useState(draft.body);
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState("");
+
+  // Persist on every change
+  useEffect(() => { setDraft({ name, category, body }); }, [name, category, body, setDraft]);
 
 
   function insertToken(token: string) {
@@ -72,7 +88,7 @@ export default function TemplateEditor({ initial, onSaved, onCancel }: Props) {
       body:    JSON.stringify({ name: name.trim(), category: category || null, body: body.trim() }),
     });
 
-    if (r.ok) { onSaved(); }
+    if (r.ok) { clearDraft(); onSaved(); }
     else {
       const d = await r.json() as { error?: string };
       setError(d.error ?? "Could not save template.");
@@ -102,14 +118,44 @@ export default function TemplateEditor({ initial, onSaved, onCancel }: Props) {
       <div>
         <div className="flex items-center justify-between mb-1">
           <label className="block text-xs font-medium text-slate">Message body *</label>
-          <div className="flex flex-wrap gap-1">
-            {PLACEHOLDERS.map((p) => (
+        </div>
+
+        {/* ── Placeholder chips — static tokens ── */}
+        <div className="mb-2 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-[10px] font-semibold text-slate uppercase tracking-wide mr-1 shrink-0">Student</span>
+            {PLACEHOLDERS.filter(p => ["/name","/class","/stream","/Admission","/results"].includes(p.token)).map((p) => (
               <button key={p.token} type="button" onClick={() => insertToken(p.token)}
                 className={`rounded-full px-2 py-0.5 text-xs font-medium border ${TOKEN_COLOURS[p.token] ?? "bg-slate/10 text-slate"} border-transparent hover:opacity-80 transition-opacity`}>
                 {p.label}
               </button>
             ))}
           </div>
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-[10px] font-semibold text-slate uppercase tracking-wide mr-1 shrink-0">Staff</span>
+            {PLACEHOLDERS.filter(p => ["/staffname","/staffno"].includes(p.token)).map((p) => (
+              <button key={p.token} type="button" onClick={() => insertToken(p.token)}
+                className={`rounded-full px-2 py-0.5 text-xs font-medium border ${TOKEN_COLOURS[p.token] ?? "bg-slate/10 text-slate"} border-transparent hover:opacity-80 transition-opacity`}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {/* ── Per-group tokens — one row per group ── */}
+          {groups.length > 0 && groups.map((g) => {
+            const token = groupToken(g.name);
+            return (
+              <div key={g.id} className="flex flex-wrap items-center gap-1">
+                <span className="text-[10px] font-semibold text-slate uppercase tracking-wide mr-1 shrink-0 max-w-[80px] truncate" title={g.name}>
+                  {g.name}
+                </span>
+                <button type="button" onClick={() => insertToken(token)}
+                  className="rounded-full px-2 py-0.5 text-xs font-medium border bg-violet-100 text-violet-700 border-transparent hover:opacity-80 transition-opacity">
+                  {token}
+                </button>
+              </div>
+            );
+          })}
         </div>
         <textarea
           data-template-body

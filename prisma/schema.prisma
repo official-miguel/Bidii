@@ -20,6 +20,16 @@ model School {
   address                  String?
   phone                    String?
   email                    String?
+  /// School branding & configuration
+  logoUrl                  String?
+  stampUrl                 String?
+  motto                    String?
+  /// DAY_ONLY | DAY_AND_BOARDING | BOARDING_ONLY
+  boardingType             String                    @default("DAY_AND_BOARDING")
+  /// MIXED | BOYS_ONLY | GIRLS_ONLY
+  genderPolicy             String                    @default("MIXED")
+  /// When true, every new student registration triggers round-robin dorm assignment
+  autoAllocateDorms        Boolean                   @default(false)
   createdAt                DateTime                  @default(now())
   updatedAt                DateTime                  @updatedAt
   aiTimetableConstraints   AiTimetableConstraint[]
@@ -228,6 +238,7 @@ model Teacher {
   userId                 String?                 @unique
   staffId                String
   fullName               String
+  designation            String?
   email                  String?
   phone                  String?
   primaryDepartmentId    String?
@@ -452,6 +463,7 @@ model Student {
   userId                   String?              @unique
   admissionNumber          String
   fullName                 String
+  gender                   String?
   dateOfBirth              DateTime?
   classId                  String
   parentName               String?

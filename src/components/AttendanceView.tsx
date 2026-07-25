@@ -14,6 +14,13 @@
  * Write path:
  *   POST /api/attendance → success → attendanceStore.upsertMany() updates
  *   IDB + in-memory state → SSE event propagates to other open tabs.
+ *
+ * Teacher once-a-day rule (lockClass=true):
+ *   - Date is locked to today — the date picker is replaced with plain text.
+ *   - After the first save the button label changes to "Update attendance"
+ *     so the teacher knows a record already exists but can still correct it.
+ *   - The API enforces this server-side too (past-date submissions rejected
+ *     for TEACHER role).
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -50,26 +57,28 @@ export default function AttendanceView({
   lockClass = false,
 }: {
   classes: { id: string; name: string }[];
+  /** When true the class and date are locked to today — teacher mode. */
   lockClass?: boolean;
 }) {
   const [classId, setClassId] = useState(classes[0]?.id || "");
-  const [date,    setDate]    = useState(today());
-  const [saving,  setSaving]  = useState(false);
+
+  // In teacher (lockClass) mode the date is always today and cannot be changed.
+  const [date, setDate] = useState(today());
+
+  const [saving,    setSaving]    = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt,   setSavedAt]   = useState<number | null>(null);
 
+  // Whether today's attendance has already been submitted at least once.
+  // Drives the "Update attendance" label and the advisory banner.
+  const [alreadySubmitted, setAlreadySubmitted] = useState(false);
+
   // ── Store reads ────────────────────────────────────────────────────────────
-  // Only subscribe reactively to DATA (students, loading flags).
-  // Actions (loadClassDate, upsertMany) are accessed via getState() so their
-  // unstable function references never appear in useEffect dependency arrays
-  // and cannot cause infinite re-render loops.
   const allStudents       = useStudentsStore((s) => s.students);
   const storesLoading     = useStudentsStore((s) => s.loading);
   const attendanceLoading = useAttendanceStore((s) => s.loading);
 
   // ── Fallback state for cold-cache visits ──────────────────────────────────
-  // If the student store has no entries yet (very first page load, IDB empty),
-  // fetch the roster from the API as a one-time fallback.
   const [apiFallbackRows, setApiFallbackRows] = useState<StudentRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -89,15 +98,12 @@ export default function AttendanceView({
   );
 
   useEffect(() => {
-    // Once the stores finish loading, clear any API fallback — the store is
-    // the source of truth from this point on.
     if (!storesLoading && storeStudents.length > 0) {
       setApiFallbackRows(null);
       setLoadError(null);
       return;
     }
 
-    // Only fetch from API if the store has no students for this class yet.
     if (!storesLoading && storeStudents.length === 0 && classId) {
       setLoadError(null);
       const controller = new AbortController();
@@ -125,12 +131,6 @@ export default function AttendanceView({
   }, [storesLoading, storeStudents.length, classId, date]);
 
   // ── Overlay store attendance status onto the roster ────────────────────────
-  // getAttendanceForClassDate returns only records that have been saved
-  // (either offline or from the server). Default = PRESENT (checkbox-on)
-  // until saved, matching the original behaviour.
-  //
-  // We subscribe to byClassDate so this component re-renders when records
-  // are saved — getAttendanceForClassDate reads from getState() directly.
   const byClassDate = useAttendanceStore((s) => s.byClassDate);
   const storedRecords: LocalAttendance[] = useMemo(
     () => getAttendanceForClassDate(classId, date),
@@ -142,8 +142,13 @@ export default function AttendanceView({
     [storedRecords]
   );
 
-  // Local override state so teachers can toggle checkboxes before saving.
-  // Initialised from store; reset when classId or date changes.
+  // ── Detect whether today already has saved records (teacher mode) ──────────
+  useEffect(() => {
+    if (!lockClass) return;
+    setAlreadySubmitted(storedRecords.length > 0);
+  }, [lockClass, storedRecords]);
+
+  // Local override state — reset when classId or date changes.
   const [overrides, setOverrides] = useState<Map<string, boolean>>(new Map());
   useEffect(() => { setOverrides(new Map()); }, [classId, date]);
 
@@ -154,12 +159,11 @@ export default function AttendanceView({
           studentId:       s.id,
           fullName:        s.fullName,
           admissionNumber: s.admissionNumber,
-          present:         true, // default
+          present:         true,
         }))
       : (apiFallbackRows ?? []);
 
     return source.map((s) => {
-      // Priority: unsaved local override > saved IDB record > default (present)
       if (overrides.has(s.studentId)) {
         return { ...s, present: overrides.get(s.studentId)! };
       }
@@ -198,7 +202,6 @@ export default function AttendanceView({
       const data = await res.json();
       if (!res.ok) { setSaveError(data.error || "Couldn't save attendance."); return; }
 
-      // Merge into the attendance store so other interactions see it immediately.
       const now = new Date().toISOString();
       const localRecords: LocalAttendance[] = rows.map((r) => ({
         id:           storedByStudent.get(r.studentId)?.id ?? `local-${r.studentId}-${date}`,
@@ -213,9 +216,9 @@ export default function AttendanceView({
       }));
       await useAttendanceStore.getState().upsertMany(localRecords);
 
-      // Clear overrides — store is now the source of truth.
       setOverrides(new Map());
       setSavedAt(Date.now());
+      setAlreadySubmitted(true);
     } catch {
       setSaveError("Couldn't save attendance.");
     } finally {
@@ -228,8 +231,11 @@ export default function AttendanceView({
   const presentCount = rows.filter((r) => r.present).length;
   const absentCount  = rows.length - presentCount;
 
-  // Show the loading spinner only during the brief IDB hydration window.
   const showLoading = (storesLoading || attendanceLoading) && rows.length === 0 && !apiFallbackRows;
+
+  const todayLabel = new Date().toLocaleDateString(undefined, {
+    weekday: "long", year: "numeric", month: "long", day: "numeric",
+  });
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -251,16 +257,28 @@ export default function AttendanceView({
             </select>
           </div>
         )}
-        <div>
-          <label className={labelClass}>Date</label>
-          <input
-            type="date"
-            className={inputClass}
-            value={date}
-            max={today()}
-            onChange={(e) => setDate(e.target.value)}
-          />
-        </div>
+
+        {/* Date — locked to today in teacher mode, editable for principal */}
+        {lockClass ? (
+          <div>
+            <p className={labelClass}>Date</p>
+            <p className="text-sm font-medium text-ink dark:text-dark-text py-1.5">
+              {todayLabel}
+            </p>
+          </div>
+        ) : (
+          <div>
+            <label className={labelClass}>Date</label>
+            <input
+              type="date"
+              className={inputClass}
+              value={date}
+              max={today()}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </div>
+        )}
+
         {rows.length > 0 && (
           <div className="flex gap-4 pb-0.5">
             <button type="button" className="text-sm text-royal hover:underline" onClick={() => markAll(true)}>
@@ -273,14 +291,21 @@ export default function AttendanceView({
         )}
       </div>
 
-      {/* Status banners */}
-      {savedAt && (
-        <div className="mb-4 rounded-md bg-success-bg text-success text-sm px-3 py-2">
-          Attendance saved.
+      {/* Already-submitted advisory (teacher mode, before this session's save) */}
+      {lockClass && alreadySubmitted && !savedAt && (
+        <div className="mb-4 rounded-md bg-teal/8 border border-teal/20 text-teal text-sm px-3 py-2">
+          Attendance has already been submitted for today. You can still make corrections and update.
         </div>
       )}
-      {saveError  && <ErrorBanner message={saveError} />}
-      {loadError  && <ErrorBanner message={loadError} />}
+
+      {/* Success banner */}
+      {savedAt && (
+        <div className="mb-4 rounded-md bg-success-bg text-success text-sm px-3 py-2">
+          {alreadySubmitted ? "Attendance updated." : "Attendance saved."}
+        </div>
+      )}
+      {saveError && <ErrorBanner message={saveError} />}
+      {loadError && <ErrorBanner message={loadError} />}
 
       {/* Roster */}
       {!classId ? (
@@ -291,11 +316,11 @@ export default function AttendanceView({
         <EmptyState message="No students in this class yet." />
       ) : (
         <>
-          <div className="bg-white border border-line rounded-xl overflow-hidden shadow-sm">
+          <div className="bg-white dark:bg-dark-surface border border-line dark:border-dark-border rounded-xl overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-sm min-w-[480px]">
                 <thead className="sticky top-0 z-10">
-                  <tr className="border-b border-line bg-slate-50/80 text-left text-xs font-semibold text-slate uppercase tracking-wide">
+                  <tr className="border-b border-line dark:border-dark-border bg-slate-50/80 dark:bg-dark-border/40 text-left text-xs font-semibold text-slate uppercase tracking-wide">
                     <th className="px-5 py-3.5 w-[130px]">Adm. No.</th>
                     <th className="px-5 py-3.5">Name</th>
                     <th className="px-5 py-3.5 w-[140px]">Present</th>
@@ -305,17 +330,19 @@ export default function AttendanceView({
                   {rows.map((r) => (
                     <tr
                       key={r.studentId}
-                      className={`border-b border-line last:border-0 cursor-pointer transition-colors ${
-                        r.present ? "hover:bg-slate-50/50" : "bg-danger-bg/20 hover:bg-danger-bg/30"
+                      className={`border-b border-line dark:border-dark-border last:border-0 cursor-pointer transition-colors ${
+                        r.present
+                          ? "hover:bg-slate-50/50 dark:hover:bg-dark-border/20"
+                          : "bg-danger-bg/20 hover:bg-danger-bg/30 dark:bg-danger/5 dark:hover:bg-danger/10"
                       }`}
                       onClick={() => setPresent(r.studentId, !r.present)}
                     >
                       <td className="px-5 py-3.5">
-                        <span className="text-xs font-mono text-slate bg-slate-50 border border-line rounded px-1.5 py-0.5">
+                        <span className="text-xs font-mono text-slate bg-slate-50 dark:bg-dark-border border border-line dark:border-dark-border rounded px-1.5 py-0.5">
                           {r.admissionNumber}
                         </span>
                       </td>
-                      <td className="px-5 py-3.5 font-medium text-ink">{r.fullName}</td>
+                      <td className="px-5 py-3.5 font-medium text-ink dark:text-dark-text">{r.fullName}</td>
                       <td className="px-5 py-3.5">
                         <label
                           className="inline-flex items-center gap-2 text-sm cursor-pointer"
@@ -340,16 +367,20 @@ export default function AttendanceView({
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between mt-5 pt-4 border-t border-line">
+          <div className="flex items-center justify-between mt-5 pt-4 border-t border-line dark:border-dark-border">
             <p className="text-sm">
               <span className="text-success font-semibold">{presentCount} present</span>
               {" · "}
               <span className="text-danger font-semibold">{absentCount} absent</span>
               {" · "}
-              <span className="text-slate">{rows.length} students</span>
+              <span className="text-slate dark:text-dark-muted">{rows.length} students</span>
             </p>
             <button className={primaryButtonClass} disabled={saving} onClick={handleSave}>
-              {saving ? "Saving…" : "Save attendance"}
+              {saving
+                ? "Saving…"
+                : alreadySubmitted
+                  ? "Update attendance"
+                  : "Save attendance"}
             </button>
           </div>
         </>

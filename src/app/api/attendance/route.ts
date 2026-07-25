@@ -401,6 +401,19 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
+  // Teachers may only submit attendance for today.
+  // This is a server-side enforcement of the once-a-day rule — the UI
+  // already locks the date to today, but we guard here too.
+  if (user.role === "TEACHER") {
+    const todayStr = isoDay(new Date());
+    if (parsed.data.date !== todayStr) {
+      return NextResponse.json(
+        { error: "Teachers can only record attendance for today." },
+        { status: 403 }
+      );
+    }
+  }
+
   // Validate class and students in parallel.
   const [schoolClass, validStudents] = await Promise.all([
     prisma.schoolClass.findFirst({

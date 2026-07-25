@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import {
-  Building2, Users, BedDouble, AlertTriangle, CheckCircle2,
+  Building2, Users, BedDouble, CheckCircle2,
   TrendingUp, Wrench, Lock, ArrowRight, Plus, RefreshCw,
   Home, UserCheck, BarChart2, ClipboardList, Settings, Shuffle, FileText,
 } from "lucide-react";
@@ -256,28 +256,6 @@ export default function AccommodationOverviewPage() {
             </div>
           </div>
 
-          {/* ── Alerts ─────────────────────────────────────────────────── */}
-          {(summary.maintenanceDormitories > 0 || summary.dormSummaries.some((d) => d.isAlmostFull)) && (
-            <div className="mb-6 space-y-2">
-              {summary.maintenanceDormitories > 0 && (
-                <div className="flex items-center gap-3 rounded-lg border border-warn/20 bg-warn-bg/50 px-4 py-3 text-sm text-warn dark:bg-warn/10">
-                  <Wrench className="h-4 w-4 shrink-0" />
-                  <span>
-                    {summary.maintenanceDormitories} dormitor{summary.maintenanceDormitories === 1 ? "y is" : "ies are"} currently under maintenance.
-                  </span>
-                </div>
-              )}
-              {summary.dormSummaries.filter((d) => d.isAlmostFull && d.status === "ACTIVE").map((d) => (
-                <div key={d.id} className="flex items-center gap-3 rounded-lg border border-warn/20 bg-warn-bg/50 px-4 py-3 text-sm text-warn dark:bg-warn/10">
-                  <AlertTriangle className="h-4 w-4 shrink-0" />
-                  <span>
-                    <strong>{d.name}</strong> is {d.occupancyPct}% occupied ({d.available} space{d.available !== 1 ? "s" : ""} remaining).
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-
           {/* ── Dorm cards ──────────────────────────────────────────────── */}
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-semibold text-ink dark:text-dark-text">All Dormitories</h2>
@@ -373,7 +351,9 @@ export default function AccommodationOverviewPage() {
                       <span className="text-xs text-slate dark:text-dark-muted">
                         {dorm.available > 0
                           ? `${dorm.available} free`
-                          : <span className="text-danger font-medium">Full</span>}
+                          : dorm.capacity > 0 && dorm.occupancyPct >= 100
+                            ? <span className="text-danger font-medium">Full</span>
+                            : <span className="text-slate dark:text-dark-muted">—</span>}
                       </span>
                     </div>
                     <ArrowRight className="h-3.5 w-3.5 text-slate group-hover:text-teal group-hover:translate-x-0.5 transition-all dark:text-dark-muted" />

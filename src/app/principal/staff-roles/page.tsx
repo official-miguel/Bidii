@@ -34,9 +34,21 @@ export default async function StaffRolesPage() {
       },
     }).catch(() => []),
     prisma.user.findMany({
-      where: { schoolId, role: "ADMIN_STAFF", isActive: true },
-      select: { id: true, email: true, staffRoleId: true,
-                userStaffRoles: { select: { staffRoleId: true } } },
+      where: { schoolId, role: { in: ["ADMIN_STAFF", "TEACHER"] }, isActive: true },
+      select: {
+        id:          true,
+        email:       true,
+        role:        true,
+        staffRoleId: true,
+        userStaffRoles: { select: { staffRoleId: true } },
+        teacher: {
+          select: {
+            fullName:       true,
+            staffId:        true,
+            classTeacherOf: { select: { name: true } },
+          },
+        },
+      },
       orderBy: { email: "asc" },
     }),
   ]);
@@ -103,7 +115,12 @@ export default async function StaffRolesPage() {
         </div>
         <div className="flex items-center gap-2 text-sm text-slate dark:text-dark-muted">
           <Users className="h-4 w-4" />
-          <span>{staffUsers.length} staff member{staffUsers.length !== 1 ? "s" : ""}</span>
+          <span>
+            {staffUsers.filter((u) => u.role === "ADMIN_STAFF").length} admin
+            {" · "}
+            {staffUsers.filter((u) => u.role === "TEACHER").length} teacher
+            {staffUsers.filter((u) => u.role === "TEACHER").length !== 1 ? "s" : ""}
+          </span>
           <span className="mx-1">·</span>
           <span>{roles.length} role{roles.length !== 1 ? "s" : ""}</span>
         </div>

@@ -4,9 +4,6 @@ import { prisma } from "@/lib/prisma";
 import { resolveAssessmentActor, canAccessDashboard } from "@/lib/assessment/auth844";
 import DeptAnalyticsPage from "@/components/assessment/DeptAnalyticsPage";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const db = prisma as any;
-
 export default async function DeptAnalyticsRoute() {
   const user = await getCurrentUser();
   if (!user || user.role !== "PRINCIPAL") redirect("/login");
@@ -31,20 +28,20 @@ export default async function DeptAnalyticsRoute() {
     });
   }
 
-  const framework = await db.assessmentFramework.findFirst({
-    where: { schoolId: user.schoolId, type: "EIGHT_FOUR_FOUR", isActive: true },
-    select: { id: true },
-  }) as { id: string } | null;
+  // Classes — all 8-4-4 classes (ExamFilterBar filters by form/stream internally).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const classes = await (prisma as any).schoolClass.findMany({
+    where: { schoolId: user.schoolId },
+    orderBy: [{ form: "asc" }, { name: "asc" }],
+    select: { id: true, name: true, form: true },
+  }) as Array<{ id: string; name: string; form: number }>;
 
-  const periods = framework
-    ? await db.assessmentPeriod.findMany({
-        where: { schoolId: user.schoolId, frameworkId: framework.id },
-        orderBy: [{ academicYear: "desc" }, { term: "desc" }],
-        select: { id: true, name: true, academicYear: true, term: true, isCurrent: true },
-      }) as Array<{ id: string; name: string; academicYear: string; term: number | null; isCurrent: boolean }>
-    : [];
-
-  const currentPeriodId = periods.find((p) => p.isCurrent)?.id ?? periods[0]?.id;
+  // Subjects — all, ExamFilterBar filters by applicableForms internally.
+  const subjects = await prisma.subject.findMany({
+    where: { schoolId: user.schoolId },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, applicableForms: true },
+  });
 
   return (
     <div className="space-y-5">
@@ -60,8 +57,8 @@ export default async function DeptAnalyticsRoute() {
         <DeptAnalyticsPage
           departments={departments}
           defaultDepartmentId={departments[0]?.id}
-          currentPeriodId={currentPeriodId}
-          periods={periods}
+          classes={classes}
+          subjects={subjects}
         />
       )}
     </div>

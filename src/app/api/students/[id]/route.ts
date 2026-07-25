@@ -20,11 +20,13 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 }
 
 const updateSchema = z.object({
-  fullName: z.string().trim().min(2).optional(),
-  dateOfBirth: z.string().trim().optional().or(z.literal("")),
-  classId: z.string().min(1).optional(),
-  parentName: z.string().trim().optional().or(z.literal("")),
-  parentContact: z.string().trim().optional().or(z.literal("")),
+  fullName:           z.string().trim().min(2).optional(),
+  dateOfBirth:        z.string().trim().optional().or(z.literal("")),
+  classId:            z.string().min(1).optional(),
+  gender:             z.enum(["MALE", "FEMALE"]).nullable().optional(),
+  boardingStatus:     z.enum(["DAY", "BOARDING"]).nullable().optional(),
+  parentName:         z.string().trim().optional().or(z.literal("")),
+  parentContact:      z.string().trim().optional().or(z.literal("")),
   electiveSubjectIds: z.array(z.string()).optional(),
 });
 

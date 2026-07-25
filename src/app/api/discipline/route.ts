@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
     orderBy: { dateOfOffence: "desc" },
     include: {
       student: { select: { id: true, fullName: true, admissionNumber: true, schoolClass: { select: { id: true, name: true, form: true, stream: true } } } },
-      recordedBy: { select: { email: true } },
+      recordedBy: { select: { email: true, role: true, teacher: { select: { fullName: true } } } },
       _count: { select: { files: true, caseNotes: true } },
     },
   });

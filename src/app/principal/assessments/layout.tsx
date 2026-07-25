@@ -36,14 +36,14 @@ export default async function PrincipalAssessmentsLayout({
   const base = isPrincipal ? "/principal" : "/staff";
 
   const navItems: AssessmentNavItem[] = [
-    { href: `${base}/assessments`,                        label: "Overview",          icon: "🏠", exact: true },
-    { href: `${base}/assessments/marksheet`,              label: "Mark Sheets",       icon: "📝" },
-    { href: `${base}/assessments/dashboard`,              label: "Dashboard",         icon: "📊" },
-    { href: `${base}/assessments/dept-analytics`,         label: "Dept Analytics",    icon: "🏛️" },
-    { href: `${base}/assessments/staff-performance`,      label: "Staff Performance", icon: "🏆" },
-    { href: `${base}/assessments/report-cards`,           label: "Report Cards",      icon: "📄" },
+    { href: `${base}/assessments`,                        label: "Overview",          icon: "overview",         exact: true },
+    { href: `${base}/assessments/marksheet`,              label: "Mark Sheets",       icon: "marksheet" },
+    { href: `${base}/assessments/dashboard`,              label: "In-depth Analysis",  icon: "dashboard" },
+    { href: `${base}/assessments/dept-analytics`,         label: "Dept Analytics",    icon: "dept-analytics" },
+    { href: `${base}/assessments/staff-performance`,      label: "Staff Performance", icon: "performance" },
+    { href: `${base}/assessments/report-cards`,           label: "Report Cards",      icon: "report-cards" },
     ...(canSeeExamSetup
-      ? [{ href: `${base}/assessments/exam-setup`,        label: "Exam Setup",        icon: "⚙️" }]
+      ? [{ href: `${base}/assessments/exam-setup`,        label: "Exam Setup",        icon: "exam-setup" as const }]
       : []),
   ];
 

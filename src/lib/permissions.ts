@@ -129,8 +129,10 @@ function mergeAccess(a: ModuleAccess, b: ModuleAccess): ModuleAccess {
 //  1. PRINCIPAL → unconditional full access to all modules.
 //  2. ADMIN_STAFF → union of all assigned StaffRole permissions (multi-role).
 //     Falls back to legacy User.staffRoleId if UserStaffRole table is empty.
-//  3. TEACHER / STUDENT / PARENT / others → empty (their pages use
-//     hardcoded logic that bypasses RBAC).
+//  3. TEACHER → same multi-role union as ADMIN_STAFF when the teacher has
+//     StaffRole assignments. Returns empty when no roles assigned (teacher
+//     layout then falls back to "show all hubs" default).
+//  4. STUDENT / PARENT / others → empty.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getEffectivePermissions(user: User): Promise<EffectivePermissions> {
@@ -140,8 +142,11 @@ export async function getEffectivePermissions(user: User): Promise<EffectivePerm
     return full;
   }
 
-  if (user.role === "ADMIN_STAFF") {
-    // Collect all StaffRole IDs assigned to this user via the new join table.
+  // Both ADMIN_STAFF and TEACHER users can hold StaffRole assignments.
+  // For TEACHER the result is additive — it only unlocks extra hubs/modules
+  // on top of their built-in class/subject access; it never removes anything.
+  if (user.role === "ADMIN_STAFF" || user.role === "TEACHER") {
+    // Collect all StaffRole IDs assigned to this user via the join table.
     const multiRoleRows = await prisma.userStaffRole.findMany({
       where: { userId: user.id },
       select: { staffRoleId: true },
@@ -155,6 +160,8 @@ export async function getEffectivePermissions(user: User): Promise<EffectivePerm
       roleIds = [user.staffRoleId];
     }
 
+    // A TEACHER with no extra roles has no extra RBAC permissions — their
+    // built-in access is handled by the teacher layout directly.
     if (roleIds.length === 0) return {};
 
     // Load all RolePermission rows for every assigned role in one query.
@@ -183,6 +190,16 @@ export async function getEffectivePermissions(user: User): Promise<EffectivePerm
   }
 
   return {};
+}
+
+/**
+ * hasAssignedRoles — lightweight check used by the teacher layout to decide
+ * whether to compute visibleHubs or use the "show everything" default.
+ * Avoids a full permission load when the teacher has no extra roles.
+ */
+export async function hasAssignedRoles(userId: string): Promise<boolean> {
+  const count = await prisma.userStaffRole.count({ where: { userId } });
+  return count > 0;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

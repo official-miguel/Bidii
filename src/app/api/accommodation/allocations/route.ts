@@ -99,9 +99,21 @@ export async function POST(req: NextRequest) {
   // Verify dorm belongs to this school
   const dorm = await prisma.dormitory.findFirst({
     where: { id: dormId, schoolId: user.schoolId },
+    include: { _count: { select: { allocations: { where: { status: "CURRENT" } } } } },
   });
   if (!dorm) {
     return NextResponse.json({ error: "Dormitory not found." }, { status: 404 });
+  }
+
+  // Block allocation if the dorm is already at or above capacity
+  // (only enforced when the dorm has sleeping positions configured)
+  if (dorm.totalCapacity > 0 && dorm._count.allocations >= dorm.totalCapacity) {
+    return NextResponse.json(
+      {
+        error: `${dorm.name} is at full capacity (${dorm._count.allocations}/${dorm.totalCapacity} positions occupied). Free up a space or add more beds before allocating another student.`,
+      },
+      { status: 409 }
+    );
   }
 
   // If a sleeping position is specified, check it's not already occupied

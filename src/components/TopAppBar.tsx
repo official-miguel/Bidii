@@ -97,6 +97,17 @@ export default function TopAppBar({
     return () => document.removeEventListener("mousedown", handler);
   }, [profileOpen]);
 
+  /* ── Quick actions outside-click ─────────────────────────────────────── */
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (quickActionsRef.current && !quickActionsRef.current.contains(e.target as Node)) {
+        setQuickActionsOpen(false);
+      }
+    }
+    if (quickActionsOpen) document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [quickActionsOpen]);
+
   /* ── Mutual exclusion ───────────────────────────────────────────────── */
   function openNotif() {
     setNotifOpen((v) => !v);

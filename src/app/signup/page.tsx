@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 
 const inputCls =
   "w-full rounded-lg border border-line bg-white px-3.5 py-2.5 text-sm text-ink " +
@@ -14,18 +15,35 @@ const inputCls =
 
 const labelCls = "block text-sm font-medium text-ink dark:text-dark-text mb-1.5";
 
+const DRAFT_DEFAULTS = {
+  schoolName:    "",
+  schoolAddress: "",
+  schoolPhone:   "",
+  fullName:      "",
+  email:         "",
+};
+
 export default function SignupPage() {
   const router = useRouter();
 
-  const [schoolName, setSchoolName]         = useState("");
-  const [schoolAddress, setSchoolAddress]   = useState("");
-  const [schoolPhone, setSchoolPhone]       = useState("");
-  const [fullName, setFullName]             = useState("");
-  const [email, setEmail]                   = useState("");
-  const [password, setPassword]             = useState("");
+  // ── Draft persistence (non-sensitive fields only) ─────────────────────────
+  const [draft, setDraft, clearDraft] = useFormDraft("bidii_draft_signup", DRAFT_DEFAULTS);
+
+  const [schoolName, setSchoolName]       = useState(draft.schoolName);
+  const [schoolAddress, setSchoolAddress] = useState(draft.schoolAddress);
+  const [schoolPhone, setSchoolPhone]     = useState(draft.schoolPhone);
+  const [fullName, setFullName]           = useState(draft.fullName);
+  const [email, setEmail]                 = useState(draft.email);
+  // Passwords are never persisted
+  const [password, setPassword]           = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError]   = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Persist non-sensitive fields on every change
+  useEffect(() => {
+    setDraft({ schoolName, schoolAddress, schoolPhone, fullName, email });
+  }, [schoolName, schoolAddress, schoolPhone, fullName, email, setDraft]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -50,6 +68,7 @@ export default function SignupPage() {
         return;
       }
 
+      clearDraft();
       router.push("/principal");
       router.refresh();
     } catch {
