@@ -9,11 +9,17 @@
  * Actions are role-filtered from ACTIONS_REGISTRY + a curated
  * "top 8 for this role" selection so the panel never feels overwhelming.
  * Clicking any action navigates immediately and closes the panel.
+ *
+ * The panel footer also houses the theme toggle and Soma AI toggle so the
+ * TopAppBar stays lean.
  */
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Zap, X } from "lucide-react";
+import { Zap, X, Sun, Moon, Sparkles } from "lucide-react";
+import { useTheme } from "@/components/ThemeProvider";
+import { useSomaAI } from "@/components/SomaAIProvider";
+import { useSomaAIStore } from "@/lib/soma-ai/store";
 import { ACTIONS_REGISTRY, NAV_REGISTRY } from "@/lib/hooks/useGlobalSearch";
 import { useProductivityStore } from "@/lib/stores/productivityStore";
 import { getLucideIcon } from "@/lib/utils/lucideIcon";
@@ -203,12 +209,85 @@ export default function QuickActionsPanel({ isOpen, onClose, role }: Props) {
           </div>
         </div>
       )}
+
+      {/* ── Utility footer: theme & AI ───────────────────────────────── */}
+      <PanelUtilityFooter onClose={onClose} />
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Trigger button — renders in TopAppBar
+// Utility footer — theme toggle + Soma AI toggle
+// ---------------------------------------------------------------------------
+
+function PanelUtilityFooter({ onClose }: { onClose: () => void }) {
+  const { theme, toggle } = useTheme();
+  const { isOpen: somaOpen, toggle: toggleSoma } = useSomaAI();
+  const somaStreaming = useSomaAIStore((s) => s.isStreaming);
+  const isDark = theme === "dark";
+
+  function handleSoma() {
+    toggleSoma();
+    onClose(); // close the panel so the AI panel gets focus
+  }
+
+  return (
+    <div className="border-t border-line dark:border-dark-border px-3 py-2.5
+                    flex items-center justify-between gap-2">
+      <p className="text-[11px] font-semibold text-slate uppercase tracking-wider
+                    dark:text-dark-muted">
+        Preferences
+      </p>
+
+      <div className="flex items-center gap-1">
+        {/* Theme toggle */}
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+          title={isDark ? "Light mode" : "Dark mode"}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg
+                     text-xs text-slate border border-line
+                     hover:bg-paper hover:text-ink transition-colors
+                     dark:text-dark-muted dark:border-dark-border
+                     dark:hover:bg-dark-border dark:hover:text-dark-text"
+        >
+          {isDark
+            ? <Sun  className="h-3.5 w-3.5" />
+            : <Moon className="h-3.5 w-3.5" />}
+          <span>{isDark ? "Light" : "Dark"}</span>
+        </button>
+
+        {/* Soma AI toggle */}
+        <button
+          type="button"
+          onClick={handleSoma}
+          aria-label={somaOpen ? "Close Soma AI" : "Open Soma AI"}
+          title="Soma AI"
+          className={`relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg
+                      text-xs border transition-colors
+                      ${somaOpen
+                        ? "bg-teal/10 text-teal border-teal/30 dark:bg-teal/20 dark:border-teal/40"
+                        : "text-slate border-line hover:bg-paper hover:text-ink dark:text-dark-muted dark:border-dark-border dark:hover:bg-dark-border dark:hover:text-dark-text"
+                      }`}
+        >
+          <span className="relative">
+            <Sparkles className="h-3.5 w-3.5" />
+            {somaStreaming && (
+              <span
+                className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full
+                           bg-teal animate-soma-pulse"
+                aria-hidden="true"
+              />
+            )}
+          </span>
+          <span>Soma AI</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 
 export function QuickActionsButton({

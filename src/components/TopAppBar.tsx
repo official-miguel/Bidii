@@ -15,14 +15,11 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { Search, Sun, Moon, ChevronDown, LogOut, Menu, Sparkles } from "lucide-react";
-import { useTheme } from "@/components/ThemeProvider";
+import { Search, ChevronDown, LogOut, Menu } from "lucide-react";
 import { useMobileDrawer } from "@/components/MobileDrawerContext";
 import GlobalSearchModal from "@/components/GlobalSearchModal";
 import NotificationCenter, { NotificationBell } from "@/components/NotificationCenter";
 import QuickActionsPanel, { QuickActionsButton } from "@/components/QuickActionsPanel";
-import { useSomaAI } from "@/components/SomaAIProvider";
-import { useSomaAIStore } from "@/lib/soma-ai/store";
 
 export interface QuickAction {
   label: string;
@@ -50,11 +47,8 @@ export default function TopAppBar({
   role = "principal",
   quickActions: _quickActions = [],
 }: Props) {
-  const { theme, toggle }      = useTheme();
   const { toggle: toggleDrawer } = useMobileDrawer();
   const router = useRouter();
-  const { isOpen: somaOpen, toggle: toggleSoma } = useSomaAI();
-  const somaStreaming = useSomaAIStore((s) => s.isStreaming);
   const [searchOpen,       setSearchOpen]       = useState(false);
   const [notifOpen,        setNotifOpen]        = useState(false);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
@@ -127,13 +121,6 @@ export default function TopAppBar({
     setQuickActionsOpen(false);
   }
 
-  function openSoma() {
-    toggleSoma();
-    setNotifOpen(false);
-    setQuickActionsOpen(false);
-    setProfileOpen(false);
-  }
-
   async function handleLogout() {
     setProfileOpen(false);
     await fetch("/api/auth/logout", { method: "POST" });
@@ -141,9 +128,6 @@ export default function TopAppBar({
     router.refresh();
   }
 
-  const isDark = theme === "dark";
-
-  // Shared icon-button class — 44px tap target on all viewports
   const iconBtn = `flex items-center justify-center w-11 h-11 rounded-lg
                    transition-colors duration-100
                    text-slate hover:bg-teal-50 hover:text-teal
@@ -214,38 +198,6 @@ export default function TopAppBar({
           className={`md:hidden ${iconBtn}`}
         >
           <Search className="h-5 w-5" />
-        </button>
-
-        {/* ── Theme toggle ─────────────────────────────────────────────── */}
-        <button
-          type="button"
-          onClick={toggle}
-          aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-          className={iconBtn}
-        >
-          {isDark
-            ? <Sun  className="h-[18px] w-[18px]" />
-            : <Moon className="h-[18px] w-[18px]" />}
-        </button>
-
-        {/* ── Soma AI ──────────────────────────────────────────────── */}
-        <button
-          type="button"
-          onClick={openSoma}
-          aria-label={somaOpen ? "Close Soma AI" : "Open Soma AI"}
-          aria-expanded={somaOpen}
-          aria-haspopup="dialog"
-          className={`relative ${iconBtn} ${somaOpen ? "bg-teal/10 text-teal dark:bg-teal/20 dark:text-teal-light" : ""}`}
-        >
-          <Sparkles className="h-[18px] w-[18px]" />
-          {/* Streaming activity dot */}
-          {somaStreaming && (
-            <span
-              className="absolute top-2 right-2 w-2 h-2 rounded-full bg-teal
-                         animate-soma-pulse"
-              aria-hidden="true"
-            />
-          )}
         </button>
 
         {/* ── Quick Actions ────────────────────────────────────────────── */}

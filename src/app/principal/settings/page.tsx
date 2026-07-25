@@ -678,7 +678,7 @@ function DormSectionCard({
 }
 
 function DormitorySettingsForm() {
-  const [dormDraft, setDormDraft, clearDormDraft] = useFormDraft("bidii_draft_settings_dorm", ACCOM_DEFAULT);
+  const [dormDraft, setDormDraft, clearDormDraft] = useFormDraft("bidii_draft_settings_dorm", ACCOM_DEFAULT as AccomSettings & Record<string, unknown>);
 
   const [settings, setSettings] = useState<AccomSettings>(dormDraft as AccomSettings);
   const [loading,  setLoading]  = useState(true);

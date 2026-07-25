@@ -304,7 +304,7 @@ export default function DashboardCharts({ classes, subjects }: Props) {
 
     const p = new URLSearchParams({ periodId });
     if (classId) p.set("classId", classId);
-    else if (form) p.set("form", form);
+    else if (form) p.set("form", String(form));
 
     fetch(`/api/assessments/dashboard/class-scorecard?${p}`, { signal: controller.signal, cache: "no-store" })
       .then(async (r) => {
