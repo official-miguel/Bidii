@@ -9,7 +9,6 @@ import {
   royalButtonClass, royalCardClass, dangerLinkClass,
 } from "@/components/ui";
 import { SkeletonTable } from "@/components/ui/ProgressivePage";
-import { useStaffStore }      from "@/lib/stores/staffStore";
 import { useStaffRolesStore } from "@/lib/stores/staffRolesStore";
 import ContextNavigation from "@/components/ContextNavigation";
 import WorkspaceToolbar from "@/components/workspace/WorkspaceToolbar";
@@ -91,18 +90,12 @@ function TabBar({ active, onChange }: { active: "directory" | "roles"; onChange:
 
 // ─── Directory tab ─────────────────────────────────────────────────────────────
 function DirectoryTab() {
-  const storeDepts  = useStaffStore((s) => s.departments);
-  const storeSubjs  = useStaffStore((s) => s.subjects);
   const storeRoles  = useStaffRolesStore((s) => s.roles);
-  const storeStaff  = useStaffStore((s) => s.teachers);
 
-  const [teachers, setTeachers] = useState<Teacher[] | null>(() =>
-    storeStaff.length > 0 ? (storeStaff as unknown as Teacher[]) : null
-  );
-
-  const departments = storeDepts as unknown as Department[];
-  const subjects    = storeSubjs as unknown as Subject[];
-  const staffRoles  = storeRoles as unknown as StaffRole[];
+  const [teachers,    setTeachers]    = useState<Teacher[] | null>(null);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [subjects,    setSubjects]    = useState<Subject[]>([]);
+  const staffRoles = storeRoles as unknown as StaffRole[];
 
   const [modalOpen, setModalOpen]   = useState(false);
   const [editing, setEditing]       = useState<Teacher | null>(null);
@@ -143,19 +136,25 @@ function DirectoryTab() {
   function openSubjDrawer(id: string)   { setDrawerSubjId(id);   setDrawerStaffId(null); setDrawerDeptId(null);  setDrawerClassId(null); }
 
   const load = useCallback(async () => {
-    const res   = await fetch("/api/staff");
-    const fresh = await res.json();
-    setTeachers(fresh);
+    const [staffRes, deptRes, subjRes] = await Promise.all([
+      fetch("/api/staff"),
+      fetch("/api/departments"),
+      fetch("/api/subjects"),
+    ]);
+    const [freshStaff, freshDepts, freshSubjs] = await Promise.all([
+      staffRes.ok ? staffRes.json() : [],
+      deptRes.ok  ? deptRes.json()  : [],
+      subjRes.ok  ? subjRes.json()  : [],
+    ]);
+    setTeachers(freshStaff);
+    setDepartments(freshDepts);
+    setSubjects(freshSubjs);
   }, []);
 
   useEffect(() => {
     load();
-    // Bootstrap stores if they haven't been loaded yet
-    const staff = useStaffStore.getState();
+    // Bootstrap staff roles store if not already loaded
     const roles = useStaffRolesStore.getState();
-    if (staff.departments.length === 0 && staff.subjects.length === 0 && !staff.loading) {
-      staff.fetch().catch(console.error);
-    }
     if (roles.roles.length === 0 && !roles.loading) {
       roles.fetch().catch(console.error);
     }
@@ -525,7 +524,7 @@ function DirectoryTab() {
                               type="button"
                               key={s.id}
                               onClick={() => toggleSubject(s.id)}
-                              className={`inline-flex items-center gap-1.5 text-sm rounded-lg border px-2.5 py-1 font-medium transition-all duration-100 ${
+                              className={`inline-flex items-center gap-1.5 text-sm rounded-lg border px-2.5 py-1 min-h-[44px] sm:min-h-0 font-medium transition-all duration-100 ${
                                 sel
                                   ? "bg-teal text-white border-teal shadow-xs"
                                   : "border-line text-ink hover:border-teal/40 hover:bg-teal-50/50"
@@ -672,6 +671,7 @@ function DirectoryTab() {
                 <button type="button" disabled={archiveLoading}
                   className="inline-flex items-center justify-center gap-2 rounded-lg
                              bg-amber-500 text-white text-sm font-medium px-4 py-2.5
+                             min-h-[44px] sm:min-h-0
                              hover:bg-amber-600 active:scale-[0.98] transition-all duration-100
                              disabled:opacity-50 disabled:cursor-not-allowed shadow-xs"
                   onClick={handleArchiveConfirm}>

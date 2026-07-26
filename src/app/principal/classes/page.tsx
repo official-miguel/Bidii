@@ -9,8 +9,6 @@ import {
   inputClass, labelClass, primaryButtonClass, secondaryButtonClass,
 } from "@/components/ui";
 import { SkeletonTable } from "@/components/ui/ProgressivePage";
-import { useClassesStore } from "@/lib/stores/classesStore";
-import { useStaffStore }   from "@/lib/stores/staffStore";
 import ContextNavigation from "@/components/ContextNavigation";
 import WorkspaceToolbar from "@/components/workspace/WorkspaceToolbar";
 import ClassWorkspaceDrawer  from "@/components/entity-drawers/ClassWorkspaceDrawer";
@@ -34,15 +32,8 @@ function FrameworkBadge({ type }: { type: string }) {
 }
 
 export default function ClassesPage() {
-  const storeClasses = useClassesStore((s) => s.classes);
-  const storeStaff   = useStaffStore((s) => s.teachers);
-
-  const [classes, setClasses] = useState<SchoolClass[] | null>(() => {
-    return storeClasses.length > 0 ? (storeClasses as unknown as SchoolClass[]) : null;
-  });
-  const [teachers, setTeachers] = useState<Teacher[]>(() => {
-    return storeStaff.length > 0 ? storeStaff.map((t) => ({ id: t.id, fullName: t.fullName })) : [];
-  });
+  const [classes, setClasses] = useState<SchoolClass[] | null>(null);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing]     = useState<SchoolClass | null>(null);
@@ -63,11 +54,15 @@ export default function ClassesPage() {
   function openSubjDrawer(id: string)  { setDrawerSubjId(id);  setDrawerClassId(null); setDrawerStaffId(null); setDrawerDeptId(null); }
 
   const load = useCallback(async () => {
-    const [classRes, teacherRes] = await Promise.all([fetch("/api/classes"), fetch("/api/staff")]);
-    const freshClasses  = await classRes.json();
-    const freshTeachers = await teacherRes.json();
-    setClasses(freshClasses);
-    setTeachers(freshTeachers.map((t: { id: string; fullName: string }) => ({ id: t.id, fullName: t.fullName })));
+    try {
+      const [classRes, teacherRes] = await Promise.all([fetch("/api/classes"), fetch("/api/staff")]);
+      const freshClasses  = classRes.ok  ? await classRes.json()  : [];
+      const freshTeachers = teacherRes.ok ? await teacherRes.json() : [];
+      setClasses(freshClasses);
+      setTeachers(freshTeachers.map((t: { id: string; fullName: string }) => ({ id: t.id, fullName: t.fullName })));
+    } catch {
+      setClasses([]);
+    }
   }, []);
 
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps

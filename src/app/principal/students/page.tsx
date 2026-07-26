@@ -16,9 +16,7 @@ import {
   primaryButtonClass,
   secondaryButtonClass,
 } from "@/components/ui";
-import { useStudentsStore } from "@/lib/stores/studentsStore";
-import { useClassesStore }  from "@/lib/stores/classesStore";
-import { useStaffStore }    from "@/lib/stores/staffStore";
+
 import { useVirtualizer }   from "@tanstack/react-virtual";
 import { SkeletonTable }    from "@/components/ui/ProgressivePage";
 import ContextNavigation from "@/components/ContextNavigation";
@@ -331,37 +329,32 @@ export default function StudentsPage() {
   const router = useRouter();
   const parentRef = useRef<HTMLDivElement>(null);
 
-  // ── Store reads ───────────────────────────────────────────────────────────
-  const rawStudents  = useStudentsStore((s) => s.students);
-  const storeLoading = useStudentsStore((s) => s.loading);
-  const rawClasses   = useClassesStore((s)  => s.classes);
-  const rawSubjects  = useStaffStore((s)    => s.subjects);
+  // ── Direct API state (no store cache) ─────────────────────────────────────
+  const [rawStudents,  setRawStudents]  = useState<Student[]>([]);
+  const [rawClasses,   setRawClasses]   = useState<SchoolClass[]>([]);
+  const [subjects,     setSubjects]     = useState<Subject[]>([]);
+  const [pageLoading,  setPageLoading]  = useState(true);
 
-  // ── Bootstrap stores on mount (if not already loaded) ───────────────────
-  useEffect(() => {
-    const s = useStudentsStore.getState();
-    const c = useClassesStore.getState();
-    if (s.students.length === 0 && !s.loading) s.fetch().catch(console.error);
-    if (c.classes.length === 0 && !c.loading) c.fetch().catch(console.error);
+  const loadAll = useCallback(async () => {
+    setPageLoading(true);
+    try {
+      const [stuRes, clsRes, subjRes] = await Promise.all([
+        fetch("/api/students"),
+        fetch("/api/classes"),
+        fetch("/api/subjects"),
+      ]);
+      const [stuData, clsData, subjData] = await Promise.all([
+        stuRes.ok ? stuRes.json() : [],
+        clsRes.ok ? clsRes.json() : [],
+        subjRes.ok ? subjRes.json() : [],
+      ]);
+      setRawStudents(stuData);
+      setRawClasses(clsData);
+      setSubjects(subjData);
+    } finally {
+      setPageLoading(false);
+    }
   }, []);
-
-  const [fetchedSubjects, setFetchedSubjects] = useState<Subject[]>([]);
-  useEffect(() => {
-    fetch("/api/subjects")
-      .then((r) => r.json())
-      .then(setFetchedSubjects)
-      .catch(() => {});
-  }, []);
-
-  const subjects: Subject[] = fetchedSubjects.length > 0
-    ? fetchedSubjects
-    : rawSubjects.map((s) => ({
-        id: s.id,
-        name: s.name,
-        code: s.code,
-        type: s.type as "CORE" | "ELECTIVE",
-        applicableForms: s.applicableForms,
-      }));
 
   // ── Modal state ───────────────────────────────────────────────────────────
   const [modalOpen, setModalOpen]     = useState(false);
@@ -400,6 +393,7 @@ export default function StudentsPage() {
 
   // Fetch school policy once on mount
   useEffect(() => {
+    loadAll();
     fetch("/api/school/settings")
       .then((r) => r.ok ? r.json() : null)
       .then((d: SchoolPolicy | null) => { if (d) setSchoolPolicy(d); })
@@ -415,15 +409,8 @@ export default function StudentsPage() {
   const classMap = useMemo(() => new Map(rawClasses.map((c) => [c.id, c])), [rawClasses]);
   const subjectMap = useMemo(() => new Map(subjects.map((s) => [s.id, s])), [subjects]);
 
-  const classes: SchoolClass[] = useMemo(
-    () => rawClasses.map((c) => ({
-      id: c.id,
-      name: c.name,
-      form: c.form,
-      frameworkType: c.frameworkType as SchoolClass["frameworkType"],
-    })),
-    [rawClasses]
-  );
+  // rawClasses is already SchoolClass[] — use directly
+  const classes = rawClasses;
 
   const forms = useMemo(
     () => Array.from(new Set(classes.map((c) => c.form))).sort((a, b) => a - b),
@@ -442,18 +429,17 @@ export default function StudentsPage() {
   );
 
   const students: Student[] = useMemo(
-    () => rawStudents
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .filter((s: any) => !s.archivedAt)
-      .map((s: any) => ({
+    () => (rawStudents as any[])
+      .filter((s) => !s.archivedAt)
+      .map((s) => ({
         id:              s.id,
         fullName:        s.fullName,
         admissionNumber: s.admissionNumber,
-        dateOfBirth:     s.dateOfBirth,
+        dateOfBirth:     s.dateOfBirth ?? null,
         gender:          s.gender ?? null,
         boardingStatus:  s.boardingStatus ?? null,
-        parentName:      s.parentName,
-        parentContact:   s.parentContact,
+        parentName:      s.parentName ?? null,
+        parentContact:   s.parentContact ?? null,
         classId:         s.classId,
         electiveIds:     (s.electives ?? []).map((e: { subjectId: string }) => e.subjectId),
       })),
@@ -534,12 +520,10 @@ export default function StudentsPage() {
       className:       cls?.name,
     });
   }, [rawClasses]);
-
   const handleRemoveSuccess = useCallback((_archiveType: "TRANSFER" | "EXPULSION") => {
     setRemoveTarget(null);
-    // Refetch students so archived student disappears from the list
-    useStudentsStore.getState().fetch().catch(console.error);
-  }, []);
+    loadAll();
+  }, [loadAll]);
 
   const handleNavigate = useCallback((id: string) => {
     router.push(`/principal/students/${id}`);
@@ -601,11 +585,11 @@ export default function StudentsPage() {
 
     setModalOpen(false);
     clearStudentDraft();
-    useStudentsStore.getState().fetch().catch(console.error);
-  }, [editing, selectedClassId, selectedElectives, selectedForm, selectedGender, selectedBoarding]);
+    loadAll();
+  }, [editing, selectedClassId, selectedElectives, selectedForm, selectedGender, selectedBoarding, loadAll]);
 
   // ── Render ────────────────────────────────────────────────────────────────
-  const showLoading = storeLoading && students.length === 0;
+  const showLoading = pageLoading && students.length === 0;
   const activeFilters = [q, filterClassId].filter(Boolean).length;
 
   return (
@@ -624,8 +608,8 @@ export default function StudentsPage() {
           <button
             className={primaryButtonClass}
             onClick={openCreate}
-            disabled={classes.length === 0}
-            title={classes.length === 0 ? "Add a class first" : undefined}
+            disabled={!pageLoading && classes.length === 0}
+            title={!pageLoading && classes.length === 0 ? "Add a class first" : undefined}
           >
             <UserPlus className="h-4 w-4" />
             Register student
@@ -633,7 +617,7 @@ export default function StudentsPage() {
         }
       />
 
-      {!showLoading && classes.length === 0 && (
+      {!showLoading && !pageLoading && classes.length === 0 && (
         <div className="mb-4 rounded-lg bg-warn-bg border border-warn/20 text-warn text-sm px-4 py-3">
           Create at least one class before registering students.
         </div>

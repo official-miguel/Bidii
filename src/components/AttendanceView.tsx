@@ -1,15 +1,15 @@
 "use client";
 
 /**
- * AttendanceView — offline-first attendance taking component.
+ * AttendanceView — attendance taking component.
  *
  * Read path:
- *   1. Student roster comes from studentsStore (IDB-backed) — renders
- *      instantly with zero network requests.
+ *   1. Student roster is fetched directly from /api/students?classId=...
+ *      on every class selection — no Zustand store dependency.
  *   2. Attendance status comes from attendanceStore.loadClassDate() which
  *      reads IDB first, then the store is kept fresh by SSE + background sync.
- *   3. If both stores are empty on first visit (cold load), falls back to the
- *      REST API for the roster while the background sync catches up.
+ *   3. If the student API returns empty, falls back to the /api/attendance
+ *      endpoint for the roster overlay.
  *
  * Write path:
  *   POST /api/attendance → success → attendanceStore.upsertMany() updates
@@ -25,7 +25,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ErrorBanner, EmptyState, inputClass, labelClass, primaryButtonClass } from "@/components/ui";
-import { useStudentsStore }   from "@/lib/stores/studentsStore";
 import { useAttendanceStore, getAttendanceForClassDate } from "@/lib/stores/attendanceStore";
 import type { LocalAttendance } from "@/lib/stores/attendanceStore";
 
@@ -74,9 +73,11 @@ export default function AttendanceView({
   const [alreadySubmitted, setAlreadySubmitted] = useState(false);
 
   // ── Store reads ────────────────────────────────────────────────────────────
-  const allStudents       = useStudentsStore((s) => s.students);
-  const storesLoading     = useStudentsStore((s) => s.loading);
   const attendanceLoading = useAttendanceStore((s) => s.loading);
+
+  // ── Student roster state (fetched directly from API) ──────────────────────
+  const [storeStudents, setStoreStudents] = useState<{ id: string; fullName: string; admissionNumber: string; classId: string }[]>([]);
+  const [studentsLoading, setStudentsLoading] = useState(false);
 
   // ── Fallback state for cold-cache visits ──────────────────────────────────
   const [apiFallbackRows, setApiFallbackRows] = useState<StudentRow[] | null>(null);
@@ -89,22 +90,34 @@ export default function AttendanceView({
     useAttendanceStore.getState().loadClassDate(classId, date).catch(console.error);
   }, [classId, date]);
 
-  // ── Build roster from studentsStore; fall back to API if store is empty ───
-  const storeStudents = useMemo(
-    () => allStudents
-      .filter((s) => s.classId === classId)
-      .sort((a, b) => a.admissionNumber.localeCompare(b.admissionNumber, undefined, { numeric: true })),
-    [allStudents, classId]
-  );
+  // ── Fetch student roster from API when classId changes ───────────────────
+  useEffect(() => {
+    if (!classId) return;
+    let cancelled = false;
+    setStudentsLoading(true);
+    fetch(`/api/students?classId=${classId}`)
+      .then(r => r.ok ? r.json() : [])
+      .then((data: { id: string; fullName: string; admissionNumber: string; classId: string; archivedAt?: string | null }[]) => {
+        if (cancelled) return;
+        const rows = data
+          .filter((s) => !s.archivedAt)
+          .map((s) => ({ id: s.id, fullName: s.fullName, admissionNumber: s.admissionNumber, classId: s.classId }))
+          .sort((a, b) => a.admissionNumber.localeCompare(b.admissionNumber, undefined, { numeric: true }));
+        setStoreStudents(rows);
+      })
+      .catch(() => { if (!cancelled) setStoreStudents([]); })
+      .finally(() => { if (!cancelled) setStudentsLoading(false); });
+    return () => { cancelled = true; };
+  }, [classId]);
 
   useEffect(() => {
-    if (!storesLoading && storeStudents.length > 0) {
+    if (!studentsLoading && storeStudents.length > 0) {
       setApiFallbackRows(null);
       setLoadError(null);
       return;
     }
 
-    if (!storesLoading && storeStudents.length === 0 && classId) {
+    if (!studentsLoading && storeStudents.length === 0 && classId) {
       setLoadError(null);
       const controller = new AbortController();
       fetch(`/api/attendance?classId=${classId}&date=${date}`, { signal: controller.signal })
@@ -128,7 +141,7 @@ export default function AttendanceView({
         });
       return () => controller.abort();
     }
-  }, [storesLoading, storeStudents.length, classId, date]);
+  }, [studentsLoading, storeStudents.length, classId, date]);
 
   // ── Overlay store attendance status onto the roster ────────────────────────
   const byClassDate = useAttendanceStore((s) => s.byClassDate);
@@ -231,7 +244,7 @@ export default function AttendanceView({
   const presentCount = rows.filter((r) => r.present).length;
   const absentCount  = rows.length - presentCount;
 
-  const showLoading = (storesLoading || attendanceLoading) && rows.length === 0 && !apiFallbackRows;
+  const showLoading = (studentsLoading || attendanceLoading) && rows.length === 0 && !apiFallbackRows;
 
   const todayLabel = new Date().toLocaleDateString(undefined, {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
