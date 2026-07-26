@@ -14,6 +14,7 @@ function LoginForm() {
 
   const [email, setEmail]           = useState("");
   const [password, setPassword]     = useState("");
+  const [schoolSlug, setSchoolSlug]     = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError]           = useState<string | null>(null);
   const [loading, setLoading]       = useState(false);
@@ -23,9 +24,10 @@ function LoginForm() {
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const draft = JSON.parse(raw) as { email?: string };
+        const draft = JSON.parse(raw) as { email?: string; schoolSlug?: string };
         // Only restore the email — never restore the password for security.
         if (draft.email) setEmail(draft.email);
+        if (draft.schoolSlug) setSchoolSlug(draft.schoolSlug);
       }
     } catch {
       // Ignore parse errors
@@ -35,11 +37,11 @@ function LoginForm() {
   // ── Persist email to sessionStorage whenever it changes ──────────────────
   useEffect(() => {
     try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ email }));
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ email, schoolSlug }));
     } catch {
       // Storage quota exceeded — fail silently
     }
-  }, [email]);
+  }, [email, schoolSlug]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -50,12 +52,18 @@ function LoginForm() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, ...(schoolSlug ? { schoolSlug } : {}) }),
       });
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || "Something went wrong. Try again.");
+        if (data.requiresSchoolSlug) {
+          setError(
+            "Multiple school accounts found for this email. Please enter your school identifier above."
+          );
+        } else {
+          setError(data.error || "Something went wrong. Try again.");
+        }
         return;
       }
 
@@ -105,6 +113,28 @@ function LoginForm() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+            <div>
+              <label htmlFor="schoolSlug" className="block text-sm font-medium text-ink dark:text-dark-text mb-1.5">
+                School identifier <span className="text-slate font-normal text-xs">(optional)</span>
+              </label>
+              <input
+                id="schoolSlug"
+                type="text"
+                autoComplete="organization"
+                value={schoolSlug}
+                onChange={(e) => setSchoolSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "").trim())}
+                className="w-full rounded-lg border border-line bg-white px-3.5 py-2.5 text-sm text-ink
+                           placeholder:text-slate-light
+                           focus:outline-none focus:border-teal focus:ring-2 focus:ring-teal/15
+                           transition-colors dark:bg-dark-surface dark:border-dark-border
+                           dark:text-dark-text dark:placeholder:text-dark-muted"
+                placeholder="e.g. green-hill-academy"
+              />
+              <p className="text-xs text-slate dark:text-dark-muted mt-1">
+                Only needed if you have accounts at more than one school.
+              </p>
+            </div>
+
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-ink dark:text-dark-text mb-1.5">
                 Email

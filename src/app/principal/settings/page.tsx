@@ -612,8 +612,6 @@ function IntegrationsPanel() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface AccomSettings {
-  boardingType: string;
-  schoolGenderPolicy: string;
   enableDormCaptains: boolean;
   enableTransfers: boolean;
   defaultAllocationPolicy: string;
@@ -624,8 +622,24 @@ interface AccomSettings {
   updatedAt: string | null;
 }
 
+// boardingType and genderPolicy live on the School model — read here, never edited here.
+interface DormSchoolPolicy {
+  boardingType: string;
+  genderPolicy: string;
+}
+
+const BOARDING_LABEL: Record<string, string> = {
+  DAY_ONLY:        "Day School Only",
+  DAY_AND_BOARDING:"Day & Boarding",
+  BOARDING_ONLY:   "Boarding Only",
+};
+const GENDER_POLICY_LABEL: Record<string, string> = {
+  MIXED:      "Mixed Gender",
+  BOYS_ONLY:  "Boys Only",
+  GIRLS_ONLY: "Girls Only",
+};
+
 const ACCOM_DEFAULT: AccomSettings = {
-  boardingType: "DAY_AND_BOARDING", schoolGenderPolicy: "MIXED",
   enableDormCaptains: true, enableTransfers: true,
   defaultAllocationPolicy: "MIXED_FORMS", occupancyWarningPct: 90,
   bedTrackingEnabled: true, analyticsEnabled: true, notifyOnAllocation: false,

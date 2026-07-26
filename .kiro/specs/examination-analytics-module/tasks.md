@@ -27,7 +27,7 @@ Implementation language: **TypeScript / Next.js** (matching the existing codebas
     - SQL for `CREATE TABLE "ReportRemark"` with the unique index
     - Run `prisma migrate deploy` (or `prisma db push` for dev) to apply
     - _Requirements: 13.3, 8.5_
-  - [-] 0.4 Run `prisma generate` to regenerate the Prisma client after schema changes
+  - [x] 0.4 Run `prisma generate` to regenerate the Prisma client after schema changes
     - Verify TypeScript compilation succeeds with the new models in scope
     - _Requirements: 13.3, 8.5_
 
@@ -46,11 +46,11 @@ Implementation language: **TypeScript / Next.js** (matching the existing codebas
     - Scope all queries to `user.schoolId`
     - _Requirements: 2.1, 2.3, 12.1_
 
-  - [ ]* 2.2 Write property test for teacher home entry count
+  - [x]* 2.2 Write property test for teacher home entry count
     - **Property 1: Teacher home entry count is consistent with the marksheet**
     - **Validates: Requirements 2.1, 2.3**
 
-  - [ ]* 2.3 Write property test for teacher home card count matches assignments
+  - [x]* 2.3 Write property test for teacher home card count matches assignments
     - **Property 2: Teacher home cards match assignments exactly**
     - **Validates: Requirements 2.1**
 
@@ -98,11 +98,11 @@ Implementation language: **TypeScript / Next.js** (matching the existing codebas
     - "—" for mean grade when no entries; 0% completion when no entries
     - _Requirements: 4.4, 4.5, 4.7_
 
-  - [ ]* 5.5 Write property test for UnifiedClassTable row completeness
+  - [x]* 5.5 Write property test for UnifiedClassTable row completeness
     - **Property 3: UnifiedClassTable row completeness**
     - **Validates: Requirements 4.4**
 
-  - [ ]* 5.6 Write property test for framework badge correctness
+  - [x]* 5.6 Write property test for framework badge correctness
     - **Property 4: Framework badge distinguishes frameworks**
     - **Validates: Requirements 4.5**
 
@@ -125,19 +125,19 @@ Implementation language: **TypeScript / Next.js** (matching the existing codebas
     - Scope all queries to `user.schoolId`
     - _Requirements: 6.1, 6.2, 6.3, 6.9, 12.3_
 
-  - [ ]* 7.2 Write property test for dept analytics subject scoping
+  - [x]* 7.2 Write property test for dept analytics subject scoping
     - **Property 5: Dept analytics subject scoping**
     - **Validates: Requirements 6.2, 6.9**
 
-  - [ ]* 7.3 Write property test for dept heatmap class scoping
+  - [x]* 7.3 Write property test for dept heatmap class scoping
     - **Property 6: Dept heatmap class scoping**
     - **Validates: Requirements 6.4**
 
-  - [ ]* 7.4 Write property test for dept vs. school mean consistency
+  - [x]* 7.4 Write property test for dept vs. school mean consistency
     - **Property 7: Dept vs. school mean consistency**
     - **Validates: Requirements 6.4**
 
-  - [ ]* 7.5 Write property test for HOD dept access control
+  - [x]* 7.5 Write property test for HOD dept access control
     - **Property 8: HOD dept access control**
     - **Validates: Requirements 6.2, 12.3**
 
@@ -175,11 +175,11 @@ Implementation language: **TypeScript / Next.js** (matching the existing codebas
     - Composite formula implemented; DB weight loading with default fallback; dense-rank sorting
     - _Requirements: 7.1_
 
-  - [ ]* 9.2 Write property test for composite score formula correctness
+  - [x]* 9.2 Write property test for composite score formula correctness
     - **Property 11: Composite score formula correctness**
     - **Validates: Requirements 7.1**
 
-  - [ ]* 9.3 Write property test for ranking trend direction
+  - [x]* 9.3 Write property test for ranking trend direction
     - **Property 12: Ranking trend direction is monotone consistent**
     - **Validates: Requirements 7.7**
 
@@ -188,11 +188,11 @@ Implementation language: **TypeScript / Next.js** (matching the existing codebas
     - Teacher-role users receive `fullList: []`; HOD scoped to dept; Director full list
     - _Requirements: 7.3, 7.4, 7.5, 12.4_
 
-  - [ ]* 9.5 Write property test for teacher ranking visibility invariant
+  - [x]* 9.5 Write property test for teacher ranking visibility invariant
     - **Property 9: Teacher ranking visibility invariant**
     - **Validates: Requirements 7.3, 12.4**
 
-  - [ ]* 9.6 Write property test for HOD ranking dept scoping
+  - [x]* 9.6 Write property test for HOD ranking dept scoping
     - **Property 10: HOD ranking dept scoping**
     - **Validates: Requirements 7.4**
 
@@ -221,7 +221,7 @@ Implementation language: **TypeScript / Next.js** (matching the existing codebas
     - Saves `editedRemark`; same access guard
     - _Requirements: 8.5, 12.5_
 
-  - [ ]* 10.3 Write property test for report remark persistence round-trip
+  - [x]* 10.3 Write property test for report remark persistence round-trip
     - **Property 14: Report remark persistence round-trip**
     - **Validates: Requirements 8.5**
 
@@ -229,7 +229,7 @@ Implementation language: **TypeScript / Next.js** (matching the existing codebas
     - Generate Report button; print-styled preview; framework-aware (`ReportCard` vs `CbeReportCard`); AI remark editor; Download PDF + Email actions; AI fallback
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.6, 8.7_
 
-  - [ ]* 10.5 Write property test for report framework routing invariant
+  - [x]* 10.5 Write property test for report framework routing invariant
     - **Property 13: Report framework routing invariant**
     - **Validates: Requirements 8.3**
 
@@ -243,7 +243,7 @@ Implementation language: **TypeScript / Next.js** (matching the existing codebas
   - [x] 12.1 Audited all chart components — `DashboardCharts.tsx` and `CbeDashboardEnhanced.tsx` already use `gradeColour()`/`levelColour()`; `DeptHeatmap` refactored to use `pointsToColour()`; `DeptSubjectBar` refactored to use `pointsToColourHex()` — both derived from central `grading844.ts` utilities
     - _Requirements: 6.5, 9.3_
 
-  - [ ]* 12.2 Write property test for uniform colour scale
+  - [x]* 12.2 Write property test for uniform colour scale
     - **Property 15: Uniform colour scale across all charts**
     - **Validates: Requirements 6.5, 9.3**
 
@@ -256,7 +256,7 @@ Implementation language: **TypeScript / Next.js** (matching the existing codebas
   - [x] 12.5 All four dept analytics chart components render an empty-state message div when data is empty
     - _Requirements: 9.5, 11.1_
 
-  - [ ]* 12.6 Write property test for empty data produces empty-state message
+  - [x]* 12.6 Write property test for empty data produces empty-state message
     - **Property 16: Empty data produces empty-state message, not empty chart**
     - **Validates: Requirements 9.5, 11.1**
 
@@ -278,7 +278,7 @@ Implementation language: **TypeScript / Next.js** (matching the existing codebas
     - Test infrastructure: `jest` + `ts-jest`, config at `jest.config.js`, script `npm test`
     - _Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6_
 
-  - [ ]* 15.2 Write property test for new endpoints enforce school scoping
+  - [x]* 15.2 Write property test for new endpoints enforce school scoping
     - **Property 17: New endpoints enforce school scoping**
     - **Validates: Requirements 12.1, 12.2, 12.3, 12.4, 12.5, 12.6**
 

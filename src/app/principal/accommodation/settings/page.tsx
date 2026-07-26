@@ -3,12 +3,13 @@
 import { useEffect, useState, FormEvent } from "react";
 import {
   Settings, BedDouble, Users, BarChart3,
-  ShieldCheck, ArrowRight, CheckCircle2,
+  ShieldCheck, ArrowRight, CheckCircle2, ExternalLink,
 } from "lucide-react";
 import {
   PageHeader, ErrorBanner, SuccessBanner,
   inputClass, primaryButtonClass, FormField,
 } from "@/components/ui";
+import Link from "next/link";
 import ContextNavigation from "@/components/ContextNavigation";
 
 const NAV_ITEMS = [
@@ -19,8 +20,6 @@ const NAV_ITEMS = [
 ];
 
 interface AccomSettings {
-  boardingType: string;
-  schoolGenderPolicy: string;
   enableDormCaptains: boolean;
   enableTransfers: boolean;
   defaultAllocationPolicy: string;
@@ -31,8 +30,24 @@ interface AccomSettings {
   updatedAt: string | null;
 }
 
+// These two are owned by /api/school/settings, shown read-only here.
+interface SchoolPolicy {
+  boardingType: string;
+  genderPolicy: string;
+}
+
+const BOARDING_LABEL: Record<string, string> = {
+  DAY_ONLY:        "Day School Only",
+  DAY_AND_BOARDING:"Day & Boarding",
+  BOARDING_ONLY:   "Boarding Only",
+};
+const GENDER_POLICY_LABEL: Record<string, string> = {
+  MIXED:      "Mixed Gender",
+  BOYS_ONLY:  "Boys Only",
+  GIRLS_ONLY: "Girls Only",
+};
+
 const DEFAULT: AccomSettings = {
-  boardingType: "DAY_AND_BOARDING", schoolGenderPolicy: "MIXED",
   enableDormCaptains: true, enableTransfers: true,
   defaultAllocationPolicy: "MIXED_FORMS", occupancyWarningPct: 90,
   bedTrackingEnabled: true, analyticsEnabled: true, notifyOnAllocation: false,
@@ -90,16 +105,20 @@ function SectionCard({
 
 export default function AccommodationSettingsPage() {
   const [settings, setSettings] = useState<AccomSettings>(DEFAULT);
+  const [schoolPolicy, setSchoolPolicy] = useState<SchoolPolicy>({ boardingType: "", genderPolicy: "" });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    fetch("/api/accommodation/settings")
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => { if (d) setSettings({ ...DEFAULT, ...d }); })
-      .finally(() => setLoading(false));
+    Promise.all([
+      fetch("/api/accommodation/settings").then((r) => r.ok ? r.json() : null),
+      fetch("/api/school/settings").then((r) => r.ok ? r.json() : null),
+    ]).then(([accom, school]) => {
+      if (accom) setSettings({ ...DEFAULT, ...accom });
+      if (school) setSchoolPolicy({ boardingType: school.boardingType ?? "", genderPolicy: school.genderPolicy ?? "" });
+    }).finally(() => setLoading(false));
   }, []);
 
   const patch = (p: Partial<AccomSettings>) => setSettings((s) => ({ ...s, ...p }));
@@ -111,15 +130,17 @@ export default function AccommodationSettingsPage() {
       const res = await fetch("/api/accommodation/settings", {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          boardingType: settings.boardingType,
-          schoolGenderPolicy: settings.schoolGenderPolicy,
-          enableDormCaptains: settings.enableDormCaptains,
-          enableTransfers: settings.enableTransfers,
+          // boardingType and schoolGenderPolicy are owned by /api/school/settings —
+          // pass through the current values so the API constraint is satisfied.
+          boardingType:            schoolPolicy.boardingType || "DAY_AND_BOARDING",
+          schoolGenderPolicy:      schoolPolicy.genderPolicy || "MIXED",
+          enableDormCaptains:      settings.enableDormCaptains,
+          enableTransfers:         settings.enableTransfers,
           defaultAllocationPolicy: settings.defaultAllocationPolicy,
-          occupancyWarningPct: settings.occupancyWarningPct,
-          bedTrackingEnabled: settings.bedTrackingEnabled,
-          analyticsEnabled: settings.analyticsEnabled,
-          notifyOnAllocation: settings.notifyOnAllocation,
+          occupancyWarningPct:     settings.occupancyWarningPct,
+          bedTrackingEnabled:      settings.bedTrackingEnabled,
+          analyticsEnabled:        settings.analyticsEnabled,
+          notifyOnAllocation:      settings.notifyOnAllocation,
         }),
       });
       const json = await res.json();
@@ -157,30 +178,29 @@ export default function AccommodationSettingsPage() {
 
       <form onSubmit={handleSave} className="space-y-6 max-w-2xl">
 
-        {/* Boarding type */}
+        {/* Boarding type — read-only, configured in School Settings */}
         <SectionCard icon={BedDouble} title="School Boarding Configuration"
-          description="Defines whether this school operates boarding and its gender admission policy.">
-          <div className="py-4">
-            <FormField label="Boarding type"
-              helper="Controls whether the Accommodation module is active and which features are shown.">
-              <select className={inputClass} value={settings.boardingType}
-                onChange={(e) => patch({ boardingType: e.target.value })}>
-                <option value="DAY_ONLY">Day School Only — boarding features hidden</option>
-                <option value="BOARDING_ONLY">Boarding Only — all students are boarders</option>
-                <option value="DAY_AND_BOARDING">Day &amp; Boarding — mixed student body</option>
-              </select>
-            </FormField>
-          </div>
-          <div className="py-4">
-            <FormField label="School gender admission policy"
-              helper="Used as the default gender option when registering new dormitories.">
-              <select className={inputClass} value={settings.schoolGenderPolicy}
-                onChange={(e) => patch({ schoolGenderPolicy: e.target.value })}>
-                <option value="BOYS_ONLY">Boys Only</option>
-                <option value="GIRLS_ONLY">Girls Only</option>
-                <option value="MIXED">Mixed Gender</option>
-              </select>
-            </FormField>
+          description="These values are set in School Configuration and apply system-wide.">
+          <div className="py-4 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs font-medium text-slate dark:text-dark-muted mb-1">Boarding type</p>
+                <p className="text-sm font-semibold text-ink dark:text-dark-text">
+                  {BOARDING_LABEL[schoolPolicy.boardingType] ?? schoolPolicy.boardingType ?? "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-slate dark:text-dark-muted mb-1">Gender admission policy</p>
+                <p className="text-sm font-semibold text-ink dark:text-dark-text">
+                  {GENDER_POLICY_LABEL[schoolPolicy.genderPolicy] ?? schoolPolicy.genderPolicy ?? "—"}
+                </p>
+              </div>
+            </div>
+            <Link href="/principal/settings?tab=school"
+              className="inline-flex items-center gap-1.5 text-xs text-teal hover:underline font-medium">
+              <ExternalLink className="h-3 w-3" />
+              Change in School Configuration → Admission Policy
+            </Link>
           </div>
         </SectionCard>
 
