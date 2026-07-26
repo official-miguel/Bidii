@@ -32,15 +32,17 @@ const schema = z.object({
 /**
  * POST /api/accommodation/bulk-allocate
  *
- * Allocates multiple students to a dormitory at once.
+ * Allocates multiple students to a dormitory at once, assigning each student
+ * to a specific free SleepingPosition so that bed-level occupancy is kept
+ * accurate in the UI.
+ *
  * Accepts either an explicit list of studentIds OR a filter object.
  * Rules:
  *  - Only students from the school are processed
- *  - Dorm gender/form rules are enforced
- *  - Capacity is checked before the transaction begins; if insufficient
+ *  - Dorm form rules are enforced
+ *  - Free sleeping positions are checked before the transaction; if insufficient
  *    space exists the request is rejected with 409
  *  - Existing CURRENT allocations are vacated and replaced
- *  - An AccommodationEvent row is written for each allocation
  */
 export async function POST(req: NextRequest) {
   const user = await manageGuard();
@@ -56,7 +58,7 @@ export async function POST(req: NextRequest) {
 
   const { dormId, cubicleId, studentIds, filter, notes, allocationDate } = parsed.data;
 
-  // Verify dorm
+  // ── Verify dorm ────────────────────────────────────────────────────────────
   const dorm = await prisma.dormitory.findFirst({
     where: { id: dormId, schoolId: user.schoolId },
     include: { permittedForms: true },
@@ -69,7 +71,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Resolve student IDs
+  // ── Resolve student IDs ────────────────────────────────────────────────────
   let targetStudentIds: string[] = studentIds ?? [];
 
   if (!targetStudentIds.length && filter) {
@@ -111,7 +113,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No students match the given criteria." }, { status: 400 });
   }
 
-  // Enforce form restrictions
+  // ── Enforce form restrictions ──────────────────────────────────────────────
   if (
     dorm.allocationPolicy === "RESTRICTED_BY_FORM" &&
     dorm.permittedForms.length > 0
@@ -135,34 +137,51 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Capacity check
-  const currentOccupancy = await prisma.allocationRecord.count({
-    where: { dormId, status: "CURRENT", schoolId: user.schoolId },
+  // ── Load free sleeping positions ───────────────────────────────────────────
+  // Filter to the requested cubicle when one is specified.
+  const freePositions = await prisma.sleepingPosition.findMany({
+    where: {
+      schoolId: user.schoolId,
+      dormId,
+      isOccupied: false,
+      ...(cubicleId ? { cubicleId } : {}),
+    },
+    select: { id: true, bedId: true, cubicleId: true },
+    orderBy: { id: "asc" },
   });
-  // Students already in this dorm don't consume extra capacity
+
+  // Students already in this exact dorm don't need a new position slot counted
+  // against capacity (they'll vacate their current one then take a new one).
+  // But we still need one free position per student being newly assigned.
+  // Simple approach: check we have enough free positions for all target students.
   const alreadyInDorm = await prisma.allocationRecord.findMany({
     where: { studentId: { in: targetStudentIds }, dormId, status: "CURRENT" },
-    select: { studentId: true },
+    select: { studentId: true, sleepingPositionId: true },
   });
   const alreadyInDormIds = new Set(alreadyInDorm.map((r) => r.studentId));
   const newStudents = targetStudentIds.filter((id) => !alreadyInDormIds.has(id));
-  const projectedOccupancy = currentOccupancy + newStudents.length;
 
-  if (dorm.totalCapacity > 0 && projectedOccupancy > dorm.totalCapacity) {
-    const available = Math.max(0, dorm.totalCapacity - currentOccupancy);
+  // For students already in this dorm, their current position will be freed
+  // before a new one is taken, so available = freePositions + their positions.
+  // Conservatively just check total free >= net new positions needed.
+  const positionsNeeded = newStudents.length;
+  if (freePositions.length < positionsNeeded) {
     return NextResponse.json(
       {
-        error: `Insufficient capacity. ${available} space(s) available, but ${newStudents.length} new student(s) need allocation.`,
-        available,
-        requested: newStudents.length,
+        error: `Insufficient capacity. ${freePositions.length} space(s) available${cubicleId ? " in this cubicle" : ""}, but ${positionsNeeded} new student(s) need allocation.`,
+        available: freePositions.length,
+        requested: positionsNeeded,
       },
       { status: 409 }
     );
   }
 
-  // Execute bulk allocation in a transaction
+  // ── Execute bulk allocation in a transaction ───────────────────────────────
   const allocDate = allocationDate ? new Date(allocationDate) : new Date();
   const results: { studentId: string; success: boolean; error?: string }[] = [];
+
+  // Use a queue of free positions — popped one per student
+  const posQueue = [...freePositions];
 
   await prisma.$transaction(
     async (tx) => {
@@ -178,26 +197,51 @@ export async function POST(req: NextRequest) {
               where: { id: existing.id },
               data: { status: "TRANSFERRED", vacatedDate: new Date() },
             });
+            // Free the old sleeping position so it's available for others
             if (existing.sleepingPositionId) {
               await tx.sleepingPosition.update({
                 where: { id: existing.sleepingPositionId },
                 data: { isOccupied: false },
               });
+              // If this student was already in this dorm, their freed position
+              // goes back into the queue so it can be reused
+              if (existing.dormId === dormId) {
+                posQueue.push({
+                  id: existing.sleepingPositionId,
+                  bedId: existing.bedId ?? "",
+                  cubicleId: existing.cubicleId ?? null,
+                });
+              }
             }
           }
 
-          // Create new allocation
+          // Grab the next free position
+          const pos = posQueue.shift();
+          if (!pos) {
+            results.push({ studentId, success: false, error: "No sleeping position available." });
+            continue;
+          }
+
+          // Create new allocation with specific bed + position
           await tx.allocationRecord.create({
             data: {
               schoolId: user.schoolId,
               studentId,
               dormId,
-              cubicleId: cubicleId ?? null,
+              cubicleId: pos.cubicleId ?? cubicleId ?? null,
+              bedId: pos.bedId || null,
+              sleepingPositionId: pos.id,
               notes: notes ?? null,
               allocatedById: user.id,
               allocationDate: allocDate,
               status: "CURRENT",
             },
+          });
+
+          // Mark sleeping position as occupied
+          await tx.sleepingPosition.update({
+            where: { id: pos.id },
+            data: { isOccupied: true },
           });
 
           results.push({ studentId, success: true });

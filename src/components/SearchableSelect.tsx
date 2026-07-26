@@ -63,7 +63,11 @@ export default function SearchableSelect({
       }
     }
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") { setOpen(false); setQuery(""); }
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setOpen(false);
+        setQuery("");
+      }
     }
     document.addEventListener("mousedown", handleOutside);
     document.addEventListener("keydown", handleKey);

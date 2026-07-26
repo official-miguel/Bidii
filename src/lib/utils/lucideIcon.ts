@@ -3,16 +3,10 @@
  *
  * Helper for resolving a Lucide icon component by name at runtime.
  *
- * IMPORTANT: Do NOT use `import * as LucideIcons from "lucide-react"` here.
- * next.config.js applies a `modularizeImports` transform that rewrites every
- * static named import from "lucide-react" into a direct per-file path.
- * That transform is only defined for named/default imports — it cannot handle
- * namespace (`import *`) imports and produces a broken module reference that
- * crashes the webpack bundler for every chunk that includes this file.
- *
- * Instead we use `require()` which is resolved at runtime and is invisible
- * to the static modularizeImports analysis, so the full lucide-react package
- * is loaded once and indexed by icon name.
+ * We use `require("lucide-react")` rather than a static `import *` so that
+ * Next.js's `optimizePackageImports` transform — which only rewrites static
+ * named imports — does not interfere with the full-package load needed for
+ * dynamic name-based resolution.
  */
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -22,7 +16,7 @@ import type { ComponentType } from "react";
 type LucideIconComponent = ComponentType<LucideProps>;
 
 // Load the full lucide-react module via require so the static
-// modularizeImports transform in next.config.js is not applied.
+// optimizePackageImports transform only rewrites named imports — not require().
 // The cast through `unknown` is required because lucide-react exports
 // ForwardRefExoticComponents which TypeScript's structural check would
 // otherwise reject as incompatible with ComponentType<LucideProps>.

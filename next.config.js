@@ -5,21 +5,16 @@ const nextConfig = {
   // Ensure gzip / brotli compression is active for all API responses.
   compress: true,
 
-  // ── Tree-shaking for icon libraries ──────────────────────────────
-  modularizeImports: {
-    "lucide-react": {
-      transform: "lucide-react/dist/esm/icons/{{kebabCase member}}",
-    },
-  },
-
   // ── Package import optimisation (Next 14 built-in) ───────────────
-  // NOTE: lucide-react is intentionally excluded here.
-  // modularizeImports above already handles its tree-shaking, and having
-  // both transforms active causes `require("lucide-react")` in
-  // src/lib/utils/lucideIcon.ts to resolve to a broken module object,
-  // producing a `TypeError: e[o] is not a function` at runtime.
+  // lucide-react v1.x ships per-icon files as .mjs, so the old
+  // modularizeImports transform (which resolved to .js paths) caused
+  // webpack to load a non-function module object for every icon import,
+  // producing `TypeError: __webpack_modules__[moduleId] is not a function`
+  // and cascading React context / hooks errors.
+  // Next.js 14's optimizePackageImports handles lucide-react tree-shaking
+  // correctly without that problem.
   experimental: {
-    optimizePackageImports: ["recharts"],
+    optimizePackageImports: ["lucide-react", "recharts"],
   },
 };
 

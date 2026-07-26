@@ -153,7 +153,7 @@ function BedCard({
                   <span className="text-slate ml-1 dark:text-dark-muted">· {alloc.student.schoolClass.name}</span>
                 </Link>
               ) : (
-                <span className="text-slate/60 dark:text-dark-muted/60">Vacant</span>
+                <span className="text-slate/60 dark:text-dark-muted/60">Available space</span>
               )}
             </div>
           );
@@ -199,17 +199,9 @@ function AddBedsModal({
 
   return (
     <Modal title="Add Beds" description="Configure beds and their sleeping positions."
-      onClose={onClose} size="sm"
-      footer={
-        <div className="flex gap-3 justify-end">
-          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
-          <button type="submit" form="add-beds-form" disabled={saving} className={`${primaryButtonClass} disabled:opacity-40`}>
-            {saving ? "Adding…" : mode === "auto" ? `Add ${count || "?"} beds` : "Add bed"}
-          </button>
-        </div>
-      }>
+      onClose={onClose} size="sm">
       {error && <div className="mb-4"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
-      <form id="add-beds-form" onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <div className="flex rounded-lg border border-line overflow-hidden dark:border-dark-border">
           {(["auto", "single"] as const).map((m) => (
             <button key={m} type="button" onClick={() => setMode(m)}
@@ -250,6 +242,12 @@ function AddBedsModal({
               onChange={(e) => setCustomOccupancy(e.target.value)} />
           </FormField>
         )}
+        <div className="flex gap-3 justify-end pt-1">
+          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
+          <button type="submit" disabled={saving} className={`${primaryButtonClass} disabled:opacity-40`}>
+            {saving ? "Adding…" : mode === "auto" ? `Add ${count || "?"} beds` : "Add bed"}
+          </button>
+        </div>
       </form>
     </Modal>
   );
@@ -329,23 +327,6 @@ function AddCubiclesModal({ dormId, onClose, onAdded }: { dormId: string; onClos
       description="Create one or more cubicles for this dormitory."
       onClose={onClose}
       size="sm"
-      footer={
-        <div className="flex items-center justify-between gap-3">
-          {/* Capacity pill in footer for quick reference */}
-          <div className="flex items-center gap-1.5 rounded-lg bg-teal/8 border border-teal/20 px-3 py-1.5">
-            <BedDouble className="h-3.5 w-3.5 text-teal shrink-0" />
-            <span className="text-xs font-medium text-teal tabular-nums">
-              {mode === "auto" ? totalCapacity : singleCapacity} sleeping position{(mode === "auto" ? totalCapacity : singleCapacity) !== 1 ? "s" : ""}
-            </span>
-          </div>
-          <div className="flex gap-2">
-            <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
-            <button type="submit" form="add-cubicles-form" disabled={saving} className={`${primaryButtonClass} disabled:opacity-40`}>
-              {saving ? "Adding…" : mode === "auto" ? `Add ${count || "?"} cubicles` : "Add cubicle"}
-            </button>
-          </div>
-        </div>
-      }
     >
       {error && <div className="mb-4"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
 
@@ -363,7 +344,7 @@ function AddCubiclesModal({ dormId, onClose, onAdded }: { dormId: string; onClos
         ))}
       </div>
 
-      <form id="add-cubicles-form" onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         {mode === "auto" ? (
           <>
             {/* Row 1 — count + prefix */}
@@ -460,6 +441,21 @@ function AddCubiclesModal({ dormId, onClose, onAdded }: { dormId: string; onClos
             </div>
           </>
         )}
+        {/* Actions */}
+        <div className="flex items-center justify-between gap-3 pt-1">
+          <div className="flex items-center gap-1.5 rounded-lg bg-teal/8 border border-teal/20 px-3 py-1.5">
+            <BedDouble className="h-3.5 w-3.5 text-teal shrink-0" />
+            <span className="text-xs font-medium text-teal tabular-nums">
+              {mode === "auto" ? totalCapacity : singleCapacity} sleeping position{(mode === "auto" ? totalCapacity : singleCapacity) !== 1 ? "s" : ""}
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
+            <button type="submit" disabled={saving} className={`${primaryButtonClass} disabled:opacity-40`}>
+              {saving ? "Adding…" : mode === "auto" ? `Add ${count || "?"} cubicles` : "Add cubicle"}
+            </button>
+          </div>
+        </div>
       </form>
     </Modal>
   );
@@ -517,18 +513,9 @@ function EditCubicleModal({
       description={`Adjust the name or bed capacity for ${cubicle.name}.`}
       onClose={onClose}
       size="sm"
-      footer={
-        <div className="flex gap-3 justify-end">
-          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
-          <button type="submit" form="edit-cubicle-form" disabled={saving || !name.trim()}
-            className={`${primaryButtonClass} disabled:opacity-40`}>
-            {saving ? "Saving…" : "Save changes"}
-          </button>
-        </div>
-      }
     >
       {error && <div className="mb-4"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
-      <form id="edit-cubicle-form" onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <FormField label="Cubicle name" required>
           <input
             className={inputClass}
@@ -567,6 +554,13 @@ function EditCubicleModal({
               {cubicle._count.allocations}
             </span>
           </div>
+        </div>
+        <div className="flex gap-3 justify-end pt-1">
+          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
+          <button type="submit" disabled={saving || !name.trim()}
+            className={`${primaryButtonClass} disabled:opacity-40`}>
+            {saving ? "Saving…" : "Save changes"}
+          </button>
         </div>
       </form>
     </Modal>

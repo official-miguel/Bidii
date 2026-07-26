@@ -70,15 +70,17 @@ export default function Modal({
     return () => { document.body.style.overflow = prev; };
   }, []);
 
-  // ── Swipe-to-dismiss on mobile (bottom-sheet) ───────────────────────────
+  // ── Swipe-to-dismiss on mobile (drag handle only) ───────────────────────
+  // Attached only to the drag handle bar — NOT the whole sheet — so that
+  // taps on buttons/inputs inside the modal are never swallowed.
   const touchStartY = useRef(0);
   const SWIPE_DOWN_THRESHOLD = 80;
 
-  function onTouchStart(e: React.TouchEvent) {
+  function onHandleTouchStart(e: React.TouchEvent) {
     touchStartY.current = e.touches[0].clientY;
   }
 
-  function onTouchEnd(e: React.TouchEvent) {
+  function onHandleTouchEnd(e: React.TouchEvent) {
     const dy = e.changedTouches[0].clientY - touchStartY.current;
     if (dy > SWIPE_DOWN_THRESHOLD) startClose();
   }
@@ -144,14 +146,17 @@ export default function Modal({
           role="dialog"
           aria-modal="true"
           aria-labelledby="modal-title"
-          onTouchStart={onTouchStart}
-          onTouchEnd={onTouchEnd}
           onClick={(e) => e.stopPropagation()}
           style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
         >
-          {/* Drag handle */}
-          <div className="flex justify-center pt-3 pb-1 shrink-0">
-            <div className="w-10 h-1 rounded-full bg-line dark:bg-dark-border" aria-hidden="true" />
+          {/* Drag handle — only this area triggers swipe-to-dismiss */}
+          <div
+            className="flex justify-center pt-3 pb-1 shrink-0 cursor-grab active:cursor-grabbing"
+            onTouchStart={onHandleTouchStart}
+            onTouchEnd={onHandleTouchEnd}
+            aria-hidden="true"
+          >
+            <div className="w-10 h-1 rounded-full bg-line dark:bg-dark-border" />
           </div>
 
           <ModalInner

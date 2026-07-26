@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { requirePermission, requireRecordsPermission } from "@/lib/permissions";
 import { emitSSE } from "@/lib/sse";
+import { autoAssignDorm } from "@/lib/accommodation/autoAssign";
 
 // ---------------------------------------------------------------------------
 // GET /api/students
@@ -149,6 +150,28 @@ export async function POST(req: NextRequest) {
   }
   const data = parsed.data;
 
+  // Duplicate guard: reject if an active student with the same name already
+  // exists in this school in the same form. Normalise to lower-case and
+  // collapse extra whitespace so "Alice Kamau" and "alice  kamau" both match.
+  const normalisedName = data.fullName.toLowerCase().replace(/\s+/g, " ").trim();
+  const sameName = await prisma.student.findMany({
+    where: {
+      schoolId:    user.schoolId,
+      archivedAt:  null,
+      schoolClass: { form: data.form },
+    },
+    select: { fullName: true },
+  });
+  const isDuplicate = sameName.some(
+    (s) => s.fullName.toLowerCase().replace(/\s+/g, " ").trim() === normalisedName
+  );
+  if (isDuplicate) {
+    return NextResponse.json(
+      { error: `A student named "${data.fullName}" is already registered in that form.` },
+      { status: 409 }
+    );
+  }
+
   // Streams for this form, in registration order — round-robin target list.
   const streams = await prisma.schoolClass.findMany({
     where: { schoolId: user.schoolId, form: data.form },
@@ -241,56 +264,20 @@ export async function POST(req: NextRequest) {
       });
 
       // ── Auto-allocate dorm if school policy + student is boarding ──────
-      if (
-        data.boardingStatus === "BOARDING" &&
-        (await prisma.school.findUnique({
+      if (data.boardingStatus === "BOARDING") {
+        const school = await prisma.school.findUnique({
           where: { id: user.schoolId },
           select: { autoAllocateDorms: true },
-        }))?.autoAllocateDorms
-      ) {
-        try {
-          const studentForm = student.schoolClass?.form;
-          const dorms = await prisma.dormitory.findMany({
-            where: { schoolId: user.schoolId, status: "ACTIVE" },
-            include: {
-              permittedForms: true,
-              _count: { select: { allocations: { where: { status: "CURRENT" } } } },
-            },
-            orderBy: { name: "asc" },
-          });
-          // Filter by gender and form eligibility
-          const eligible = dorms.filter((d) => {
-            if (d._count.allocations >= d.totalCapacity && d.totalCapacity > 0) return false;
-            if (d.allocationPolicy === "RESTRICTED_BY_FORM" && d.permittedForms.length > 0) {
-              if (!d.permittedForms.some((pf: { form: number }) => pf.form === studentForm)) return false;
-            }
-            return true;
-          });
-          if (eligible.length > 0) {
-            // Round-robin: pick the dorm with the most available capacity
-            const chosen = eligible.reduce((a, b) => {
-              const ca = Math.max(0, a.totalCapacity - a._count.allocations);
-              const cb = Math.max(0, b.totalCapacity - b._count.allocations);
-              return cb > ca ? b : a;
-            });
-            await prisma.allocationRecord.create({
-              data: {
-                schoolId:  user.schoolId,
-                studentId: student.id,
-                dormId:    chosen.id,
-                status:    "CURRENT",
-                allocationDate: new Date(),
-                notes:     "Auto-allocated on registration",
-                allocatedById: user.id,
-              },
-            });
-            await prisma.dormitory.update({
-              where: { id: chosen.id },
-              data: { totalCapacity: chosen.totalCapacity }, // keep totalCapacity; occupancy is counted
-            });
-          }
-        } catch {
-          // Auto-allocation is non-fatal — student is still registered
+        });
+        if (school?.autoAllocateDorms) {
+          // Non-fatal: if no eligible dorm or free position exists the student
+          // is still registered; staff can allocate manually afterwards.
+          await autoAssignDorm({
+            schoolId: user.schoolId,
+            studentId: student.id,
+            studentForm: student.schoolClass.form,
+            allocatedById: user.id,
+          }).catch(() => undefined);
         }
       }
 

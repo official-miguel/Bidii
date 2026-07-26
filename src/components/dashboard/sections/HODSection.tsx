@@ -1,0 +1,90 @@
+import Link from "next/link";
+import { TrendingUp, Users, BookOpen, Clock } from "lucide-react";
+import StatCard from "@/components/dashboard/StatCard";
+import CountdownTimer from "@/components/dashboard/CountdownTimer";
+import type { HeadOfDeptRole } from "@/lib/derivedRoles";
+
+interface DeptClass { id: string; name: string; form: number }
+
+interface AssessmentPeriod {
+  id: string; name: string; closingDate?: Date | string | null;
+}
+
+interface Props {
+  rolePrefix:     string;
+  derived:        HeadOfDeptRole | null;
+  deptTeachers:   number;
+  deptSubjects:   number;
+  deptClasses:    DeptClass[];
+  marksEntered:   number;
+  activePeriods:  AssessmentPeriod[];
+}
+
+export default function HODSection({
+  rolePrefix, derived, deptTeachers, deptSubjects, deptClasses, marksEntered, activePeriods,
+}: Props) {
+  if (!derived) return null;
+
+  const assessmentsHref = `/${rolePrefix}/assessments`;
+  const calendarHref = rolePrefix === "teacher" ? "/teacher/calendar" : "/staff/calendar";
+
+  return (
+    <section aria-labelledby="hod-heading" className="space-y-4">
+      <div className="flex items-center gap-2">
+        <span className="h-1 w-5 rounded-full bg-teal shrink-0" aria-hidden="true" />
+        <h2
+          id="hod-heading"
+          className="text-sm font-semibold text-slate uppercase tracking-wide dark:text-dark-muted"
+        >
+          Head of Department — {derived.departmentName}
+        </h2>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatCard label="Dept teachers"  value={deptTeachers}       href={`/${rolePrefix === "teacher" ? "teacher" : "staff"}/directory`} icon={Users}       color="teal" />
+        <StatCard label="Dept subjects"  value={deptSubjects}       href={assessmentsHref} icon={BookOpen}    color="teal" />
+        <StatCard label="Dept classes"   value={deptClasses.length} href={assessmentsHref} icon={TrendingUp}  color="teal" />
+        <StatCard label="Marks entered"  value={marksEntered}       href={assessmentsHref} icon={Clock}
+                  color={marksEntered > 0 ? "success" : "warn"} sub="this period" />
+      </div>
+
+      {activePeriods.length > 0 && (
+        <div className="bg-card border border-line rounded-xl p-5 shadow-xs dark:bg-dark-surface dark:border-dark-border">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-semibold text-ink dark:text-dark-text">Marks submission deadlines</p>
+            <Link href={assessmentsHref} className="text-xs text-teal hover:underline">Enter marks</Link>
+          </div>
+          <ul className="space-y-3">
+            {activePeriods.map((ap) => (
+              <li key={ap.id} className="flex items-center justify-between gap-3">
+                <span className="text-sm text-ink dark:text-dark-text">{ap.name}</span>
+                {ap.closingDate
+                  ? <CountdownTimer deadline={new Date(ap.closingDate).toISOString()} label="Closes" />
+                  : <span className="text-xs text-slate dark:text-dark-muted">No deadline set</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {deptClasses.length > 0 && (
+        <div className="bg-card border border-line rounded-xl p-5 shadow-xs dark:bg-dark-surface dark:border-dark-border">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-semibold text-ink dark:text-dark-text">Classes in your department</p>
+            <span className="text-xs text-slate dark:text-dark-muted">{deptClasses.length} classes</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+            {deptClasses.map((c) => (
+              <Link key={c.id} href={`${assessmentsHref}?classId=${c.id}`}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg border border-line text-sm
+                           hover:border-teal/40 hover:bg-teal-50 transition-colors
+                           dark:border-dark-border dark:hover:border-teal/40 dark:hover:bg-teal/5">
+                <span className="text-ink dark:text-dark-text">{c.name}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}

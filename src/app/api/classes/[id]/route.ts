@@ -5,7 +5,7 @@ import { requireRole } from "@/lib/auth";
 
 const updateSchema = z.object({
   name: z.string().trim().min(2).optional(),
-  form: z.number().int().min(1).max(6).optional(),
+  form: z.number().int().min(1).optional(),
   stream: z.string().trim().optional().or(z.literal("")),
   classTeacherId: z.string().nullable().optional(),
 });

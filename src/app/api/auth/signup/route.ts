@@ -3,14 +3,9 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, createSession, SESSION_COOKIE } from "@/lib/auth";
 
-/// Turns a school name into a URL-safe slug, e.g. "Green Hill Academy" ->
-/// "green-hill-academy". Not shown to the user today, but reserved for a
-/// future per-school login URL.
 function slugify(name: string) {
   return (
-    name
-      .toLowerCase()
-      .trim()
+    name.toLowerCase().trim()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "") || "school"
   );
@@ -19,8 +14,6 @@ function slugify(name: string) {
 async function uniqueSlug(base: string) {
   let slug = base;
   let n = 1;
-  // Small, bounded loop — collisions are rare, this just guarantees we never
-  // 500 on the (unlikely) case of two schools with an identical name.
   while (await prisma.school.findUnique({ where: { slug } })) {
     n += 1;
     slug = `${base}-${n}`;
@@ -29,16 +22,20 @@ async function uniqueSlug(base: string) {
 }
 
 const schema = z.object({
-  schoolName: z.string().trim().min(2, "Enter your school's name."),
-  schoolAddress: z.string().trim().optional().or(z.literal("")),
-  schoolPhone: z.string().trim().optional().or(z.literal("")),
-  fullName: z.string().trim().min(2, "Enter your full name."),
-  email: z.string().trim().email("Enter a valid email address."),
-  password: z
-    .string()
-    .min(8, "Password must be at least 8 characters.")
-    .max(200),
-});
+  schoolName:     z.string().trim().min(2, "Enter your school's name."),
+  schoolEmail:    z.string().trim().email("Enter a valid school email address."),
+  schoolAddress:  z.string().trim().optional().or(z.literal("")),
+  schoolPhone:    z.string().trim().optional().or(z.literal("")),
+  fullName:       z.string().trim().min(2, "Enter your full name."),
+  principalEmail: z.string().trim().email("Enter a valid personal email address."),
+  password:       z.string().min(8, "Password must be at least 8 characters.").max(200),
+}).refine(
+  (d) => d.schoolEmail.toLowerCase() !== d.principalEmail.toLowerCase(),
+  {
+    message: "Your personal login email must be different from the school email.",
+    path: ["principalEmail"],
+  }
+);
 
 export async function POST(req: NextRequest) {
   const parsed = schema.safeParse(await req.json().catch(() => null));
@@ -51,31 +48,91 @@ export async function POST(req: NextRequest) {
   const data = parsed.data;
 
   try {
-    const slug = await uniqueSlug(slugify(data.schoolName));
     const passwordHash = await hashPassword(data.password);
 
-    // Creates the school and the principal's own login together — if either
-    // fails, neither is left behind.
+    // ── Check if school email already exists ──────────────────────────────
+    const existingSchool = await prisma.school.findFirst({
+      where: { email: data.schoolEmail },
+      select: { id: true, name: true },
+    });
+
+    if (existingSchool) {
+      // Path B — Incoming Principal for existing school
+      // Enforce one active Principal at a time
+      const activePrincipal = await prisma.user.findFirst({
+        where: { schoolId: existingSchool.id, role: "PRINCIPAL", isActive: true },
+        select: { id: true },
+      });
+
+      if (activePrincipal) {
+        return NextResponse.json(
+          {
+            error:
+              "This school already has an active Principal. The current Principal must transfer or deactivate their account before a new one can be registered.",
+            code: "PRINCIPAL_ALREADY_EXISTS",
+          },
+          { status: 409 }
+        );
+      }
+
+      // Check personal email not already in use at this school
+      const emailConflict = await prisma.user.findFirst({
+        where: { schoolId: existingSchool.id, email: data.principalEmail, isActive: true },
+        select: { id: true },
+      });
+      if (emailConflict) {
+        return NextResponse.json(
+          { error: "That email address is already in use at this school." },
+          { status: 409 }
+        );
+      }
+
+      // Create new Principal linked to existing school
+      const user = await prisma.user.create({
+        data: {
+          schoolId:          existingSchool.id,
+          email:             data.principalEmail,
+          passwordHash,
+          role:              "PRINCIPAL",
+          mustChangePassword: false,
+        },
+      });
+
+      const token = await createSession(user.id);
+      const res = NextResponse.json(
+        { role: user.role, schoolName: existingSchool.name, isExistingSchool: true },
+        { status: 201 }
+      );
+      res.cookies.set(SESSION_COOKIE, token, {
+        httpOnly: true,
+        secure:   process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path:     "/",
+        maxAge:   60 * 60 * 24 * 7,
+      });
+      return res;
+    }
+
+    // Path A — New school
+    const slug = await uniqueSlug(slugify(data.schoolName));
+
     const { user } = await prisma.$transaction(async (tx) => {
       const school = await tx.school.create({
         data: {
-          name: data.schoolName,
+          name:    data.schoolName,
           slug,
           address: data.schoolAddress || null,
-          phone: data.schoolPhone || null,
-          email: data.email,
+          phone:   data.schoolPhone   || null,
+          email:   data.schoolEmail,           // institutional email — permanent identifier
         },
       });
 
       const user = await tx.user.create({
         data: {
-          schoolId: school.id,
-          email: data.email,
+          schoolId:          school.id,
+          email:             data.principalEmail, // personal login email — separate from school email
           passwordHash,
-          role: "PRINCIPAL",
-          // The principal set this password themselves at signup, so there's
-          // no need to force a change on first login (unlike staff accounts
-          // the principal creates later with a generated temp password).
+          role:              "PRINCIPAL",
           mustChangePassword: false,
         },
       });
@@ -84,37 +141,34 @@ export async function POST(req: NextRequest) {
     });
 
     const token = await createSession(user.id);
-    const res = NextResponse.json({ role: user.role }, { status: 201 });
+    const res = NextResponse.json({ role: user.role, isExistingSchool: false }, { status: 201 });
     res.cookies.set(SESSION_COOKIE, token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure:   process.env.NODE_ENV === "production",
       sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 7,
+      path:     "/",
+      maxAge:   60 * 60 * 24 * 7,
     });
     return res;
+
   } catch (e) {
     const err = e as { code?: string; meta?: { target?: string[] | string } };
     if (err.code === "P2002") {
       const target: (string | undefined)[] = Array.isArray(err.meta?.target)
-        ? err.meta.target
-        : [err.meta?.target];
+        ? err.meta.target : [err.meta?.target];
       if (target.includes("slug")) {
         return NextResponse.json(
-          {
-            error:
-              "A school with a very similar name is already registered. Try a slightly different school name.",
-          },
+          { error: "A school with a very similar name is already registered. Try a slightly different name." },
           { status: 409 }
         );
       }
       return NextResponse.json(
-        { error: "An account with that email already exists. Try logging in instead." },
+        { error: "That email address is already registered. Try logging in instead." },
         { status: 409 }
       );
     }
     return NextResponse.json(
-      { error: "Couldn't create your school account. Try again." },
+      { error: "Couldn't create the account. Please try again." },
       { status: 500 }
     );
   }

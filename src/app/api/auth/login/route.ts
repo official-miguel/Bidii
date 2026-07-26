@@ -65,6 +65,9 @@ export async function POST(req: NextRequest) {
 
     // ── User lookup — school-scoped when a slug is provided ────────────────
     let user;
+    // Set to true when the password has already been verified during the
+    // multi-candidate selection phase so we don't hash twice.
+    let passwordAlreadyVerified = false;
     try {
       if (schoolSlug) {
         // Two-step lookup: school by slug, then user by (schoolId, email).
@@ -81,28 +84,64 @@ export async function POST(req: NextRequest) {
           where: { schoolId: school.id, email },
         });
       } else {
-        // Fallback: no slug supplied — find the first active account with
-        // this email. Works correctly for schools where every user has a
-        // unique email across the whole platform. If the same email exists
-        // at more than one school the user is told to supply a school slug.
+        // Fallback: no slug supplied — find all active accounts with this
+        // email, then verify the password before doing anything else.
+        // We never reveal whether multiple accounts exist until the password
+        // has been proven correct, so a bad actor cannot enumerate multi-school
+        // memberships or use this path for account discovery.
         const candidates = await prisma.user.findMany({
           where: { email, isActive: true },
           select: { id: true, email: true, passwordHash: true, role: true,
                     mustChangePassword: true, isActive: true, schoolId: true,
                     staffRoleId: true, createdAt: true, updatedAt: true },
         });
-        if (candidates.length > 1) {
-          return NextResponse.json(
-            {
-              error:
-                "Multiple school accounts found for this email. " +
-                "Please enter your school identifier to log in.",
-              requiresSchoolSlug: true,
-            },
-            { status: 409 }
-          );
+
+        if (candidates.length === 0) {
+          // No accounts — fall through to the invalid() call below.
+          user = null;
+        } else if (candidates.length === 1) {
+          // Single account — normal path; password check happens below.
+          user = candidates[0];
+        } else {
+          // Multiple accounts share this email.
+          // Verify the password against each candidate BEFORE disclosing
+          // ambiguity.  This prevents the multi-school hint from being used
+          // as an oracle to discover which emails have cross-school accounts.
+          const matched: typeof candidates = [];
+          for (const candidate of candidates) {
+            try {
+              const passwordMatches = await verifyPassword(password, candidate.passwordHash);
+              if (passwordMatches) matched.push(candidate);
+            } catch {
+              // If hashing fails for one account, skip it — don't abort the
+              // whole request, just treat that candidate as non-matching.
+            }
+          }
+
+          if (matched.length === 0) {
+            // Wrong password — return the same generic error as always.
+            return invalid();
+          } else if (matched.length === 1) {
+            // Password matches exactly one school account — log that user in
+            // directly without requiring any extra step.
+            user = matched[0];
+            passwordAlreadyVerified = true;
+          } else {
+            // Extremely rare: same password hash matches accounts at more than
+            // one school (e.g. a shared default password that was never changed).
+            // Only NOW, after the password has been verified, do we ask for the
+            // school identifier.  The message is intentionally vague.
+            return NextResponse.json(
+              {
+                error:
+                  "Your account is linked to more than one school. " +
+                  "Please enter your school identifier to continue.",
+                requiresSchoolSlug: true,
+              },
+              { status: 409 }
+            );
+          }
         }
-        user = candidates[0] ?? null;
       }
     } catch (userQueryError) {
       console.error("[LOGIN] Error querying user:", userQueryError);
@@ -114,18 +153,19 @@ export async function POST(req: NextRequest) {
 
     if (!user || !user.isActive) return invalid();
 
-    // Verify password
-    let valid;
-    try {
-      valid = await verifyPassword(password, user.passwordHash);
-    } catch {
-      return NextResponse.json(
-        { error: "Authentication service temporarily unavailable." },
-        { status: 503 }
-      );
+    // Verify password (skip if already verified during multi-candidate selection)
+    if (!passwordAlreadyVerified) {
+      let valid;
+      try {
+        valid = await verifyPassword(password, user.passwordHash);
+      } catch {
+        return NextResponse.json(
+          { error: "Authentication service temporarily unavailable." },
+          { status: 503 }
+        );
+      }
+      if (!valid) return invalid();
     }
-
-    if (!valid) return invalid();
 
     // Create session
     let token;

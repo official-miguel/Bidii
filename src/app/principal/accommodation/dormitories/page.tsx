@@ -366,6 +366,9 @@ function DormWizard({
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    // Guard: only submit when on the final step — prevents accidental
+    // Enter-key submissions from text inputs on earlier steps bubbling through.
+    if (step !== STEP_LABELS.length - 1) return;
     if (!canNext()) return;
     setSaving(true); setError(null);
     try {
@@ -398,31 +401,7 @@ function DormWizard({
       title={editDorm ? `Edit ${editDorm.name}` : "Register Dormitory"}
       description={editDorm ? "Update dormitory details." : `Step ${step + 1} of ${STEP_LABELS.length} — ${STEP_LABELS[step]}`}
       onClose={() => { if (!editDorm) clearWizDraft(); onClose(); }} size="md"
-      footer={
-        <div className="flex items-center justify-between gap-3">
-          <button type="button" onClick={() => { if (!editDorm) clearWizDraft(); onClose(); }} className={secondaryButtonClass}>Cancel</button>
-          <div className="flex items-center gap-2">
-            {step > 0 && (
-              <button type="button" onClick={() => setStep((s) => s - 1)} className={secondaryButtonClass}>
-                <ChevronLeft className="h-4 w-4" /> Back
-              </button>
-            )}
-            {step < STEP_LABELS.length - 1 ? (
-              <button type="button" onClick={() => setStep((s) => s + 1)}
-                disabled={!canNext()}
-                className={`${primaryButtonClass} disabled:opacity-40`}>
-                Next <ChevronRight className="h-4 w-4" />
-              </button>
-            ) : (
-              <button type="submit" form="dorm-wizard-form"
-                disabled={saving || !canNext()}
-                className={`${primaryButtonClass} disabled:opacity-40`}>
-                {saving ? "Saving…" : editDorm ? "Save changes" : "Register dormitory"}
-              </button>
-            )}
-          </div>
-        </div>
-      }
+      disableBackdropClose
     >
       {/* Step indicator */}
       {!editDorm && (
@@ -443,10 +422,34 @@ function DormWizard({
 
       {error && <div className="mb-4"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
 
-      <form id="dorm-wizard-form" onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} onKeyDown={(e) => { if (e.key === "Enter" && (e.target as HTMLElement).tagName !== "TEXTAREA") e.preventDefault(); }}>
         {step === 0 && <Step1Basics data={data} onChange={patch} staffList={staffList} studentList={studentList} schoolPolicy={schoolPolicy} />}
         {step === 1 && <Step2Structure data={data} onChange={patch} />}
         {step === 2 && <Step3Policy data={data} onChange={patch} />}
+
+        <div className="flex items-center justify-between gap-3 mt-6">
+          <button type="button" onClick={() => { if (!editDorm) clearWizDraft(); onClose(); }} className={secondaryButtonClass}>Cancel</button>
+          <div className="flex items-center gap-2">
+            {step > 0 && (
+              <button type="button" onClick={() => setStep((s) => s - 1)} className={secondaryButtonClass}>
+                <ChevronLeft className="h-4 w-4" /> Back
+              </button>
+            )}
+            {step < STEP_LABELS.length - 1 ? (
+              <button key="next" type="button" onClick={() => setStep((s) => s + 1)}
+                disabled={!canNext()}
+                className={`${primaryButtonClass} disabled:opacity-40`}>
+                Next <ChevronRight className="h-4 w-4" />
+              </button>
+            ) : (
+              <button key="submit" type="submit"
+                disabled={saving || !canNext()}
+                className={`${primaryButtonClass} disabled:opacity-40`}>
+                {saving ? "Saving…" : editDorm ? "Save changes" : "Register dormitory"}
+              </button>
+            )}
+          </div>
+        </div>
       </form>
     </Modal>
   );

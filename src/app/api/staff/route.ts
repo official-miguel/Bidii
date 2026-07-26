@@ -112,6 +112,21 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Pre-check: if login creation is requested, ensure the email isn't already taken
+  // within this school. The User unique constraint is compound (schoolId + email).
+  if (data.createLogin && data.email) {
+    const existingUser = await prisma.user.findUnique({
+      where: { schoolId_email: { schoolId: user.schoolId, email: data.email } },
+      select: { id: true },
+    });
+    if (existingUser) {
+      return NextResponse.json(
+        { error: "An account with that email already exists. Use a different email address." },
+        { status: 409 }
+      );
+    }
+  }
+
   // Fetch school name once — used in the welcome email subject/body.
   const school = await prisma.school.findUnique({
     where: { id: user.schoolId },
@@ -189,9 +204,22 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       const err = e as { code?: string; meta?: { target?: string[] } };
       if (err.code === "P2002") {
-        const field = err.meta?.target?.[0] ?? "field";
+        const target = err.meta?.target ?? [];
+        const fields = Array.isArray(target) ? target.join(", ") : String(target);
+        if (fields.includes("email")) {
+          return NextResponse.json(
+            { error: "An account with that email already exists. Use a different email address." },
+            { status: 409 }
+          );
+        }
+        if (fields.includes("staffId")) {
+          return NextResponse.json(
+            { error: "That staff ID is already in use. Choose a different one." },
+            { status: 409 }
+          );
+        }
         return NextResponse.json(
-          { error: `That ${field === "staffId" ? "staff ID" : field} is already in use.` },
+          { error: `A record with those details already exists (${fields}).` },
           { status: 409 }
         );
       }
@@ -283,10 +311,18 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       const err = e as { code?: string; meta?: { target?: string[] } };
       if (err.code === "P2002") {
-        const field = err.meta?.target?.[0] ?? "";
-        if (field === "staffId" || field.includes("staffId")) continue;
+        const target = err.meta?.target ?? [];
+        const fields = Array.isArray(target) ? target.join(", ") : String(target);
+        // staffId collision — retry with the next available ID
+        if (fields.includes("staffId")) continue;
+        if (fields.includes("email")) {
+          return NextResponse.json(
+            { error: "An account with that email already exists. Use a different email address." },
+            { status: 409 }
+          );
+        }
         return NextResponse.json(
-          { error: `That ${field} is already in use.` },
+          { error: `A record with those details already exists (${fields}).` },
           { status: 409 }
         );
       }

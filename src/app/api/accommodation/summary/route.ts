@@ -84,12 +84,10 @@ export async function GET() {
   });
 
   // Top-level totals: all beds across all dorms (including maintenance/closed
-  // so the "total" figure is accurate), but available = free beds in active dorms only.
-  const totalPositions   = dormSummaries.reduce((s, d) => s + d.capacity, 0);
-  const totalOccupied    = dormSummaries.reduce((s, d) => s + d.occupied, 0);
-  const availableInActive = dormSummaries
-    .filter((d) => d.status === "ACTIVE")
-    .reduce((s, d) => s + d.available, 0);
+  // so the "total" and "available" figures are accurate across every dorm.
+  const totalPositions = dormSummaries.reduce((s, d) => s + d.capacity, 0);
+  const totalOccupied  = dormSummaries.reduce((s, d) => s + d.occupied, 0);
+  const availableInActive = dormSummaries.reduce((s, d) => s + d.available, 0);
 
   const boardingStudents = await prisma.allocationRecord.count({
     where: { schoolId, status: "CURRENT" },

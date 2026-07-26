@@ -574,16 +574,8 @@ function IntegrationsPanel() {
           title={`${statusFor(editing)?.configured ? "Update" : "Add"} ${PROVIDER_INFO[editing].label} key`}
           description="This key is stored encrypted. Only the last 4 characters will be shown after saving."
           onClose={() => setEditing(null)}
-          footer={
-            <div className="flex justify-end gap-3">
-              <button type="button" className={secondaryButtonClass} onClick={() => setEditing(null)}>Cancel</button>
-              <button type="submit" form="api-key-form" className={royalButtonClass} disabled={saving}>
-                <Key className="h-4 w-4" />{saving ? "Saving…" : "Save key"}
-              </button>
-            </div>
-          }
         >
-          <form id="api-key-form" onSubmit={handleSaveKey} className="space-y-4">
+          <form onSubmit={handleSaveKey} className="space-y-4">
             {intError && <ErrorBanner message={intError} />}
             <div className="form-section">
               <div className="form-section-title">API Credentials</div>
@@ -599,6 +591,12 @@ function IntegrationsPanel() {
                   saving — only the last 4 characters, to confirm which key is active.
                 </p>
               </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-1">
+              <button type="button" className={secondaryButtonClass} onClick={() => setEditing(null)}>Cancel</button>
+              <button type="submit" className={royalButtonClass} disabled={saving}>
+                <Key className="h-4 w-4" />{saving ? "Saving…" : "Save key"}
+              </button>
             </div>
           </form>
         </Modal>

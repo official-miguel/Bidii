@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getEffectivePermissions, getVisibleHubs, getRoleDisplayLabel } from "@/lib/permissions";
 import DashboardShell from "@/components/DashboardShell";
 import MustChangePasswordGate from "@/components/MustChangePasswordGate";
+import PermissionProvider from "@/components/PermissionProvider";
 
 export default async function StaffPortalLayout({
   children,
@@ -34,7 +35,9 @@ export default async function StaffPortalLayout({
         motto={school?.motto}
         visibleHubs={visibleHubs}
       >
-        {children}
+        <PermissionProvider schoolId={user.schoolId} userId={user.id}>
+          {children}
+        </PermissionProvider>
       </DashboardShell>
     </MustChangePasswordGate>
   );
