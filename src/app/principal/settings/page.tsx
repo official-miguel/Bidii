@@ -612,8 +612,6 @@ function IntegrationsPanel() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface AccomSettings {
-  boardingType: string;
-  schoolGenderPolicy: string;
   enableDormCaptains: boolean;
   enableTransfers: boolean;
   defaultAllocationPolicy: string;
@@ -624,8 +622,24 @@ interface AccomSettings {
   updatedAt: string | null;
 }
 
+// boardingType and genderPolicy live on the School model — read here, never edited here.
+interface DormSchoolPolicy {
+  boardingType: string;
+  genderPolicy: string;
+}
+
+const BOARDING_LABEL: Record<string, string> = {
+  DAY_ONLY:        "Day School Only",
+  DAY_AND_BOARDING:"Day & Boarding",
+  BOARDING_ONLY:   "Boarding Only",
+};
+const GENDER_POLICY_LABEL: Record<string, string> = {
+  MIXED:      "Mixed Gender",
+  BOYS_ONLY:  "Boys Only",
+  GIRLS_ONLY: "Girls Only",
+};
+
 const ACCOM_DEFAULT: AccomSettings = {
-  boardingType: "DAY_AND_BOARDING", schoolGenderPolicy: "MIXED",
   enableDormCaptains: true, enableTransfers: true,
   defaultAllocationPolicy: "MIXED_FORMS", occupancyWarningPct: 90,
   bedTrackingEnabled: true, analyticsEnabled: true, notifyOnAllocation: false,
@@ -680,20 +694,22 @@ function DormSectionCard({
 function DormitorySettingsForm() {
   const [dormDraft, setDormDraft, clearDormDraft] = useFormDraft("bidii_draft_settings_dorm", ACCOM_DEFAULT as AccomSettings & Record<string, unknown>);
 
-  const [settings, setSettings] = useState<AccomSettings>(dormDraft as AccomSettings);
-  const [loading,  setLoading]  = useState(true);
-  const [saving,   setSaving]   = useState(false);
-  const [error,    setError]    = useState<string | null>(null);
-  const [saved,    setSaved]    = useState(false);
-  const [dirty,    setDirty]    = useState(false);
+  const [settings,     setSettings]     = useState<AccomSettings>(dormDraft as AccomSettings);
+  const [schoolPolicy, setSchoolPolicy] = useState<DormSchoolPolicy>({ boardingType: "", genderPolicy: "" });
+  const [loading,      setLoading]      = useState(true);
+  const [saving,       setSaving]       = useState(false);
+  const [error,        setError]        = useState<string | null>(null);
+  const [saved,        setSaved]        = useState(false);
+  const [dirty,        setDirty]        = useState(false);
 
   useEffect(() => {
-    fetch("/api/accommodation/settings")
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => {
-        if (d && !dirty) setSettings({ ...ACCOM_DEFAULT, ...d });
-      })
-      .finally(() => setLoading(false));
+    Promise.all([
+      fetch("/api/accommodation/settings").then((r) => r.ok ? r.json() : null),
+      fetch("/api/school/settings").then((r) => r.ok ? r.json() : null),
+    ]).then(([accom, school]) => {
+      if (accom && !dirty) setSettings({ ...ACCOM_DEFAULT, ...accom });
+      if (school) setSchoolPolicy({ boardingType: school.boardingType ?? "", genderPolicy: school.genderPolicy ?? "" });
+    }).finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -715,8 +731,10 @@ function DormitorySettingsForm() {
       const res = await fetch("/api/accommodation/settings", {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          boardingType:            settings.boardingType,
-          schoolGenderPolicy:      settings.schoolGenderPolicy,
+          // boardingType and schoolGenderPolicy are owned by /api/school/settings —
+          // pass through the current school values so the API schema is satisfied.
+          boardingType:            schoolPolicy.boardingType || "DAY_AND_BOARDING",
+          schoolGenderPolicy:      schoolPolicy.genderPolicy || "MIXED",
           enableDormCaptains:      settings.enableDormCaptains,
           enableTransfers:         settings.enableTransfers,
           defaultAllocationPolicy: settings.defaultAllocationPolicy,
@@ -749,34 +767,35 @@ function DormitorySettingsForm() {
       {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
       {saved && <SuccessBanner message="Dormitory settings saved successfully." />}
 
-      {/* Boarding type */}
+      {/* Boarding type — read-only, owned by School Configuration */}
       <DormSectionCard icon={BedDouble} title="School Boarding Configuration"
-        description="Defines whether this school operates boarding and its gender admission policy.">
+        description="These values are configured in School Configuration and apply system-wide.">
         <div className="py-4 space-y-4">
-          <div>
-            <label className={labelClass}>Boarding type</label>
-            <select className={inputClass} value={settings.boardingType}
-              onChange={(e) => patch({ boardingType: e.target.value })}>
-              <option value="DAY_ONLY">Day School Only — boarding features hidden</option>
-              <option value="BOARDING_ONLY">Boarding Only — all students are boarders</option>
-              <option value="DAY_AND_BOARDING">Day &amp; Boarding — mixed student body</option>
-            </select>
-            <p className="text-xs text-slate dark:text-dark-muted mt-1.5">
-              Controls whether the Accommodation module is active and which features are shown.
-            </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs font-medium text-slate dark:text-dark-muted mb-1">Boarding type</p>
+              <p className="text-sm font-semibold text-ink dark:text-dark-text">
+                {BOARDING_LABEL[schoolPolicy.boardingType] ?? schoolPolicy.boardingType ?? "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-slate dark:text-dark-muted mb-1">Gender admission policy</p>
+              <p className="text-sm font-semibold text-ink dark:text-dark-text">
+                {GENDER_POLICY_LABEL[schoolPolicy.genderPolicy] ?? schoolPolicy.genderPolicy ?? "—"}
+              </p>
+            </div>
           </div>
-          <div>
-            <label className={labelClass}>School gender admission policy</label>
-            <select className={inputClass} value={settings.schoolGenderPolicy}
-              onChange={(e) => patch({ schoolGenderPolicy: e.target.value })}>
-              <option value="BOYS_ONLY">Boys Only</option>
-              <option value="GIRLS_ONLY">Girls Only</option>
-              <option value="MIXED">Mixed Gender</option>
-            </select>
-            <p className="text-xs text-slate dark:text-dark-muted mt-1.5">
-              Used as the default gender option when registering new dormitories.
-            </p>
-          </div>
+          <p className="text-xs text-slate dark:text-dark-muted">
+            To change these, go to the{" "}
+            <button type="button" className="text-teal hover:underline font-medium"
+              onClick={() => {
+                // Switch to the "school" tab within this same settings page
+                window.dispatchEvent(new CustomEvent("bidii:settings:tab", { detail: "school" }));
+              }}>
+              School Configuration
+            </button>{" "}
+            section above.
+          </p>
         </div>
       </DormSectionCard>
 
@@ -1288,7 +1307,7 @@ export default function SettingsPage() {
   const [active, setActive] = useState<SectionId>("integrations");
   const rankingRef = useRef<HTMLDivElement>(null);
 
-  // Honour ?tab= or #ranking deep-links
+  // Honour ?tab= or #ranking deep-links, and the internal tab-switch event
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab") as SectionId | null;
@@ -1300,6 +1319,14 @@ export default function SettingsPage() {
       setActive("ranking");
       setTimeout(() => rankingRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     }
+
+    // Allow child components to switch tabs without prop-drilling
+    const handler = (e: Event) => {
+      const tab = (e as CustomEvent<SectionId>).detail;
+      if (SECTIONS.some((s) => s.id === tab)) setActive(tab);
+    };
+    window.addEventListener("bidii:settings:tab", handler);
+    return () => window.removeEventListener("bidii:settings:tab", handler);
   }, []);
 
   return (

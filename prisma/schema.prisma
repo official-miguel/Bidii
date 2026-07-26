@@ -15,7 +15,7 @@ model School {
   name                     String
   /// Short URL-safe handle, e.g. "green-hill-academy" — reserved for a
   /// future school-specific login URL; not required at login today (login is
-  /// by email, which is globally unique).
+  /// by email, which is unique per school).
   slug                     String                    @unique
   address                  String?
   phone                    String?
@@ -112,9 +112,11 @@ model School {
 /// schoolId scopes every user (including the Principal) to exactly one
 /// school — this is what makes "log in and land inside your own school's
 /// system" work.
+/// Email is unique per school, not globally — the same person can hold
+/// accounts at multiple schools using the same email address.
 model User {
   id                        String               @id @default(cuid())
-  email                     String               @unique
+  email                     String
   passwordHash              String
   role                      Role
   mustChangePassword        Boolean              @default(true)
@@ -157,6 +159,8 @@ model User {
   @@index([role])
   @@index([schoolId])
   @@index([staffRoleId])
+  /// Email uniqueness is scoped to one school — same email OK at different schools
+  @@unique([schoolId, email])
 }
 
 /// Opaque bearer token stored server-side (not a JWT) so sessions can be

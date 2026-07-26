@@ -50,14 +50,6 @@ export async function POST(req: NextRequest) {
   }
   const data = parsed.data;
 
-  const existing = await prisma.user.findUnique({ where: { email: data.email } });
-  if (existing) {
-    return NextResponse.json(
-      { error: "An account with that email already exists. Try logging in instead." },
-      { status: 409 }
-    );
-  }
-
   try {
     const slug = await uniqueSlug(slugify(data.schoolName));
     const passwordHash = await hashPassword(data.password);

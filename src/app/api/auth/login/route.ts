@@ -6,6 +6,9 @@ import { verifyPassword, createSession, SESSION_COOKIE, buildOfflineToken } from
 const schema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+  /// Optional school slug — required when the same email is registered at
+  /// multiple schools. Ignored when omitted (falls back to findFirst).
+  schoolSlug: z.string().trim().optional().or(z.literal("")),
 });
 
 export async function POST(req: NextRequest) {
@@ -30,9 +33,6 @@ export async function POST(req: NextRequest) {
     // Test database connectivity
     try {
       await prisma.$connect();
-      if (process.env.NODE_ENV === "development") {
-        console.log("[LOGIN] Database connection successful");
-      }
     } catch (dbError) {
       console.error("[LOGIN] Database connection failed:", dbError);
       return NextResponse.json(
@@ -53,21 +53,57 @@ export async function POST(req: NextRequest) {
     // Validate input schema
     const parsed = schema.safeParse(body);
     if (!parsed.success) {
-      console.log("[LOGIN] Invalid input schema:", parsed.error.issues);
       return NextResponse.json({ error: "Enter a valid email and password." }, { status: 400 });
     }
 
-    const { email, password } = parsed.data;
+    const { email, password, schoolSlug } = parsed.data;
 
-    // Log authentication attempt (without sensitive data)
-    if (process.env.NODE_ENV === "development") {
-      console.log(`[LOGIN] Authentication attempt for email: ${email}`);
-    }
+    // Same generic error for unknown email or wrong password — prevents
+    // login from being used to enumerate registered accounts.
+    const invalid = () =>
+      NextResponse.json({ error: "Incorrect email or password." }, { status: 401 });
 
-    // Find user in database
+    // ── User lookup — school-scoped when a slug is provided ────────────────
     let user;
     try {
-      user = await prisma.user.findUnique({ where: { email } });
+      if (schoolSlug) {
+        // Two-step lookup: school by slug, then user by (schoolId, email).
+        // This is the correct path when the same email exists at multiple schools.
+        const school = await prisma.school.findUnique({
+          where: { slug: schoolSlug },
+          select: { id: true },
+        });
+        if (!school) {
+          // Return the same generic error so slug enumeration isn't possible.
+          return invalid();
+        }
+        user = await prisma.user.findUnique({
+          where: { schoolId_email: { schoolId: school.id, email } },
+        });
+      } else {
+        // Fallback: no slug supplied — find the first active account with
+        // this email. Works correctly for schools where every user has a
+        // unique email across the whole platform. If the same email exists
+        // at more than one school the user is told to supply a school slug.
+        const candidates = await prisma.user.findMany({
+          where: { email, isActive: true },
+          select: { id: true, email: true, passwordHash: true, role: true,
+                    mustChangePassword: true, isActive: true, schoolId: true,
+                    staffRoleId: true, createdAt: true, updatedAt: true },
+        });
+        if (candidates.length > 1) {
+          return NextResponse.json(
+            {
+              error:
+                "Multiple school accounts found for this email. " +
+                "Please enter your school identifier to log in.",
+              requiresSchoolSlug: true,
+            },
+            { status: 409 }
+          );
+        }
+        user = candidates[0] ?? null;
+      }
     } catch (userQueryError) {
       console.error("[LOGIN] Error querying user:", userQueryError);
       return NextResponse.json(
@@ -76,38 +112,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Check if demo data exists if no user found
-    if (!user) {
-      try {
-        const userCount = await prisma.user.count();
-        if (userCount === 0) {
-          console.error("[LOGIN] No users found in database - demo data may not be seeded");
-          return NextResponse.json({
-            error: "No user accounts found. Please run 'npm run db:seed-demo' to create demo accounts."
-          }, { status: 404 });
-        }
-      } catch (countError) {
-        console.error("[LOGIN] Error checking user count:", countError);
-      }
-    }
-
-    // Same generic error whether the email doesn't exist or the password is
-    // wrong, so login can't be used to enumerate registered accounts.
-    const invalid = () => {
-      if (process.env.NODE_ENV === "development") {
-        console.log(`[LOGIN] Authentication failed for email: ${email}`);
-      }
-      return NextResponse.json({ error: "Incorrect email or password." }, { status: 401 });
-    };
-
     if (!user || !user.isActive) return invalid();
 
     // Verify password
     let valid;
     try {
       valid = await verifyPassword(password, user.passwordHash);
-    } catch (passwordError) {
-      console.error("[LOGIN] Password verification error:", passwordError);
+    } catch {
       return NextResponse.json(
         { error: "Authentication service temporarily unavailable." },
         { status: 503 }
@@ -120,8 +131,7 @@ export async function POST(req: NextRequest) {
     let token;
     try {
       token = await createSession(user.id);
-    } catch (sessionError) {
-      console.error("[LOGIN] Session creation error:", sessionError);
+    } catch {
       return NextResponse.json(
         { error: "Failed to create session. Please try again." },
         { status: 500 }
@@ -132,17 +142,11 @@ export async function POST(req: NextRequest) {
     let offlineToken;
     try {
       offlineToken = buildOfflineToken(user);
-    } catch (tokenError) {
-      console.error("[LOGIN] Offline token creation error:", tokenError);
+    } catch {
       return NextResponse.json(
         { error: "Failed to create authentication token." },
         { status: 500 }
       );
-    }
-
-    // Log successful authentication
-    if (process.env.NODE_ENV === "development") {
-      console.log(`[LOGIN] Successfully authenticated user: ${email} (${user.role})`);
     }
 
     const res = NextResponse.json({
@@ -162,24 +166,16 @@ export async function POST(req: NextRequest) {
     return res;
 
   } catch (error) {
-    // Catch-all error handler
     console.error("[LOGIN] Unexpected error:", error);
-    
-    // Don't expose internal error details in production
-    const errorMessage = process.env.NODE_ENV === "development" 
-      ? `Internal server error: ${error instanceof Error ? error.message : 'Unknown error'}`
+    const errorMessage = process.env.NODE_ENV === "development"
+      ? `Internal server error: ${error instanceof Error ? error.message : "Unknown error"}`
       : "An unexpected error occurred. Please try again.";
-
-    return NextResponse.json(
-      { error: errorMessage },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   } finally {
-    // Ensure database connection is properly handled
     try {
       await prisma.$disconnect();
-    } catch (disconnectError) {
-      console.error("[LOGIN] Error disconnecting from database:", disconnectError);
+    } catch {
+      // ignore
     }
   }
 }

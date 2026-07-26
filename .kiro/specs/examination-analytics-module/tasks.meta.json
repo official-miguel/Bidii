@@ -1,5 +1,38 @@
 {
-  "pbtResults": {},
+  "pbtResults": {
+    "2.2 Write property test for teacher home entry count": {
+      "status": "passed",
+      "lastRunTimestamp": 1785046122309
+    },
+    "2.3 Write property test for teacher home card count matches assignments": {
+      "status": "passed",
+      "lastRunTimestamp": 1785046129118
+    },
+    "12.6 Write property test for empty data produces empty-state message": {
+      "status": "passed",
+      "lastRunTimestamp": 1785046599816
+    },
+    "10.5 Write property test for report framework routing invariant": {
+      "status": "passed",
+      "lastRunTimestamp": 1785046723643
+    },
+    "10.3 Write property test for report remark persistence round-trip": {
+      "status": "passed",
+      "lastRunTimestamp": 1785047090312
+    },
+    "9.5 Write property test for teacher ranking visibility invariant": {
+      "status": "passed",
+      "lastRunTimestamp": 1785047411196
+    },
+    "9.6 Write property test for HOD ranking dept scoping": {
+      "status": "passed",
+      "lastRunTimestamp": 1785047574025
+    },
+    "15.2 Write property test for new endpoints enforce school scoping": {
+      "status": "passed",
+      "lastRunTimestamp": 1785047845634
+    }
+  },
   "executionHistory": {
     "0.1 Add `RankingConfig` model to `prisma/schema.prisma`": [
       {
@@ -62,6 +95,11 @@
         "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
         "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
         "timestamp": 1784404073102
+      },
+      {
+        "executionId": "747234e3-5db3-462d-93f2-78e7aeb10d17",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785045676649
       }
     ],
     "1. Navigation shell — RoleNav and TopBar wiring": [
@@ -398,6 +436,180 @@
         "executionId": "c6f23c8c-8763-4e0d-af43-fd5aa4468b08",
         "chatSessionId": "sess_739fb7a3-53ef-463e-92bf-d35f94aa555c",
         "timestamp": 1784403826331
+      }
+    ],
+    "2.2 Write property test for teacher home entry count": [
+      {
+        "executionId": "747234e3-5db3-462d-93f2-78e7aeb10d17",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785045703675
+      },
+      {
+        "executionId": "f0991f84-c452-4354-97f2-1d24b2efc700",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046149197
+      }
+    ],
+    "2.3 Write property test for teacher home card count matches assignments": [
+      {
+        "executionId": "747234e3-5db3-462d-93f2-78e7aeb10d17",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785045708439
+      },
+      {
+        "executionId": "f0991f84-c452-4354-97f2-1d24b2efc700",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046154170
+      }
+    ],
+    "5.5 Write property test for UnifiedClassTable row completeness": [
+      {
+        "executionId": "747234e3-5db3-462d-93f2-78e7aeb10d17",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785045712888
+      },
+      {
+        "executionId": "f0991f84-c452-4354-97f2-1d24b2efc700",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046161063
+      }
+    ],
+    "5.6 Write property test for framework badge correctness": [
+      {
+        "executionId": "747234e3-5db3-462d-93f2-78e7aeb10d17",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785045717439
+      },
+      {
+        "executionId": "f0991f84-c452-4354-97f2-1d24b2efc700",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046165752
+      }
+    ],
+    "7.2 Write property test for dept analytics subject scoping": [
+      {
+        "executionId": "747234e3-5db3-462d-93f2-78e7aeb10d17",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785045722508
+      },
+      {
+        "executionId": "f0991f84-c452-4354-97f2-1d24b2efc700",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046171104
+      }
+    ],
+    "7.3 Write property test for dept heatmap class scoping": [
+      {
+        "executionId": "f0991f84-c452-4354-97f2-1d24b2efc700",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046177561
+      }
+    ],
+    "7.4 Write property test for dept vs. school mean consistency": [
+      {
+        "executionId": "f0991f84-c452-4354-97f2-1d24b2efc700",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046183118
+      }
+    ],
+    "7.5 Write property test for HOD dept access control": [
+      {
+        "executionId": "f0991f84-c452-4354-97f2-1d24b2efc700",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046187789
+      }
+    ],
+    "9.2 Write property test for composite score formula correctness": [
+      {
+        "executionId": "f0991f84-c452-4354-97f2-1d24b2efc700",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046192592
+      }
+    ],
+    "9.3 Write property test for ranking trend direction": [
+      {
+        "executionId": "f0991f84-c452-4354-97f2-1d24b2efc700",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046203542
+      }
+    ],
+    "12.2 Write property test for uniform colour scale": [
+      {
+        "executionId": "f0991f84-c452-4354-97f2-1d24b2efc700",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046208947
+      }
+    ],
+    "9.5 Write property test for teacher ranking visibility invariant": [
+      {
+        "executionId": "f0991f84-c452-4354-97f2-1d24b2efc700",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046251032
+      },
+      {
+        "executionId": "fe19c132-1a00-492a-8926-8046d544ed83",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785047428541
+      }
+    ],
+    "9.6 Write property test for HOD ranking dept scoping": [
+      {
+        "executionId": "f0991f84-c452-4354-97f2-1d24b2efc700",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046255746
+      },
+      {
+        "executionId": "fe19c132-1a00-492a-8926-8046d544ed83",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785047591476
+      }
+    ],
+    "10.3 Write property test for report remark persistence round-trip": [
+      {
+        "executionId": "f0991f84-c452-4354-97f2-1d24b2efc700",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046261137
+      },
+      {
+        "executionId": "fe19c132-1a00-492a-8926-8046d544ed83",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785047108412
+      }
+    ],
+    "10.5 Write property test for report framework routing invariant": [
+      {
+        "executionId": "f0991f84-c452-4354-97f2-1d24b2efc700",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046265984
+      },
+      {
+        "executionId": "fe19c132-1a00-492a-8926-8046d544ed83",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046741631
+      }
+    ],
+    "12.6 Write property test for empty data produces empty-state message": [
+      {
+        "executionId": "f0991f84-c452-4354-97f2-1d24b2efc700",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046272398
+      },
+      {
+        "executionId": "fe19c132-1a00-492a-8926-8046d544ed83",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046616398
+      }
+    ],
+    "15.2 Write property test for new endpoints enforce school scoping": [
+      {
+        "executionId": "f0991f84-c452-4354-97f2-1d24b2efc700",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785046278384
+      },
+      {
+        "executionId": "fe19c132-1a00-492a-8926-8046d544ed83",
+        "chatSessionId": "sess_f24ebd63-eeaf-491e-b285-a316340aad29",
+        "timestamp": 1785047867948
       }
     ]
   }

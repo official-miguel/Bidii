@@ -54,7 +54,8 @@ const updateSchema = z.object({
 });
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
-  const user = await requireRole("PRINCIPAL");
+  const user =
+    (await requireRole("PRINCIPAL")) ?? (await requirePermission("STAFF", "edit"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const parsed = updateSchema.safeParse(await req.json().catch(() => null));

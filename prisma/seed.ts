@@ -13,7 +13,7 @@ async function main() {
   const password = process.env.SEED_PRINCIPAL_PASSWORD || "ChangeMe123!";
   const schoolName = process.env.SEED_SCHOOL_NAME || "Bidii Demo School";
 
-  const existing = await prisma.user.findUnique({ where: { email } });
+  const existing = await prisma.user.findFirst({ where: { email } });
   if (existing) {
     console.log(`Principal account already exists: ${email}`);
     return;

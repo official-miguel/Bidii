@@ -63,7 +63,8 @@ function generateTempPassword() {
 // ---------------------------------------------------------------------------
 
 export async function POST(req: NextRequest) {
-  const user = await requireRole("PRINCIPAL");
+  const user =
+    (await requireRole("PRINCIPAL")) ?? (await requirePermission("STAFF", "create"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const parsed = createSchema.safeParse(await req.json().catch(() => null));

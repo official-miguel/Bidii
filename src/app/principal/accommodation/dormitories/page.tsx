@@ -47,6 +47,10 @@ interface WizardData {
   allocationPolicy: string; cubiclesInheritPolicy: boolean; permittedForms: number[];
 }
 
+interface SchoolPolicy {
+  genderPolicy: string; // "MIXED" | "BOYS_ONLY" | "GIRLS_ONLY"
+}
+
 const EMPTY_WIZARD: WizardData = {
   name: "", genderPolicy: "MIXED", status: "ACTIVE",
   boardingMasterId: "", dormCaptainId: "", description: "",
@@ -83,13 +87,17 @@ const FORMS = [1, 2, 3, 4, 5, 6];
 // ── Wizard Step 1: Basics ─────────────────────────────────────────────────────
 
 function Step1Basics({
-  data, onChange, staffList, studentList,
+  data, onChange, staffList, studentList, schoolPolicy,
 }: {
   data: WizardData;
   onChange: (patch: Partial<WizardData>) => void;
   staffList: StaffOption[];
   studentList: StudentOption[];
+  schoolPolicy: SchoolPolicy;
 }) {
+  const genderLocked = schoolPolicy.genderPolicy === "BOYS_ONLY" || schoolPolicy.genderPolicy === "GIRLS_ONLY";
+  const lockedGenderLabel = schoolPolicy.genderPolicy === "BOYS_ONLY" ? "Boys only" : "Girls only";
+
   return (
     <div className="space-y-5">
       <FormField label="Dormitory name" required>
@@ -101,12 +109,25 @@ function Step1Basics({
 
       <div className="grid grid-cols-2 gap-4">
         <FormField label="Gender" required>
-          <select className={inputClass} value={data.genderPolicy}
-            onChange={(e) => onChange({ genderPolicy: e.target.value })}>
-            <option value="MIXED">Mixed</option>
-            <option value="BOYS_ONLY">Boys only</option>
-            <option value="GIRLS_ONLY">Girls only</option>
-          </select>
+          {genderLocked ? (
+            <>
+              <input
+                readOnly
+                value={lockedGenderLabel}
+                className={`${inputClass} bg-paper cursor-not-allowed`}
+              />
+              <p className="text-xs text-slate mt-1.5 dark:text-dark-muted">
+                Fixed by the school gender policy.
+              </p>
+            </>
+          ) : (
+            <select className={inputClass} value={data.genderPolicy}
+              onChange={(e) => onChange({ genderPolicy: e.target.value })}>
+              <option value="MIXED">Mixed</option>
+              <option value="BOYS_ONLY">Boys only</option>
+              <option value="GIRLS_ONLY">Girls only</option>
+            </select>
+          )}
         </FormField>
         <FormField label="Status" required>
           <select className={inputClass} value={data.status}
@@ -288,16 +309,22 @@ function Step3Policy({ data, onChange }: { data: WizardData; onChange: (p: Parti
 const STEP_LABELS = ["Basics", "Structure", "Allocation Policy"];
 
 function DormWizard({
-  onClose, onSaved, editDorm, staffList, studentList,
+  onClose, onSaved, editDorm, staffList, studentList, schoolPolicy,
 }: {
   onClose: () => void;
   onSaved: (dorm: DormRow) => void;
   editDorm?: DormRow | null;
   staffList: StaffOption[];
   studentList: StudentOption[];
+  schoolPolicy: SchoolPolicy;
 }) {
-  // Draft key scoped to the record: edits use dorm id, creates use "new"
   const dormWizardDraftKey = `bidii_draft_dorm_wizard_${editDorm?.id ?? "new"}`;
+
+  // Derive the correct default genderPolicy from school settings for new dorms
+  const schoolGenderDefault =
+    schoolPolicy.genderPolicy === "BOYS_ONLY" ? "BOYS_ONLY" :
+    schoolPolicy.genderPolicy === "GIRLS_ONLY" ? "GIRLS_ONLY" : "MIXED";
+
   const defaultData: WizardData = editDorm
     ? {
         name: editDorm.name, genderPolicy: editDorm.genderPolicy,
@@ -307,7 +334,7 @@ function DormWizard({
         cubiclesInheritPolicy: editDorm.cubiclesInheritPolicy,
         permittedForms: editDorm.permittedForms,
       }
-    : { ...EMPTY_WIZARD };
+    : { ...EMPTY_WIZARD, genderPolicy: schoolGenderDefault };
 
   const [wizDraft, setWizDraft, clearWizDraft] = useFormDraft(
     dormWizardDraftKey,
@@ -417,7 +444,7 @@ function DormWizard({
       {error && <div className="mb-4"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
 
       <form id="dorm-wizard-form" onSubmit={handleSubmit}>
-        {step === 0 && <Step1Basics data={data} onChange={patch} staffList={staffList} studentList={studentList} />}
+        {step === 0 && <Step1Basics data={data} onChange={patch} staffList={staffList} studentList={studentList} schoolPolicy={schoolPolicy} />}
         {step === 1 && <Step2Structure data={data} onChange={patch} />}
         {step === 2 && <Step3Policy data={data} onChange={patch} />}
       </form>
@@ -431,6 +458,7 @@ export default function DormitoriesPage() {
   const [dorms, setDorms] = useState<DormRow[]>([]);
   const [staffList, setStaffList] = useState<StaffOption[]>([]);
   const [studentList, setStudentList] = useState<StudentOption[]>([]);
+  const [schoolPolicy, setSchoolPolicy] = useState<SchoolPolicy>({ genderPolicy: "MIXED" });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showWizard, setShowWizard] = useState(false);
@@ -442,14 +470,16 @@ export default function DormitoriesPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [dr, sr, studr] = await Promise.all([
+      const [dr, sr, studr, schoolr] = await Promise.all([
         fetch("/api/accommodation/dormitories").then((r) => r.json()),
         fetch("/api/staff?limit=200").then((r) => r.ok ? r.json() : []),
         fetch("/api/accommodation/students?limit=200").then((r) => r.ok ? r.json() : []),
+        fetch("/api/school/settings").then((r) => r.ok ? r.json() : null),
       ]);
       setDorms(Array.isArray(dr) ? dr : []);
       setStaffList(Array.isArray(sr) ? sr : []);
       setStudentList(Array.isArray(studr) ? studr : []);
+      if (schoolr) setSchoolPolicy({ genderPolicy: schoolr.genderPolicy ?? "MIXED" });
     } finally { setLoading(false); }
   }, []);
 
@@ -623,6 +653,7 @@ export default function DormitoriesPage() {
           editDorm={editDorm}
           staffList={staffList}
           studentList={studentList}
+          schoolPolicy={schoolPolicy}
         />
       )}
 

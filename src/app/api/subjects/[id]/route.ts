@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
+import { requirePermission } from "@/lib/permissions";
 
 const updateSchema = z.object({
   name: z.string().trim().min(2).optional(),
@@ -21,7 +22,8 @@ const updateSchema = z.object({
 });
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
-  const user = await requireRole("PRINCIPAL");
+  const user =
+    (await requireRole("PRINCIPAL")) ?? (await requirePermission("SUBJECTS", "edit"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const parsed = updateSchema.safeParse(await req.json().catch(() => null));
@@ -69,7 +71,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
-  const user = await requireRole("PRINCIPAL");
+  const user =
+    (await requireRole("PRINCIPAL")) ?? (await requirePermission("SUBJECTS", "delete"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const existing = await prisma.subject.findFirst({
