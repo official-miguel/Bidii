@@ -11,7 +11,7 @@ import { CheckCircle2, AlertCircle, AlertTriangle, Info, X } from "lucide-react"
 // ── Form primitives ───────────────────────────────────────────────────────────
 
 export const inputClass =
-  "w-full rounded-lg border border-line bg-white px-3.5 py-2.5 text-sm text-ink " +
+  "w-full rounded-lg border border-line bg-white px-3.5 py-2.5 text-base sm:text-sm text-ink " +
   "placeholder:text-slate-light " +
   "focus:outline-none focus:border-teal focus:ring-2 focus:ring-teal/15 " +
   "hover:border-slate-light " +
@@ -35,7 +35,7 @@ export const successTextClass =
 /** Teal primary — main CTA */
 export const primaryButtonClass =
   "inline-flex items-center justify-center gap-2 " +
-  "rounded-lg bg-teal text-white text-sm font-medium px-4 py-2.5 " +
+  "rounded-lg bg-teal text-white text-sm font-medium px-4 py-2.5 min-h-[44px] sm:min-h-0 " +
   "hover:bg-teal-dark active:scale-[0.98] transition-all duration-100 " +
   "disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 " +
   "focus:outline-none focus:ring-2 focus:ring-teal/30 focus:ring-offset-2 " +
@@ -44,7 +44,7 @@ export const primaryButtonClass =
 /** Outlined secondary */
 export const secondaryButtonClass =
   "inline-flex items-center justify-center gap-2 " +
-  "rounded-lg border border-line bg-white text-sm font-medium px-4 py-2.5 text-ink " +
+  "rounded-lg border border-line bg-white text-sm font-medium px-4 py-2.5 min-h-[44px] sm:min-h-0 text-ink " +
   "hover:bg-paper hover:border-slate-light active:scale-[0.98] transition-all duration-100 " +
   "disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 " +
   "focus:outline-none focus:ring-2 focus:ring-teal/20 focus:ring-offset-2";
@@ -52,7 +52,7 @@ export const secondaryButtonClass =
 /** Danger destructive button */
 export const dangerButtonClass =
   "inline-flex items-center justify-center gap-2 " +
-  "rounded-lg bg-danger text-white text-sm font-medium px-4 py-2.5 " +
+  "rounded-lg bg-danger text-white text-sm font-medium px-4 py-2.5 min-h-[44px] sm:min-h-0 " +
   "hover:bg-red-600 active:scale-[0.98] transition-all duration-100 " +
   "disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 " +
   "focus:outline-none focus:ring-2 focus:ring-danger/30 focus:ring-offset-2 " +

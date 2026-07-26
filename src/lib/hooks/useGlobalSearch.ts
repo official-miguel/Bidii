@@ -3,22 +3,20 @@
  *
  * Application-wide instant search hook.
  *
- * Sources (all in-memory, zero network calls):
- *   - Students           (studentsStore)
- *   - Teachers / Staff   (staffStore)
- *   - Departments        (staffStore)
- *   - Subjects           (staffStore)
+ * Sources (fetched via API and cached locally):
+ *   - Students           (direct API fetch)
+ *   - Teachers / Staff   (direct API fetch)
+ *   - Departments        (direct API fetch)
+ *   - Subjects           (direct API fetch)
  *   - Navigation pages   (static per-role registry)
  *
- * Results are grouped by category and returned within ~1 ms for
+ * Results are grouped by category and returned quickly for
  * typical school datasets (< 5,000 students, < 200 staff).
  */
 
 "use client";
 
-import { useMemo, useCallback } from "react";
-import { useStudentsStore } from "@/lib/stores/studentsStore";
-import { useStaffStore }    from "@/lib/stores/staffStore";
+import { useMemo, useCallback, useState, useEffect } from "react";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,6 +47,56 @@ export interface SearchResultGroup {
   icon:     string;
   results:  SearchResult[];
 }
+
+// ---------------------------------------------------------------------------
+// Local data types (matching API responses)
+// ---------------------------------------------------------------------------
+
+type LocalStudent = {
+  id: string;
+  admissionNumber: string;
+  fullName: string;
+  dateOfBirth: Date | null;
+  classId: string;
+  parentName: string | null;
+  parentContact: string | null;
+  schoolId: string;
+  archivedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type LocalTeacher = {
+  id: string;
+  staffId: string;
+  fullName: string;
+  email: string | null;
+  phone: string | null;
+  primaryDepartmentId: string | null;
+  todEligible: boolean;
+  schoolId: string;
+  userId: string | null;
+  updatedAt: string;
+};
+
+type LocalDepartment = {
+  id: string;
+  name: string;
+  headTeacherId: string | null;
+  schoolId: string;
+  updatedAt: string;
+};
+
+type LocalSubject = {
+  id: string;
+  name: string;
+  code: string;
+  type: string;
+  departmentId: string;
+  applicableForms: number[];
+  schoolId: string;
+  updatedAt: string;
+};
 
 // ---------------------------------------------------------------------------
 // Role-aware navigation registry
@@ -137,14 +185,67 @@ const CATEGORY_META: Record<SearchCategory, { label: string; icon: string }> = {
 // ---------------------------------------------------------------------------
 
 export function useGlobalSearch(query: string, role: string) {
-  const students    = useStudentsStore((s) => s.students);
-  const teachers    = useStaffStore((s) => s.teachers);
-  const departments = useStaffStore((s) => s.departments);
-  const subjects    = useStaffStore((s) => s.subjects);
+  // Local state for data management
+  const [students, setStudents] = useState<LocalStudent[]>([]);
+  const [teachers, setTeachers] = useState<LocalTeacher[]>([]);
+  const [departments, setDepartments] = useState<LocalDepartment[]>([]);
+  const [subjects, setSubjects] = useState<LocalSubject[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch data from APIs on component mount
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const [studentsRes, teachersRes, departmentsRes, subjectsRes] = await Promise.allSettled([
+          fetch("/api/students"),
+          fetch("/api/staff"),
+          fetch("/api/departments"),
+          fetch("/api/subjects"),
+        ]);
+
+        // Process students response
+        if (studentsRes.status === 'fulfilled' && studentsRes.value.ok) {
+          const studentsData: LocalStudent[] = await studentsRes.value.json();
+          // Filter out archived students
+          const activeStudents = studentsData.filter(s => !s.archivedAt);
+          activeStudents.sort((a, b) => a.fullName.localeCompare(b.fullName));
+          setStudents(activeStudents);
+        }
+
+        // Process teachers response
+        if (teachersRes.status === 'fulfilled' && teachersRes.value.ok) {
+          const teachersData: LocalTeacher[] = await teachersRes.value.json();
+          teachersData.sort((a, b) => a.fullName.localeCompare(b.fullName));
+          setTeachers(teachersData);
+        }
+
+        // Process departments response
+        if (departmentsRes.status === 'fulfilled' && departmentsRes.value.ok) {
+          const departmentsData: LocalDepartment[] = await departmentsRes.value.json();
+          departmentsData.sort((a, b) => a.name.localeCompare(b.name));
+          setDepartments(departmentsData);
+        }
+
+        // Process subjects response
+        if (subjectsRes.status === 'fulfilled' && subjectsRes.value.ok) {
+          const subjectsData: LocalSubject[] = await subjectsRes.value.json();
+          subjectsData.sort((a, b) => a.name.localeCompare(b.name));
+          setSubjects(subjectsData);
+        }
+      } catch (error) {
+        console.error("Failed to fetch search data:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
 
   const search = useCallback(
     (q: string): SearchResultGroup[] => {
-      if (!q.trim()) return [];
+      if (!q.trim() || loading) return [];
       const lower = q.toLowerCase().trim();
 
       const groups: SearchResultGroup[] = [];
@@ -296,7 +397,7 @@ export function useGlobalSearch(query: string, role: string) {
 
       return groups;
     },
-    [students, teachers, departments, subjects, role]
+    [students, teachers, departments, subjects, role, loading]
   );
 
   const results = useMemo(() => search(query), [search, query]);
@@ -306,7 +407,7 @@ export function useGlobalSearch(query: string, role: string) {
     [results]
   );
 
-  return { results, totalCount };
+  return { results, totalCount, loading };
 }
 
 // Re-export registry for use by QuickActionsPanel

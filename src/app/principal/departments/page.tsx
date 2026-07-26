@@ -14,7 +14,6 @@ import {
   secondaryButtonClass,
 } from "@/components/ui";
 import { SkeletonTable } from "@/components/ui/ProgressivePage";
-import { useStaffStore } from "@/lib/stores/staffStore";
 import ContextNavigation from "@/components/ContextNavigation";
 import WorkspaceToolbar from "@/components/workspace/WorkspaceToolbar";
 import DepartmentWorkspaceDrawer from "@/components/entity-drawers/DepartmentWorkspaceDrawer";
@@ -32,12 +31,8 @@ type Department = {
 };
 
 export default function DepartmentsPage() {
-  const storeStaff = useStaffStore((s) => s.teachers);
-
   const [departments, setDepartments] = useState<Department[] | null>(null);
-  const [teachers, setTeachers] = useState<Teacher[]>(() =>
-    storeStaff.length > 0 ? storeStaff.map((t) => ({ id: t.id, fullName: t.fullName })) : []
-  );
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Department | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,14 +50,18 @@ export default function DepartmentsPage() {
   function openClassDrawer(id: string) { setDrawerClassId(id); setDrawerDeptId(null);  setDrawerStaffId(null); setDrawerSubjId(null); }
 
   const load = useCallback(async () => {
-    const [deptRes, teacherRes] = await Promise.all([
-      fetch("/api/departments"),
-      fetch("/api/staff"),
-    ]);
-    const freshDepts = await deptRes.json();
-    setDepartments(freshDepts);
-    const teacherData = await teacherRes.json();
-    setTeachers(teacherData.map((t: { id: string; fullName: string }) => ({ id: t.id, fullName: t.fullName })));
+    try {
+      const [deptRes, teacherRes] = await Promise.all([
+        fetch("/api/departments"),
+        fetch("/api/staff"),
+      ]);
+      const freshDepts  = deptRes.ok   ? await deptRes.json()   : [];
+      const teacherData = teacherRes.ok ? await teacherRes.json() : [];
+      setDepartments(freshDepts);
+      setTeachers(teacherData.map((t: { id: string; fullName: string }) => ({ id: t.id, fullName: t.fullName })));
+    } catch {
+      setDepartments([]);
+    }
   }, []);
 
   useEffect(() => {

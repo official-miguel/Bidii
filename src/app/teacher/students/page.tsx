@@ -9,8 +9,6 @@ import {
   Avatar,
   ActionIconButton,
 } from "@/components/ui";
-import { useStudentsStore } from "@/lib/stores/studentsStore";
-import { useClassesStore }  from "@/lib/stores/classesStore";
 import { useVirtualizer }   from "@tanstack/react-virtual";
 import { SkeletonTable }    from "@/components/ui/ProgressivePage";
 import WorkspaceToolbar from "@/components/workspace/WorkspaceToolbar";
@@ -114,16 +112,27 @@ export default function TeacherStudentsPage() {
   const router = useRouter();
   const parentRef = useRef<HTMLDivElement>(null);
 
-  const rawStudents  = useStudentsStore((s) => s.students);
-  const storeLoading = useStudentsStore((s) => s.loading);
-  const rawClasses   = useClassesStore((s) => s.classes);
+  // ── Direct API state (no store cache) ────────────────────────────────────
+  const [rawStudents,  setRawStudents]  = useState<Student[]>([]);
+  const [rawClasses,   setRawClasses]   = useState<{ id: string; name: string }[]>([]);
+  const [pageLoading,  setPageLoading]  = useState(true);
 
-  // ── Bootstrap stores on mount (if not already loaded) ───────────────────
   useEffect(() => {
-    const s = useStudentsStore.getState();
-    const c = useClassesStore.getState();
-    if (s.students.length === 0 && !s.loading) s.fetch().catch(console.error);
-    if (c.classes.length === 0 && !c.loading) c.fetch().catch(console.error);
+    let cancelled = false;
+    setPageLoading(true);
+    Promise.all([fetch("/api/students"), fetch("/api/classes")])
+      .then(([stuRes, clsRes]) => Promise.all([
+        stuRes.ok ? stuRes.json() : [],
+        clsRes.ok ? clsRes.json() : [],
+      ]))
+      .then(([stuData, clsData]) => {
+        if (cancelled) return;
+        setRawStudents(stuData);
+        setRawClasses(clsData);
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setPageLoading(false); });
+    return () => { cancelled = true; };
   }, []);
 
   const [search,        setSearch]        = useState("");
@@ -133,13 +142,15 @@ export default function TeacherStudentsPage() {
   const classMap = useMemo(() => new Map(rawClasses.map((c) => [c.id, c])), [rawClasses]);
 
   const students: Student[] = useMemo(
-    () => rawStudents.map((s) => ({
-      id:              s.id,
-      fullName:        s.fullName,
-      admissionNumber: s.admissionNumber,
-      classId:         s.classId,
-      parentName:      s.parentName,
-    })),
+    () => (rawStudents as any[])
+      .filter((s) => !s.archivedAt)
+      .map((s) => ({
+        id:              s.id,
+        fullName:        s.fullName,
+        admissionNumber: s.admissionNumber,
+        classId:         s.classId,
+        parentName:      s.parentName ?? null,
+      })),
     [rawStudents]
   );
 
@@ -162,7 +173,7 @@ export default function TeacherStudentsPage() {
   });
 
   const useVirtual = visibleStudents.length > VIRTUAL_THRESHOLD;
-  const showLoading = storeLoading && students.length === 0;
+  const showLoading = pageLoading && rawStudents.length === 0;
   const activeFilters = [q, filterClassId].filter(Boolean).length;
 
   const handleNavigate = useCallback(

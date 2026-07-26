@@ -15,7 +15,6 @@ import {
   secondaryButtonClass,
 } from "@/components/ui";
 import { SkeletonTable } from "@/components/ui/ProgressivePage";
-import { useStaffStore } from "@/lib/stores/staffStore";
 import WorkspaceToolbar from "@/components/workspace/WorkspaceToolbar";
 import SubjectWorkspaceDrawer from "@/components/entity-drawers/SubjectWorkspaceDrawer";
 import StaffProfileDrawer    from "@/components/entity-drawers/StaffProfileDrawer";
@@ -40,11 +39,8 @@ type Subject = {
 const FORMS = [1, 2, 3, 4, 5, 6];
 
 export default function SubjectsPage() {
-  const storeSubjects = useStaffStore((s) => s.subjects);
-
-  const [subjects, setSubjects] = useState<Subject[] | null>(() =>
-    storeSubjects.length > 0 ? (storeSubjects as unknown as Subject[]) : null
-  );
+  const [subjects, setSubjects] = useState<Subject[] | null>(null);
+  const [loading,  setLoading]  = useState(true);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Subject | null>(null);
@@ -68,13 +64,18 @@ export default function SubjectsPage() {
   function openClassDrawer(id: string) { setDrawerClassId(id); setDrawerSubjId(null);  setDrawerStaffId(null); setDrawerDeptId(null); }
 
   const load = useCallback(async () => {
-    const [subjRes, deptRes] = await Promise.all([
-      fetch("/api/subjects"),
-      fetch("/api/departments"),
-    ]);
-    const freshSubjects = await subjRes.json();
-    setSubjects(freshSubjects);
-    setDepartments(await deptRes.json());
+    setLoading(true);
+    try {
+      const [subjRes, deptRes] = await Promise.all([
+        fetch("/api/subjects"),
+        fetch("/api/departments"),
+      ]);
+      const freshSubjects = await subjRes.json();
+      setSubjects(freshSubjects);
+      setDepartments(await deptRes.json());
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -155,15 +156,15 @@ export default function SubjectsPage() {
           <button
             className={primaryButtonClass}
             onClick={openCreate}
-            disabled={departments.length === 0}
-            title={departments.length === 0 ? "Add a department first" : undefined}
+            disabled={!loading && departments.length === 0}
+            title={!loading && departments.length === 0 ? "Add a department first" : undefined}
           >
             Add subject
           </button>
         }
       />
 
-      {departments.length === 0 && subjects !== null && (
+      {departments.length === 0 && subjects !== null && !loading && (
         <div className="mb-4 rounded-md bg-warn-bg text-warn text-sm px-3 py-2">
           Create at least one department before adding subjects.
         </div>
@@ -357,7 +358,7 @@ export default function SubjectsPage() {
                     type="button"
                     key={f}
                     onClick={() => toggleForm(f)}
-                    className={`text-sm rounded-md border px-3 py-1.5 transition-colors ${
+                    className={`text-sm rounded-md border px-3 py-1.5 min-h-[44px] sm:min-h-0 transition-colors ${
                       selectedForms.includes(f)
                         ? "bg-teal text-white border-teal"
                         : "border-line text-ink hover:bg-paper"

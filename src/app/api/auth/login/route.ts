@@ -77,8 +77,8 @@ export async function POST(req: NextRequest) {
           // Return the same generic error so slug enumeration isn't possible.
           return invalid();
         }
-        user = await prisma.user.findUnique({
-          where: { schoolId_email: { schoolId: school.id, email } },
+        user = await prisma.user.findFirst({
+          where: { schoolId: school.id, email },
         });
       } else {
         // Fallback: no slug supplied — find the first active account with
