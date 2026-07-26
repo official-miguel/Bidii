@@ -8,6 +8,7 @@ import {
 } from "@/lib/permissions";
 import DashboardShell from "@/components/DashboardShell";
 import MustChangePasswordGate from "@/components/MustChangePasswordGate";
+import PermissionProvider from "@/components/PermissionProvider";
 
 // Teacher base hubs — always visible regardless of extra roles.
 // These mirror the pages that actually exist under /teacher/*.
@@ -58,7 +59,9 @@ export default async function TeacherLayout({
         motto={school?.motto}
         visibleHubs={visibleHubs as Parameters<typeof DashboardShell>[0]["visibleHubs"]}
       >
-        {children}
+        <PermissionProvider schoolId={user.schoolId} userId={user.id}>
+          {children}
+        </PermissionProvider>
       </DashboardShell>
     </MustChangePasswordGate>
   );

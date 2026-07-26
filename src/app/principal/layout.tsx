@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import DashboardShell from "@/components/DashboardShell";
 import MustChangePasswordGate from "@/components/MustChangePasswordGate";
+import PermissionProvider from "@/components/PermissionProvider";
 
 export default async function PrincipalLayout({
   children,
@@ -29,7 +30,9 @@ export default async function PrincipalLayout({
         schoolName={school?.name}
         motto={school?.motto}
       >
-        {children}
+        <PermissionProvider schoolId={user.schoolId} userId={user.id}>
+          {children}
+        </PermissionProvider>
       </DashboardShell>
     </MustChangePasswordGate>
   );

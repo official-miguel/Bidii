@@ -100,6 +100,7 @@ function DirectoryTab() {
   const [modalOpen, setModalOpen]   = useState(false);
   const [editing, setEditing]       = useState<Teacher | null>(null);
   const [error, setError]           = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   // Draft for the "new staff" form — scoped to "new" for creates, staff id for edits
   const staffDraftKey = editing ? `bidii_draft_staff_${editing.id}` : "bidii_draft_staff_new";
@@ -192,7 +193,9 @@ function DirectoryTab() {
   const isTeaching = roleChoice === TEACHING_STAFF;
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault(); setError(null);
+    e.preventDefault();
+    if (submitting) return;
+    setSubmitting(true); setError(null);
     const form = new FormData(e.currentTarget);
     if (editing) {
       const payload = {
@@ -205,8 +208,8 @@ function DirectoryTab() {
       };
       const res = await fetch(`/api/staff/${editing.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await res.json();
-      if (!res.ok) { setError(data.error || "Something went wrong."); return; }
-      clearStaffDraft(); setModalOpen(false); load();
+      if (!res.ok) { setError(data.error || "Something went wrong."); setSubmitting(false); return; }
+      clearStaffDraft(); setModalOpen(false); setSubmitting(false); load();
     } else {
       const payload = {
         fullName: form.get("fullName") as string, staffId: (form.get("staffId") as string) || undefined,
@@ -220,9 +223,10 @@ function DirectoryTab() {
       };
       const res = await fetch("/api/staff", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await res.json();
-      if (!res.ok) { setError(data.error || "Something went wrong."); return; }
+      if (!res.ok) { setError(data.error || "Something went wrong."); setSubmitting(false); return; }
       clearStaffDraft();
       setModalOpen(false);
+      setSubmitting(false);
       if (data.tempPassword) setTempPassword({ email: payload.email, password: data.tempPassword });
       nextStaffIdFetched.current = false; setNextStaffId(null); load();
     }
@@ -392,20 +396,10 @@ function DirectoryTab() {
               ? "Update this staff member's details, role, and subject assignments."
               : "Add a new member of staff to the school register."
           }
-          onClose={() => { clearStaffDraft(); setModalOpen(false); }}
+          onClose={() => { clearStaffDraft(); setModalOpen(false); setSubmitting(false); }}
           size="xl"
-          footer={
-            <div className="flex justify-end gap-3">
-              <button type="button" className={secondaryButtonClass} onClick={() => { clearStaffDraft(); setModalOpen(false); }}>
-                Cancel
-              </button>
-              <button type="submit" form="staff-form" className={primaryButtonClass}>
-                {editing ? "Save changes" : "Register staff"}
-              </button>
-            </div>
-          }
         >
-          <form id="staff-form" onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
             {error && <ErrorBanner message={error} />}
 
             {/* ── Identity ── */}
@@ -600,6 +594,16 @@ function DirectoryTab() {
                 <span>A login account is created automatically for non-teaching staff using the email above.</span>
               </div>
             )}
+
+            {/* Form actions — inside the form so they work on mobile */}
+            <div className="flex justify-end gap-3 pt-1">
+              <button type="button" className={secondaryButtonClass} onClick={() => { clearStaffDraft(); setModalOpen(false); setSubmitting(false); }}>
+                Cancel
+              </button>
+              <button type="submit" className={primaryButtonClass} disabled={submitting}>
+                {submitting ? (editing ? "Saving…" : "Registering…") : (editing ? "Save changes" : "Register staff")}
+              </button>
+            </div>
           </form>
         </Modal>
       )}
@@ -934,18 +938,8 @@ function RolesTab() {
           title="New staff role"
           description="Define a named role. You'll assign module permissions right after creating it."
           onClose={() => setCreateOpen(false)}
-          footer={
-            <div className="flex justify-end gap-3">
-              <button type="button" className={secondaryButtonClass} onClick={() => setCreateOpen(false)}>
-                Cancel
-              </button>
-              <button type="submit" form="create-role-form" className={royalButtonClass}>
-                Create role
-              </button>
-            </div>
-          }
         >
-          <form id="create-role-form" onSubmit={handleCreate} className="space-y-4">
+          <form onSubmit={handleCreate} className="space-y-4">
             {error && <ErrorBanner message={error} />}
             <div className="form-section">
               <div className="form-section-title">Role Details</div>
@@ -972,6 +966,16 @@ function RolesTab() {
                   />
                 </div>
               </div>
+            </div>
+
+            {/* Form actions — inside the form so they work on mobile */}
+            <div className="flex justify-end gap-3 pt-1">
+              <button type="button" className={secondaryButtonClass} onClick={() => setCreateOpen(false)}>
+                Cancel
+              </button>
+              <button type="submit" className={royalButtonClass}>
+                Create role
+              </button>
             </div>
           </form>
         </Modal>

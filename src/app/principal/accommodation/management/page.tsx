@@ -100,18 +100,9 @@ function TransferStudentModal({ dorms, onClose, onDone }: {
 
   return (
     <Modal title="Transfer Student" description="Move a student from their current dormitory to a new one."
-      onClose={onClose} size="md"
-      footer={
-        <div className="flex gap-3 justify-end">
-          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
-          <button type="submit" form="transfer-form" disabled={saving || !selectedId || !toDormId}
-            className={`${primaryButtonClass} disabled:opacity-40`}>
-            {saving ? "Transferring…" : "Transfer student"}
-          </button>
-        </div>
-      }>
+      onClose={onClose} size="md">
       {error && <div className="mb-4"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
-      <form id="transfer-form" onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <FormField label="Search student (boarding only)">
           <input className={inputClass} value={search} onChange={(e) => setSearch(e.target.value)}
             placeholder="Type name or admission number…" />
@@ -153,6 +144,13 @@ function TransferStudentModal({ dorms, onClose, onDone }: {
         <FormField label="Notes (optional)">
           <textarea className={`${inputClass} resize-none`} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </FormField>
+        <div className="flex gap-3 justify-end pt-1">
+          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
+          <button type="submit" disabled={saving || !selectedId || !toDormId}
+            className={`${primaryButtonClass} disabled:opacity-40`}>
+            {saving ? "Transferring…" : "Transfer student"}
+          </button>
+        </div>
       </form>
     </Modal>
   );
@@ -190,18 +188,9 @@ function MaintenanceModal({ dorm, dorms, onClose, onDone }: {
     <Modal
       title={isClosing ? `Maintenance: ${dorm.name}` : `Reopen: ${dorm.name}`}
       description={isClosing ? "Close this dorm for maintenance. Students can optionally be relocated." : "Set this dorm back to Active status."}
-      onClose={onClose} size="md"
-      footer={
-        <div className="flex gap-3 justify-end">
-          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
-          <button type="submit" form="maintenance-form" disabled={saving || (isClosing && !reason)}
-            className={`${isClosing ? "bg-warn text-white hover:bg-amber-600" : primaryButtonClass} inline-flex items-center gap-2 rounded-lg text-sm font-medium px-4 py-2.5 disabled:opacity-40`}>
-            {saving ? "Saving…" : isClosing ? "Close for maintenance" : "Reopen dormitory"}
-          </button>
-        </div>
-      }>
+      onClose={onClose} size="md">
       {error && <div className="mb-4"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
-      <form id="maintenance-form" onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         {isClosing && (
           <>
             <FormField label="Reason for maintenance" required>
@@ -238,6 +227,13 @@ function MaintenanceModal({ dorm, dorms, onClose, onDone }: {
             <span>{dorm.occupiedCount} student(s) will remain in records as allocated to this dorm. Enable &ldquo;Relocate&rdquo; to move them.</span>
           </div>
         )}
+        <div className="flex gap-3 justify-end pt-1">
+          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
+          <button type="submit" disabled={saving || (isClosing && !reason)}
+            className={`${isClosing ? "bg-warn text-white hover:bg-amber-600" : primaryButtonClass} inline-flex items-center gap-2 rounded-lg text-sm font-medium px-4 py-2.5 disabled:opacity-40`}>
+            {saving ? "Saving…" : isClosing ? "Close for maintenance" : "Reopen dormitory"}
+          </button>
+        </div>
       </form>
     </Modal>
   );
@@ -268,18 +264,9 @@ function BulkRemoveModal({ dorm, onClose, onDone }: {
   return (
     <Modal title={`Remove All Allocations — ${dorm.name}`}
       description={`This will vacate all ${dorm.occupiedCount} current allocation(s) from this dorm. This cannot be undone.`}
-      onClose={onClose} size="sm"
-      footer={
-        <div className="flex gap-3 justify-end">
-          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
-          <button type="submit" form="bulk-remove-form" disabled={saving || !reason}
-            className="inline-flex items-center gap-2 rounded-lg bg-danger text-white text-sm font-medium px-4 py-2.5 hover:bg-red-600 transition-all disabled:opacity-40">
-            {saving ? "Removing…" : "Remove all allocations"}
-          </button>
-        </div>
-      }>
+      onClose={onClose} size="sm">
       {error && <div className="mb-4"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
-      <form id="bulk-remove-form" onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <FormField label="Reason" required helper="Required — this will be recorded in all affected allocation histories.">
           <input className={inputClass} value={reason} onChange={(e) => setReason(e.target.value)}
             placeholder="e.g. End of term, Dorm closure…" />
@@ -287,6 +274,13 @@ function BulkRemoveModal({ dorm, onClose, onDone }: {
         <FormField label="Notes (optional)">
           <textarea className={`${inputClass} resize-none`} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </FormField>
+        <div className="flex gap-3 justify-end pt-1">
+          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
+          <button type="submit" disabled={saving || !reason}
+            className="inline-flex items-center gap-2 rounded-lg bg-danger text-white text-sm font-medium px-4 py-2.5 hover:bg-red-600 transition-all disabled:opacity-40">
+            {saving ? "Removing…" : "Remove all allocations"}
+          </button>
+        </div>
       </form>
     </Modal>
   );
@@ -318,22 +312,13 @@ function EmergencyRelocationModal({ dorm, dorms, onClose, onDone }: {
   return (
     <Modal title={`Emergency Relocation — ${dorm.name}`}
       description="Immediately vacate all students and mark dorm as under maintenance."
-      onClose={onClose} size="md"
-      footer={
-        <div className="flex gap-3 justify-end">
-          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
-          <button type="submit" form="emergency-form" disabled={saving || !reason}
-            className="inline-flex items-center gap-2 rounded-lg bg-danger text-white text-sm font-medium px-4 py-2.5 hover:bg-red-600 transition-all disabled:opacity-40">
-            <AlertTriangle className="h-4 w-4" /> {saving ? "Relocating…" : "Emergency relocate"}
-          </button>
-        </div>
-      }>
+      onClose={onClose} size="md">
       {error && <div className="mb-4"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
       <div className="mb-4 rounded-lg border border-danger/20 bg-danger/5 dark:bg-danger/10 px-3 py-2.5 text-sm text-danger flex items-start gap-2">
         <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
         <span>This will immediately vacate all <strong>{dorm.occupiedCount}</strong> student(s) and set the dorm to <strong>Under Maintenance</strong>.</span>
       </div>
-      <form id="emergency-form" onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <FormField label="Reason for emergency relocation" required>
           <input className={inputClass} value={reason} onChange={(e) => setReason(e.target.value)}
             placeholder="e.g. Fire alarm, structural damage, flooding…" />
@@ -349,6 +334,13 @@ function EmergencyRelocationModal({ dorm, dorms, onClose, onDone }: {
         <FormField label="Additional notes (optional)">
           <textarea className={`${inputClass} resize-none`} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </FormField>
+        <div className="flex gap-3 justify-end pt-1">
+          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
+          <button type="submit" disabled={saving || !reason}
+            className="inline-flex items-center gap-2 rounded-lg bg-danger text-white text-sm font-medium px-4 py-2.5 hover:bg-red-600 transition-all disabled:opacity-40">
+            <AlertTriangle className="h-4 w-4" /> {saving ? "Relocating…" : "Emergency relocate"}
+          </button>
+        </div>
       </form>
     </Modal>
   );

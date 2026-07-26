@@ -50,8 +50,9 @@ export async function GET(req: NextRequest) {
 }
 
 const createSchema = z.object({
-  name: z.string().trim().min(2, "Name must be at least 2 characters, e.g. Form 3 North."),
-  form: z.number().int().min(1).max(6),
+  name: z.string().trim().min(2, "Name must be at least 2 characters, e.g. Form 3."),
+  // form is auto-derived from the class name on the client; accept any positive int
+  form: z.number().int().min(1).optional().default(1),
   stream: z.string().trim().optional().or(z.literal("")),
   classTeacherId: z.string().nullable().optional(),
   frameworkType: z.enum(["EIGHT_FOUR_FOUR", "CBC", "CBE"]).optional().default("EIGHT_FOUR_FOUR"),

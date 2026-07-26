@@ -72,12 +72,19 @@ export default function ClassesPage() {
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); setError(null);
-    const form = new FormData(e.currentTarget);
+    const fd   = new FormData(e.currentTarget);
+    const name = fd.get("name") as string;
+    // Auto-derive a numeric level from the class name so the DB field is
+    // still populated for ordering/grouping — the user never types it.
+    // Matches the first standalone number: "Form 3" → 3, "Grade 7" → 7,
+    // "S2" → 2, "Year 10" → 10.  Falls back to 1 if nothing found.
+    const match       = name.match(/\d+/);
+    const derivedForm = match ? parseInt(match[0], 10) : 1;
     const payload = {
-      name: form.get("name") as string,
-      form: Number(form.get("form")),
-      stream: (form.get("stream") as string) || "",
-      classTeacherId: (form.get("classTeacherId") as string) || null,
+      name,
+      form: derivedForm,
+      stream: (fd.get("stream") as string) || "",
+      classTeacherId: (fd.get("classTeacherId") as string) || null,
       frameworkType: editing ? editing.frameworkType : frameworkType,
     };
     const res  = await fetch(editing ? `/api/classes/${editing.id}` : "/api/classes", {
@@ -97,6 +104,9 @@ export default function ClassesPage() {
     if (!res.ok) { alert(data.error || "Couldn't delete class."); return; }
     load();
   }
+
+  // Build distinct form values from loaded classes — no hardcoded list
+  const distinctForms = [...new Set((classes ?? []).map((c) => c.form))].sort((a, b) => a - b);
 
   const visibleClasses = (classes ?? []).filter((c) =>
     (!filterForm      || c.form === Number(filterForm)) &&
@@ -129,7 +139,7 @@ export default function ClassesPage() {
           label="Form" value={filterForm}
           options={[
             { value: "", label: "All forms" },
-            ...[1,2,3,4,5,6].map((f) => ({ value: String(f), label: `Form ${f}` })),
+            ...distinctForms.map((f) => ({ value: String(f), label: `Form ${f}` })),
           ]}
           onChange={setFilterForm}
         />
@@ -244,52 +254,28 @@ export default function ClassesPage() {
           title={editing ? "Edit class" : "Add class"}
           description={editing ? "Update class information and assignment." : "Create a new class grouping for students."}
           onClose={() => setModalOpen(false)}
-          footer={
-            <div className="flex justify-end gap-3">
-              <button type="button" className={secondaryButtonClass} onClick={() => setModalOpen(false)}>
-                Cancel
-              </button>
-              <button type="submit" form="class-form" className={primaryButtonClass}>
-                {editing ? "Save changes" : "Add class"}
-              </button>
-            </div>
-          }
         >
-          <form id="class-form" onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-5">
             {error && <ErrorBanner message={error} />}
 
             {/* Basic information section */}
             <div className="form-section">
               <div className="form-section-title">Basic Information</div>
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className={labelClass}>
-                      Class name <span className="text-danger">*</span>
-                    </label>
-                    <input
-                      name="name"
-                      required
-                      defaultValue={editing?.name}
-                      className={inputClass}
-                      placeholder="e.g. Form 3 North"
-                    />
-                    <p className="text-xs text-slate mt-1.5">
-                      Students will see this in their timetable and records.
-                    </p>
-                  </div>
-                  <div>
-                    <label className={labelClass}>
-                      Form <span className="text-danger">*</span>
-                    </label>
-                    <select name="form" defaultValue={editing?.form || 1} className={inputClass}>
-                      {[1, 2, 3, 4, 5, 6].map((f) => (
-                        <option key={f} value={f}>
-                          Form {f}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                <div>
+                  <label className={labelClass}>
+                    Class name <span className="text-danger">*</span>
+                  </label>
+                  <input
+                    name="name"
+                    required
+                    defaultValue={editing?.name}
+                    className={inputClass}
+                    placeholder="e.g. Form 3, Grade 7, Year 10, S3"
+                  />
+                  <p className="text-xs text-slate mt-1.5">
+                    This is the full class name students will see in their timetable and records.
+                  </p>
                 </div>
 
                 <div>
@@ -301,7 +287,7 @@ export default function ClassesPage() {
                     placeholder="e.g. North, A, Science"
                   />
                   <p className="text-xs text-slate mt-1.5">
-                    Used to distinguish parallel classes in the same form.
+                    Used to distinguish parallel classes with the same name.
                   </p>
                 </div>
               </div>
@@ -380,6 +366,16 @@ export default function ClassesPage() {
                   The class teacher oversees attendance, discipline, and student welfare.
                 </p>
               </div>
+            </div>
+
+            {/* Form actions — kept inside the form so they work on mobile */}
+            <div className="flex justify-end gap-3 pt-1">
+              <button type="button" className={secondaryButtonClass} onClick={() => setModalOpen(false)}>
+                Cancel
+              </button>
+              <button type="submit" className={primaryButtonClass}>
+                {editing ? "Save changes" : "Add class"}
+              </button>
             </div>
           </form>
         </Modal>

@@ -523,16 +523,17 @@ export type DashboardVariant =
 export async function getDashboardVariant(user: User): Promise<DashboardVariant> {
   if (user.role === "PRINCIPAL") return "principal";
   if (user.role === "TEACHER") {
-    // Check if this teacher has a class assignment or HOD role
     const teacher = await prisma.teacher.findUnique({
       where: { userId: user.id },
       select: {
-        classTeacherOf: { select: { id: true } },
-        departmentHeadOf: { select: { id: true } },
+        classTeacherOf:      { select: { id: true } },
+        departmentHeadOf:    { select: { id: true } },
+        dormsBoardingMaster: { select: { id: true }, take: 1 },
       },
     });
-    if (teacher?.departmentHeadOf) return "hod";
-    if (teacher?.classTeacherOf)   return "class_teacher";
+    if (teacher?.departmentHeadOf)            return "hod";
+    if (teacher?.classTeacherOf)              return "class_teacher";
+    if (teacher?.dormsBoardingMaster?.length) return "boarding_master";
     return "subject_teacher";
   }
 
@@ -546,10 +547,23 @@ export async function getDashboardVariant(user: User): Promise<DashboardVariant>
     if (lower.some((n) => n.includes("librarian")))                                return "librarian";
     if (lower.some((n) => n.includes("boarding master") || n.includes("matron")))  return "boarding_master";
 
-    // Fall back to ACCOMMODATION or LIBRARY module access
+    // Also check derived assignments for ADMIN_STAFF who have a teacher record
+    const teacher = await prisma.teacher.findUnique({
+      where: { userId: user.id },
+      select: {
+        classTeacherOf:      { select: { id: true } },
+        departmentHeadOf:    { select: { id: true } },
+        dormsBoardingMaster: { select: { id: true }, take: 1 },
+      },
+    }).catch(() => null);
+
+    if (teacher?.departmentHeadOf)            return "hod";
+    if (teacher?.classTeacherOf)              return "class_teacher";
+    if (teacher?.dormsBoardingMaster?.length) return "boarding_master";
+
     const perms = await getEffectivePermissions(user);
-    if (perms.ACCOMMODATION?.canView)  return "boarding_master";
-    if (perms.LIBRARY?.canManage)      return "librarian";
+    if (perms.ACCOMMODATION?.canView) return "boarding_master";
+    if (perms.LIBRARY?.canManage)     return "librarian";
     return "staff_generic";
   }
 
@@ -591,3 +605,74 @@ export async function getRoleDisplayLabel(user: User): Promise<string> {
 
 // Re-export legacy name so existing callers don't break
 export { requirePermission as requireRecordsPermissionLegacy };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getFullRoleContext
+// Complete picture of all active roles — assigned + derived — for a user.
+// Used by UnifiedDashboard and layouts to build the blended homepage view.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface FullRoleContext {
+  isPrincipal:       boolean;
+  isDeputy:          boolean;
+  isTeacher:         boolean;
+  isAdminStaff:      boolean;
+  /** All StaffRole names assigned to this user */
+  assignedRoleNames: string[];
+  /** Derived role kinds active right now: SUBJECT_TEACHER, CLASS_TEACHER, HEAD_OF_DEPT, DORM_MASTER */
+  derivedKinds:      Set<string>;
+  /** Combined display label, e.g. "HOD & Class Teacher" */
+  displayLabel:      string;
+  isLibrarian:       boolean;
+  isMatron:          boolean;
+  modulePermissions: EffectivePermissions;
+}
+
+export async function getFullRoleContext(user: User): Promise<FullRoleContext> {
+  const isPrincipal  = user.role === "PRINCIPAL";
+  const isTeacher    = user.role === "TEACHER";
+  const isAdminStaff = user.role === "ADMIN_STAFF";
+
+  const [assignedRoleNames, modulePermissions] = await Promise.all([
+    isAdminStaff ? getAssignedRoleNames(user) : Promise.resolve([] as string[]),
+    (isAdminStaff || isTeacher)
+      ? getEffectivePermissions(user)
+      : Promise.resolve({} as EffectivePermissions),
+  ]);
+
+  const lower       = assignedRoleNames.map((n) => n.toLowerCase());
+  const isDeputy    = lower.some((n) => n.includes("deputy"));
+  const isLibrarian = lower.some((n) => n.includes("librarian"));
+  const isMatron    = lower.some((n) =>
+    n.includes("matron") || (n.includes("boarding") && !n.includes("dorm"))
+  );
+
+  let derivedKinds = new Set<string>();
+  if (isTeacher || isAdminStaff) {
+    try {
+      const { computeDerivedRoles } = await import("./derivedRoles");
+      const dr = await computeDerivedRoles(user.id, user.schoolId);
+      derivedKinds = dr.activeKinds as Set<string>;
+    } catch { /* non-fatal */ }
+  }
+
+  let displayLabel: string;
+  if (isPrincipal) {
+    displayLabel = "Principal";
+  } else if (isTeacher) {
+    const parts: string[] = [];
+    if (derivedKinds.has("HEAD_OF_DEPT"))                           parts.push("HOD");
+    if (derivedKinds.has("CLASS_TEACHER"))                          parts.push("Class Teacher");
+    if (derivedKinds.has("DORM_MASTER"))                            parts.push("Dorm Master");
+    if (derivedKinds.has("SUBJECT_TEACHER") && parts.length === 0)  parts.push("Teacher");
+    displayLabel = parts.join(" & ") || "Teacher";
+  } else {
+    displayLabel = await getRoleDisplayLabel(user);
+  }
+
+  return {
+    isPrincipal, isDeputy, isTeacher, isAdminStaff,
+    assignedRoleNames, derivedKinds, displayLabel,
+    isLibrarian, isMatron, modulePermissions,
+  };
+}

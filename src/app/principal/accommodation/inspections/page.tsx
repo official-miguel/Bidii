@@ -138,16 +138,7 @@ function InspectionFormModal({ dorms, editing, onClose, onSaved }: {
   return (
     <Modal title={editing ? "Edit Inspection" : "New Inspection"}
       description={editing ? `Editing inspection for ${editing.dorm.name}` : "Record a dormitory inspection with checklist items."}
-      onClose={onClose} size="xl"
-      footer={
-        <div className="flex gap-3 justify-end">
-          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
-          <button type="submit" form="inspection-form" disabled={saving || !dormId}
-            className={`${primaryButtonClass} disabled:opacity-40`}>
-            {saving ? "Saving…" : editing ? "Save changes" : "Save inspection"}
-          </button>
-        </div>
-      }>
+      onClose={onClose} size="xl">
       {error && <div className="mb-4"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
 
       {/* Tabs */}
@@ -160,7 +151,7 @@ function InspectionFormModal({ dorms, editing, onClose, onSaved }: {
         ))}
       </div>
 
-      <form id="inspection-form" onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit}>
         {tab === "details" && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
@@ -231,12 +222,19 @@ function InspectionFormModal({ dorms, editing, onClose, onSaved }: {
             ))}
           </div>
         )}
+
+        {/* Form actions — inside the form so they work on mobile */}
+        <div className="flex gap-3 justify-end pt-4 mt-2 border-t border-line dark:border-dark-border">
+          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
+          <button type="submit" disabled={saving || !dormId}
+            className={`${primaryButtonClass} disabled:opacity-40`}>
+            {saving ? "Saving…" : editing ? "Save changes" : "Save inspection"}
+          </button>
+        </div>
       </form>
     </Modal>
   );
 }
-
-// ── InspectionCard ────────────────────────────────────────────────────────────
 function InspectionCard({
   inspection, onEdit, onDelete,
 }: { inspection: Inspection; onEdit: () => void; onDelete: () => void }) {

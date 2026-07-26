@@ -212,15 +212,6 @@ function AllocateModal({
       title={`Allocate ${student.fullName}`}
       description={`${student.admissionNumber} · ${student.className}${student.currentAllocation ? " — currently allocated, will be transferred" : ""}`}
       onClose={onClose} size="md"
-      footer={
-        <div className="flex gap-3 justify-end">
-          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
-          <button type="submit" form="allocate-form" disabled={saving || !dormId}
-            className={`${primaryButtonClass} disabled:opacity-40`}>
-            {saving ? "Allocating…" : student.currentAllocation ? "Transfer" : "Allocate"}
-          </button>
-        </div>
-      }
     >
       {student.currentAllocation && (
         <div className="mb-4 rounded-lg border border-warn/20 bg-warn-bg/40 dark:bg-warn/10 px-4 py-3 text-sm text-warn flex items-start gap-2">
@@ -229,7 +220,7 @@ function AllocateModal({
         </div>
       )}
       {error && <div className="mb-4"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
-      <form id="allocate-form" onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <p className="text-sm font-medium text-ink mb-2 dark:text-dark-text">Select dormitory</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1">
@@ -269,6 +260,13 @@ function AllocateModal({
           <textarea className={`${inputClass} resize-none`} rows={2} value={notes}
             onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Transferred from Girls Block A…" />
         </FormField>
+        <div className="flex gap-3 justify-end pt-1">
+          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
+          <button type="submit" disabled={saving || !dormId}
+            className={`${primaryButtonClass} disabled:opacity-40`}>
+            {saving ? "Allocating…" : student.currentAllocation ? "Transfer" : "Allocate"}
+          </button>
+        </div>
       </form>
     </Modal>
   );
@@ -294,18 +292,9 @@ function DeallocateModal({ student, onClose, onSaved }: { student: StudentRow; o
   }
   return (
     <Modal title="Remove Allocation" description={`${student.fullName} — ${student.currentAllocation?.dorm.name}`}
-      onClose={onClose} size="sm"
-      footer={
-        <div className="flex gap-3 justify-end">
-          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
-          <button type="submit" form="dealloc-form" disabled={saving}
-            className="inline-flex items-center gap-2 rounded-lg bg-danger text-white text-sm font-medium px-4 py-2.5 hover:bg-red-600 transition-all disabled:opacity-40">
-            {saving ? "Removing…" : "Remove"}
-          </button>
-        </div>
-      }>
+      onClose={onClose} size="sm">
       {error && <div className="mb-4"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
-      <form id="dealloc-form" onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <FormField label="Reason">
           <select className={inputClass} value={transferStatus} onChange={(e) => setTransferStatus(e.target.value as "VACATED" | "TRANSFERRED")}>
             <option value="VACATED">Vacated — student leaving boarding</option>
@@ -315,6 +304,13 @@ function DeallocateModal({ student, onClose, onSaved }: { student: StudentRow; o
         <FormField label="Notes" helper="Optional reason for this removal.">
           <textarea className={`${inputClass} resize-none`} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </FormField>
+        <div className="flex gap-3 justify-end pt-1">
+          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
+          <button type="submit" disabled={saving}
+            className="inline-flex items-center gap-2 rounded-lg bg-danger text-white text-sm font-medium px-4 py-2.5 hover:bg-red-600 transition-all disabled:opacity-40">
+            {saving ? "Removing…" : "Remove"}
+          </button>
+        </div>
       </form>
     </Modal>
   );
@@ -426,24 +422,9 @@ function BulkAllocateModal({
 
   return (
     <Modal title="Bulk Allocation" description="Allocate multiple students to a dormitory at once."
-      onClose={onClose} size="lg"
-      footer={
-        <div className="flex items-center justify-between gap-3">
-          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
-          <div className="flex gap-2">
-            <button type="button" onClick={handlePreview} disabled={!dormId || previewing}
-              className={`${secondaryButtonClass} disabled:opacity-40`}>
-              {previewing ? "Previewing…" : "Preview"}
-            </button>
-            <button type="submit" form="bulk-alloc-form" disabled={saving || !dormId}
-              className={`${primaryButtonClass} disabled:opacity-40`}>
-              {saving ? "Allocating…" : "Allocate"}
-            </button>
-          </div>
-        </div>
-      }>
+      onClose={onClose} size="lg">
       {error && <div className="mb-4"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
-      <form id="bulk-alloc-form" onSubmit={handleSubmit} className="space-y-5">
+      <form onSubmit={handleSubmit} className="space-y-5">
         {/* Mode tabs */}
         <div className="flex rounded-lg border border-line overflow-hidden dark:border-dark-border">
           {([["unallocated","Unallocated students"],["form","By form"],["class","By class"]] as [typeof mode, string][]).map(([m, label]) => (
@@ -513,6 +494,19 @@ function BulkAllocateModal({
             )}
           </div>
         )}
+        <div className="flex items-center justify-between gap-3 pt-1">
+          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
+          <div className="flex gap-2">
+            <button type="button" onClick={handlePreview} disabled={!dormId || previewing}
+              className={`${secondaryButtonClass} disabled:opacity-40`}>
+              {previewing ? "Previewing…" : "Preview"}
+            </button>
+            <button type="submit" disabled={saving || !dormId}
+              className={`${primaryButtonClass} disabled:opacity-40`}>
+              {saving ? "Allocating…" : "Allocate"}
+            </button>
+          </div>
+        </div>
       </form>
     </Modal>
   );
@@ -563,25 +557,9 @@ function AutoAllocateModal({
 
   return (
     <Modal title="Auto-Allocate Students" description="Distribute students across dormitories automatically according to dorm rules."
-      onClose={onClose} size="lg"
-      footer={
-        <div className="flex items-center justify-between gap-3">
-          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
-          <div className="flex gap-2">
-            <button type="button" onClick={runDryRun} disabled={previewing}
-              className={`${secondaryButtonClass} disabled:opacity-40`}>
-              {previewing ? "Previewing…" : "Preview plan"}
-            </button>
-            <button type="submit" form="auto-alloc-form" disabled={saving}
-              className={`${primaryButtonClass} disabled:opacity-40`}>
-              <Sparkles className="h-4 w-4" />
-              {saving ? "Allocating…" : "Run auto-allocation"}
-            </button>
-          </div>
-        </div>
-      }>
+      onClose={onClose} size="lg">
       {error && <div className="mb-4"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
-      <form id="auto-alloc-form" onSubmit={handleSubmit} className="space-y-5">
+      <form onSubmit={handleSubmit} className="space-y-5">
         {/* Strategy */}
         <div>
           <p className="text-sm font-medium text-ink mb-2 dark:text-dark-text">Distribution strategy</p>
@@ -644,6 +622,20 @@ function AutoAllocateModal({
             </div>
           </div>
         )}
+        <div className="flex items-center justify-between gap-3 pt-1">
+          <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
+          <div className="flex gap-2">
+            <button type="button" onClick={runDryRun} disabled={previewing}
+              className={`${secondaryButtonClass} disabled:opacity-40`}>
+              {previewing ? "Previewing…" : "Preview plan"}
+            </button>
+            <button type="submit" disabled={saving}
+              className={`${primaryButtonClass} disabled:opacity-40`}>
+              <Sparkles className="h-4 w-4" />
+              {saving ? "Allocating…" : "Run auto-allocation"}
+            </button>
+          </div>
+        </div>
       </form>
     </Modal>
   );

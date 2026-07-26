@@ -360,6 +360,7 @@ export default function StudentsPage() {
   const [modalOpen, setModalOpen]     = useState(false);
   const [editing, setEditing]         = useState<Student | null>(null);
   const [error, setError]             = useState<string | null>(null);
+  const [saving, setSaving]           = useState(false);
 
   // Draft for the "new student" form — only the controlled-state fields
   // (text inputs use defaultValue/FormData and survive within the session).
@@ -540,53 +541,59 @@ export default function StudentsPage() {
 
   const handleSubmit = useCallback(async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (saving) return; // guard against double-submit
     setError(null);
+    setSaving(true);
     const form = new FormData(e.currentTarget);
 
-    if (editing) {
-      const payload = {
-        fullName:           form.get("fullName") as string,
-        dateOfBirth:        (form.get("dateOfBirth") as string) || "",
-        classId:            selectedClassId,
-        gender:             selectedGender || null,
-        boardingStatus:     selectedBoarding || null,
-        parentName:         (form.get("parentName") as string) || "",
-        parentContact:      (form.get("parentContact") as string) || "",
-        electiveSubjectIds: selectedElectives,
-      };
-      const res = await fetch(`/api/students/${editing.id}`, {
-        method:  "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error || "Something went wrong."); return; }
-    } else {
-      const payload = {
-        fullName:                form.get("fullName") as string,
-        startingAdmissionNumber: (form.get("startingAdmissionNumber") as string) || undefined,
-        form:                    selectedForm,
-        dateOfBirth:             (form.get("dateOfBirth") as string) || "",
-        gender:                  selectedGender || null,
-        boardingStatus:          selectedBoarding || null,
-        parentName:              (form.get("parentName") as string) || "",
-        parentContact:           (form.get("parentContact") as string) || "",
-        electiveSubjectIds:      selectedElectives,
-      };
-      if (!payload.form) { setError("Choose a form."); return; }
-      const res = await fetch("/api/students", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error || "Something went wrong."); return; }
-    }
+    try {
+      if (editing) {
+        const payload = {
+          fullName:           form.get("fullName") as string,
+          dateOfBirth:        (form.get("dateOfBirth") as string) || "",
+          classId:            selectedClassId,
+          gender:             selectedGender || null,
+          boardingStatus:     selectedBoarding || null,
+          parentName:         (form.get("parentName") as string) || "",
+          parentContact:      (form.get("parentContact") as string) || "",
+          electiveSubjectIds: selectedElectives,
+        };
+        const res = await fetch(`/api/students/${editing.id}`, {
+          method:  "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) { setError(data.error || "Something went wrong."); return; }
+      } else {
+        const payload = {
+          fullName:                form.get("fullName") as string,
+          startingAdmissionNumber: (form.get("startingAdmissionNumber") as string) || undefined,
+          form:                    selectedForm,
+          dateOfBirth:             (form.get("dateOfBirth") as string) || "",
+          gender:                  selectedGender || null,
+          boardingStatus:          selectedBoarding || null,
+          parentName:              (form.get("parentName") as string) || "",
+          parentContact:           (form.get("parentContact") as string) || "",
+          electiveSubjectIds:      selectedElectives,
+        };
+        if (!payload.form) { setError("Choose a form."); return; }
+        const res = await fetch("/api/students", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) { setError(data.error || "Something went wrong."); return; }
+      }
 
-    setModalOpen(false);
-    clearStudentDraft();
-    loadAll();
-  }, [editing, selectedClassId, selectedElectives, selectedForm, selectedGender, selectedBoarding, loadAll]);
+      setModalOpen(false);
+      clearStudentDraft();
+      loadAll();
+    } finally {
+      setSaving(false);
+    }
+  }, [saving, editing, selectedClassId, selectedElectives, selectedForm, selectedGender, selectedBoarding, loadAll]);
 
   // ── Render ────────────────────────────────────────────────────────────────
   const showLoading = pageLoading && students.length === 0;
@@ -806,22 +813,8 @@ export default function StudentsPage() {
           }
           onClose={() => { setModalOpen(false); clearStudentDraft(); }}
           size="xl"
-          footer={
-            <div className="flex flex-col-reverse xs:flex-row xs:justify-end gap-2 xs:gap-3">
-              <button
-                type="button"
-                className={`${secondaryButtonClass} w-full xs:w-auto`}
-                onClick={() => { setModalOpen(false); clearStudentDraft(); }}
-              >
-                Cancel
-              </button>
-              <button type="submit" form="student-form" className={`${primaryButtonClass} w-full xs:w-auto`}>
-                {editing ? "Save changes" : "Register student"}
-              </button>
-            </div>
-          }
         >
-          <form id="student-form" onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
             {error && <ErrorBanner message={error} />}
 
             {/* ── Identity ── */}
@@ -1129,6 +1122,20 @@ export default function StudentsPage() {
                   )}
                 </div>
               )}
+            </div>
+
+            {/* Form actions — inside the form so they work on mobile */}
+            <div className="flex flex-col-reverse xs:flex-row xs:justify-end gap-2 xs:gap-3 pt-1">
+              <button
+                type="button"
+                className={`${secondaryButtonClass} w-full xs:w-auto`}
+                onClick={() => { setModalOpen(false); clearStudentDraft(); }}
+              >
+                Cancel
+              </button>
+              <button type="submit" className={`${primaryButtonClass} w-full xs:w-auto`} disabled={saving}>
+                {saving ? (editing ? "Saving…" : "Registering…") : (editing ? "Save changes" : "Register student")}
+              </button>
             </div>
           </form>
         </Modal>
