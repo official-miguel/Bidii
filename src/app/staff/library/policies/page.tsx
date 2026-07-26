@@ -33,7 +33,7 @@ interface FineAuditRow {
   amount: number; balanceAfter: number; reason: string | null; createdAt: string;
 }
 
-const PATRON_TYPES = ["DEFAULT","STUDENT","TEACHER","BOARDING","DAY_SCHOLAR","JUNIOR","SENIOR"];
+const ALL_PATRON_TYPES = ["DEFAULT","STUDENT","TEACHER","BOARDING","DAY_SCHOLAR","JUNIOR","SENIOR"];
 const PATRON_LABELS: Record<string,string> = {
   DEFAULT: "Default (all students)", STUDENT: "Students", TEACHER: "Teachers",
   BOARDING: "Boarding Students", DAY_SCHOLAR: "Day Scholars",
@@ -51,9 +51,10 @@ const fmt = (iso: string) => new Date(iso).toLocaleDateString("en-KE", { day: "n
 
 // ── PolicyForm ─────────────────────────────────────────────────────────────
 
-function PolicyForm({ initial, onSave, onCancel, saving, error }: {
+function PolicyForm({ initial, onSave, onCancel, saving, error, availablePatronTypes }: {
   initial: Partial<Policy>; onSave: (d: Partial<Policy>) => void;
   onCancel: () => void; saving: boolean; error: string | null;
+  availablePatronTypes: string[];
 }) {
   const [f, setF] = useState({
     patronType:          initial.patronType          ?? "DEFAULT",
@@ -81,7 +82,7 @@ function PolicyForm({ initial, onSave, onCancel, saving, error }: {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <FormField label="Patron type" required>
           <select className={inputClass} value={f.patronType} onChange={e => set("patronType", e.target.value)} disabled={!!initial.id}>
-            {PATRON_TYPES.map(t => <option key={t} value={t}>{PATRON_LABELS[t]}</option>)}
+            {availablePatronTypes.map(t => <option key={t} value={t}>{PATRON_LABELS[t]}</option>)}
           </select>
         </FormField>
         <FormField label="Label (optional)">
@@ -152,6 +153,7 @@ export default function PoliciesPage() {
   const [pauses, setPauses]       = useState<FinePause[]>([]);
   const [auditRows, setAuditRows] = useState<FineAuditRow[]>([]);
   const [loading, setLoading]     = useState(true);
+  const [boardingType, setBoardingType] = useState<string>("DAY_AND_BOARDING");
   const [tab, setTab]             = useState<"policies"|"pauses"|"audit">("policies");
   const [editPolicy, setEditPolicy] = useState<Policy | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -170,12 +172,15 @@ export default function PoliciesPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [p, ps, au] = await Promise.all([
+    const [p, ps, au, school] = await Promise.all([
       fetch("/api/library/policies").then(r => r.ok ? r.json() : []),
       fetch("/api/library/fines/pause").then(r => r.ok ? r.json() : []),
       fetch("/api/library/fines/audit?take=50").then(r => r.ok ? r.json() : { items: [] }),
+      fetch("/api/school/settings").then(r => r.ok ? r.json() : null),
     ]);
-    setPolicies(p); setPauses(ps); setAuditRows(au.items ?? []); setLoading(false);
+    setPolicies(p); setPauses(ps); setAuditRows(au.items ?? []);
+    if (school?.boardingType) setBoardingType(school.boardingType);
+    setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -205,6 +210,12 @@ export default function PoliciesPage() {
   async function deactivatePause(id: string) {
     await fetch(`/api/library/fines/pause?id=${id}`, { method: "DELETE" }); load();
   }
+
+  // Patron types available depend on school boarding configuration.
+  // BOARDING and DAY_SCHOLAR are irrelevant (and confusing) for day-only schools.
+  const availablePatronTypes = ALL_PATRON_TYPES.filter(t =>
+    boardingType !== "DAY_ONLY" || (t !== "BOARDING" && t !== "DAY_SCHOLAR")
+  );
 
   // existingTypes preserved for future use (patron type uniqueness check)
 
@@ -241,7 +252,7 @@ export default function PoliciesPage() {
           {(showCreate || editPolicy) && (
             <div className="mb-6 rounded-xl border border-line bg-white p-5 dark:bg-dark-surface dark:border-dark-border animate-slide-down">
               <p className="text-sm font-semibold text-ink mb-4">{editPolicy ? `Edit — ${PATRON_LABELS[editPolicy.patronType]}` : "New Policy"}</p>
-              <PolicyForm initial={editPolicy ?? {}} onSave={handleSavePolicy} onCancel={() => { setShowCreate(false); setEditPolicy(null); setSaveErr(null); }} saving={saving} error={saveErr} />
+              <PolicyForm initial={editPolicy ?? {}} onSave={handleSavePolicy} onCancel={() => { setShowCreate(false); setEditPolicy(null); setSaveErr(null); }} saving={saving} error={saveErr} availablePatronTypes={availablePatronTypes} />
             </div>
           )}
 
