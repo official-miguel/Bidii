@@ -980,7 +980,7 @@ export default function StudentsPage() {
                                     {schoolPolicy.activeDormsCount === 0 && (
                                       <li>No dormitories created yet</li>
                                     )}
-                                    {schoolPolicy.activeDormsCount > 0 && schoolPolicy.freePositionsCount === 0 && (
+                                    {(schoolPolicy.activeDormsCount ?? 0) > 0 && (schoolPolicy.freePositionsCount ?? 0) === 0 && (
                                       <li>No free sleeping positions available</li>
                                     )}
                                   </ul>
