@@ -85,6 +85,7 @@ export async function GET(
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const cubicleId = req.nextUrl.searchParams.get("cubicleId");
+  console.log("[GET /beds] Fetching beds for dormId:", params.dormId, "cubicleId:", cubicleId, "schoolId:", user.schoolId);
 
   const beds = await prisma.bed.findMany({
     where: {
@@ -113,6 +114,11 @@ export async function GET(
       },
     },
   });
+
+  console.log("[GET /beds] Found", beds.length, "beds");
+  if (beds.length > 0) {
+    console.log("[GET /beds] First bed:", beds[0]);
+  }
 
   return NextResponse.json(beds);
 }
