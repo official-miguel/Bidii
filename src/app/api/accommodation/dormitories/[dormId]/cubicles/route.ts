@@ -54,7 +54,18 @@ export async function GET(
     },
   });
 
-  return NextResponse.json(cubicles);
+  // Transform to ensure counts are properly formatted
+  const result = cubicles.map((c) => ({
+    ...c,
+    _count: {
+      ...c._count,
+      // Ensure sleepingPositions count is visible
+      sleepingPositions: c._count.sleepingPositions,
+      allocations: c._count.allocations,
+    },
+  }));
+
+  return NextResponse.json(result);
 }
 
 export async function POST(
@@ -141,7 +152,22 @@ export async function POST(
           data: { totalCapacity: positionCount },
         });
 
-        return cubicles;
+        // Fetch cubicles with counts for response
+        const createdWithCounts = await tx.cubicle.findMany({
+          where: { id: { in: cubicles.map(c => c.id) } },
+          include: {
+            permittedForms: true,
+            _count: {
+              select: {
+                beds: true,
+                sleepingPositions: true,
+                allocations: { where: { status: "CURRENT" } },
+              },
+            },
+          },
+        });
+
+        return createdWithCounts;
       });
 
       return NextResponse.json({ created: created.length, cubicles: created }, { status: 201 });
@@ -207,7 +233,6 @@ export async function POST(
               ? { create: permittedForms.map((form) => ({ form })) }
               : undefined,
         },
-        include: { permittedForms: true },
       });
 
       // Auto-generate beds based on capacity
@@ -243,7 +268,20 @@ export async function POST(
         data: { totalCapacity: positionCount },
       });
 
-      return newCubicle;
+      // Fetch with full counts for response
+      return tx.cubicle.findUnique({
+        where: { id: newCubicle.id },
+        include: {
+          permittedForms: true,
+          _count: {
+            select: {
+              beds: true,
+              sleepingPositions: true,
+              allocations: { where: { status: "CURRENT" } },
+            },
+          },
+        },
+      });
     });
 
     return NextResponse.json(cubicle, { status: 201 });
