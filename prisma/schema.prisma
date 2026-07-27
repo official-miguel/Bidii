@@ -468,6 +468,8 @@ model Student {
   admissionNumber          String
   fullName                 String
   gender                   String?
+  /// DAY | BOARDING — persisted so the UI can display and filter by boarding status
+  boardingStatus           String?
   dateOfBirth              DateTime?
   classId                  String
   parentName               String?
@@ -2288,6 +2290,10 @@ enum AllocationStatus {
   CURRENT
   VACATED
   TRANSFERRED
+  /// Student was in this dorm when it was closed/put under maintenance.
+  /// The original dormId, cubicleId, bedId, sleepingPositionId are preserved
+  /// so the student can be restored when the dorm is reactivated.
+  MAINTENANCE_HOLD
 }
 
 // =============================================================================
@@ -2629,4 +2635,6 @@ model AllocationRecord {
   /// Fast lookup for a student's current allocation.
   @@index([studentId, status])
   @@index([schoolId, status])
+  /// Fast lookup of held allocations for a dorm (used on reactivation).
+  @@index([dormId, status])
 }

@@ -3,6 +3,11 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { requirePermission } from "@/lib/permissions";
+import {
+  type GenderPolicy,
+  effectiveDormGenderPolicy,
+  studentMatchesDormGender,
+} from "@/lib/accommodation/genderPolicy";
 
 async function manageGuard() {
   return (
@@ -58,11 +63,18 @@ export async function POST(req: NextRequest) {
 
   const { dormId, cubicleId, studentIds, filter, notes, allocationDate } = parsed.data;
 
-  // ── Verify dorm ────────────────────────────────────────────────────────────
-  const dorm = await prisma.dormitory.findFirst({
-    where: { id: dormId, schoolId: user.schoolId },
-    include: { permittedForms: true },
-  });
+  // ── Verify dorm & load school gender policy ───────────────────────────────
+  const [dorm, school] = await Promise.all([
+    prisma.dormitory.findFirst({
+      where: { id: dormId, schoolId: user.schoolId },
+      include: { permittedForms: true },
+    }),
+    prisma.school.findUnique({
+      where: { id: user.schoolId },
+      select: { genderPolicy: true },
+    }),
+  ]);
+
   if (!dorm) return NextResponse.json({ error: "Dormitory not found." }, { status: 404 });
   if (dorm.status !== "ACTIVE") {
     return NextResponse.json(
@@ -70,6 +82,13 @@ export async function POST(req: NextRequest) {
       { status: 409 }
     );
   }
+
+  const schoolGenderPolicy = (school?.genderPolicy ?? "MIXED") as GenderPolicy;
+  // Effective dorm gender policy accounts for single-gender school overrides
+  const effectiveGender = effectiveDormGenderPolicy(
+    schoolGenderPolicy,
+    dorm.genderPolicy as GenderPolicy,
+  );
 
   // ── Resolve student IDs ────────────────────────────────────────────────────
   let targetStudentIds: string[] = studentIds ?? [];
@@ -113,26 +132,47 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No students match the given criteria." }, { status: 400 });
   }
 
-  // ── Enforce form restrictions ──────────────────────────────────────────────
+  // ── Enforce gender policy & form restrictions ─────────────────────────────
+  // Fetch gender + form for all target students in one shot.
+  const studentsForValidation = await prisma.student.findMany({
+    where: { id: { in: targetStudentIds }, schoolId: user.schoolId },
+    select: { id: true, gender: true, schoolClass: { select: { form: true } } },
+  });
+
+  // Gender check — uses school-aware helper so single-gender schools skip
+  // per-student checks entirely (all students are the same gender by policy).
+  if (effectiveGender !== "MIXED") {
+    const genderViolators = studentsForValidation.filter(
+      (s) => !studentMatchesDormGender(schoolGenderPolicy, dorm.genderPolicy as GenderPolicy, s.gender),
+    );
+    if (genderViolators.length > 0) {
+      const policyLabel = effectiveGender === "BOYS_ONLY" ? "Boys Only" : "Girls Only";
+      return NextResponse.json(
+        {
+          error: `${genderViolators.length} student(s) do not match this dormitory's gender policy (${policyLabel}).`,
+          violatingIds: genderViolators.map((s) => s.id),
+        },
+        { status: 409 },
+      );
+    }
+  }
+
+  // Form restriction check
   if (
     dorm.allocationPolicy === "RESTRICTED_BY_FORM" &&
     dorm.permittedForms.length > 0
   ) {
     const allowedForms = dorm.permittedForms.map((f) => f.form);
-    const studentsWithForms = await prisma.student.findMany({
-      where: { id: { in: targetStudentIds }, schoolId: user.schoolId },
-      select: { id: true, schoolClass: { select: { form: true } } },
-    });
-    const violating = studentsWithForms.filter(
-      (s) => !allowedForms.includes(s.schoolClass.form)
+    const formViolators = studentsForValidation.filter(
+      (s) => !allowedForms.includes(s.schoolClass.form),
     );
-    if (violating.length > 0) {
+    if (formViolators.length > 0) {
       return NextResponse.json(
         {
-          error: `${violating.length} student(s) are from forms not permitted in this dormitory. Permitted forms: ${allowedForms.join(", ")}.`,
-          violatingIds: violating.map((s) => s.id),
+          error: `${formViolators.length} student(s) are from forms not permitted in this dormitory. Permitted forms: ${allowedForms.join(", ")}.`,
+          violatingIds: formViolators.map((s) => s.id),
         },
-        { status: 409 }
+        { status: 409 },
       );
     }
   }

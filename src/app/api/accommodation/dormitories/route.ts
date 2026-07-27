@@ -3,6 +3,11 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { requirePermission } from "@/lib/permissions";
+import {
+  type GenderPolicy,
+  validateDormGenderPolicy,
+  requiredDormGenderPolicy,
+} from "@/lib/accommodation/genderPolicy";
 
 async function guard() {
   return (
@@ -75,7 +80,11 @@ export async function GET(req: NextRequest) {
 
 const createSchema = z.object({
   name: z.string().trim().min(1, "Dorm name is required.").max(100),
-  genderPolicy: z.enum(["BOYS_ONLY", "GIRLS_ONLY", "MIXED"]),
+  // MIXED is never a valid dorm gender policy — every dorm must be dedicated
+  // to one gender. The school-level policy enforces which one is required.
+  genderPolicy: z.enum(["BOYS_ONLY", "GIRLS_ONLY"], {
+    errorMap: () => ({ message: "Dormitory gender must be Boys Only or Girls Only." }),
+  }),
   structure: z.enum(["OPEN_HALL", "CUBICLE_BASED"]),
   status: z.enum(["ACTIVE", "UNDER_MAINTENANCE", "CLOSED"]).default("ACTIVE"),
   allocationPolicy: z.enum(["RESTRICTED_BY_FORM", "MIXED_FORMS"]).default("MIXED_FORMS"),
@@ -122,11 +131,31 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // ── Enforce school gender policy ───────────────────────────────────────────
+  // Fetch the school's gender policy and validate the requested dorm policy
+  // against it. For single-gender schools we also silently coerce the value
+  // so that a misbehaving client cannot create a dorm with the wrong gender.
+  const school = await prisma.school.findUnique({
+    where: { id: user.schoolId },
+    select: { genderPolicy: true },
+  });
+  const schoolGenderPolicy = (school?.genderPolicy ?? "MIXED") as GenderPolicy;
+
+  const genderError = validateDormGenderPolicy(schoolGenderPolicy, genderPolicy as GenderPolicy);
+  if (genderError) {
+    return NextResponse.json({ error: genderError }, { status: 409 });
+  }
+
+  // For single-gender schools, coerce the dorm policy to the required value
+  // as a safety net (even though the UI already locks the field).
+  const resolvedGenderPolicy: string =
+    requiredDormGenderPolicy(schoolGenderPolicy) ?? genderPolicy;
+
   const dorm = await prisma.dormitory.create({
     data: {
       schoolId: user.schoolId,
       name,
-      genderPolicy,
+      genderPolicy: resolvedGenderPolicy,
       structure,
       status,
       allocationPolicy,

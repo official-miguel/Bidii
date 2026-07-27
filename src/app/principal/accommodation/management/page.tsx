@@ -161,12 +161,12 @@ function MaintenanceModal({ dorm, dorms, onClose, onDone }: {
   dorm: DormRow; dorms: DormRow[]; onClose: () => void; onDone: (msg: string) => void;
 }) {
   const isClosing = dorm.status === "ACTIVE";
-  const [reason, setReason]           = useState("");
-  const [notes, setNotes]             = useState("");
-  const [relocate, setRelocate]       = useState(false);
-  const [toDormId, setToDormId]       = useState("");
-  const [saving, setSaving]           = useState(false);
-  const [error, setError]             = useState<string | null>(null);
+  const [reason, setReason]     = useState("");
+  const [notes, setNotes]       = useState("");
+  const [relocate, setRelocate] = useState(false);
+  const [toDormId, setToDormId] = useState("");
+  const [saving, setSaving]     = useState(false);
+  const [error, setError]       = useState<string | null>(null);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault(); setSaving(true); setError(null);
@@ -180,16 +180,41 @@ function MaintenanceModal({ dorm, dorms, onClose, onDone }: {
       });
       const json = await res.json();
       if (!res.ok) { setError(json.error ?? "Failed."); return; }
-      onDone(isClosing ? `${dorm.name} set to maintenance${relocate ? `, ${json.relocated} student(s) relocated` : ""}.` : `${dorm.name} reopened.`);
+
+      if (isClosing) {
+        const extra = relocate ? `, ${json.relocated} student(s) temporarily relocated` : `, ${json.snapshotted} student(s) held for restore`;
+        onDone(`${dorm.name} set to maintenance${extra}.`);
+      } else {
+        const restoredMsg = json.restored > 0 ? `${json.restored} student(s) restored to their original beds` : "No students to restore";
+        const skippedMsg  = json.skipped > 0 ? `, ${json.skipped} skipped (left school or reallocated)` : "";
+        onDone(`${dorm.name} reopened. ${restoredMsg}${skippedMsg}.`);
+      }
     } catch { setError("Network error."); } finally { setSaving(false); }
   }
 
   return (
     <Modal
       title={isClosing ? `Maintenance: ${dorm.name}` : `Reopen: ${dorm.name}`}
-      description={isClosing ? "Close this dorm for maintenance. Students can optionally be relocated." : "Set this dorm back to Active status."}
+      description={
+        isClosing
+          ? "Close this dorm for maintenance. Student bed assignments are saved and restored when you reopen."
+          : "Set this dorm back to Active. Students who were here will be restored to their original beds."
+      }
       onClose={onClose} size="md">
       {error && <div className="mb-4"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}
+
+      {/* Reopen info banner */}
+      {!isClosing && (
+        <div className="mb-4 rounded-lg border border-teal/20 bg-teal/5 dark:bg-teal/10 px-3 py-2.5 text-sm text-teal flex items-start gap-2">
+          <Unlock className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>
+            Students who were in <strong>{dorm.name}</strong> when it closed will be automatically
+            restored to their original beds. Students who have since graduated, been expelled, or
+            transferred will be skipped and their beds left free.
+          </span>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-4">
         {isClosing && (
           <>
@@ -197,41 +222,57 @@ function MaintenanceModal({ dorm, dorms, onClose, onDone }: {
               <input className={inputClass} value={reason} onChange={(e) => setReason(e.target.value)}
                 placeholder="e.g. Roof repair, plumbing works, renovation…" />
             </FormField>
+
+            {/* Snapshot info — replaces the old misleading warning */}
+            {dorm.occupiedCount > 0 && (
+              <div className="rounded-lg border border-teal/20 bg-teal/5 dark:bg-teal/10 px-3 py-2.5 text-sm text-teal flex items-start gap-2">
+                <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+                <span>
+                  <strong>{dorm.occupiedCount} student(s)</strong> will be held in a snapshot.
+                  They appear as <em>unallocated</em> while the dorm is closed and are
+                  automatically restored to their exact beds when you reopen.
+                </span>
+              </div>
+            )}
+
             <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-line dark:border-dark-border p-3">
               <input type="checkbox" checked={relocate} onChange={(e) => setRelocate(e.target.checked)}
                 className="mt-0.5 h-4 w-4 rounded border-line text-teal" />
               <div>
-                <p className="text-sm font-medium text-ink dark:text-dark-text">Relocate current occupants</p>
-                <p className="text-xs text-slate dark:text-dark-muted">Move all {dorm.occupiedCount} current student(s) to another dorm.</p>
+                <p className="text-sm font-medium text-ink dark:text-dark-text">Also give temporary accommodation</p>
+                <p className="text-xs text-slate dark:text-dark-muted">
+                  Move all {dorm.occupiedCount} student(s) to another dorm while this one is closed.
+                  Their snapshot is still saved for the restore.
+                </p>
               </div>
             </label>
+
             {relocate && (
-              <FormField label="Relocate to" required>
+              <FormField label="Temporary dorm" required>
                 <select className={inputClass} value={toDormId} onChange={(e) => setToDormId(e.target.value)}>
                   <option value="">— Select destination —</option>
-                  {dorms.filter((d) => d.id !== dorm.id && d.status === "ACTIVE" && d.availableCount >= dorm.occupiedCount).map((d) => (
-                    <option key={d.id} value={d.id}>{d.name} ({d.availableCount} spaces free)</option>
-                  ))}
+                  {dorms
+                    .filter((d) => d.id !== dorm.id && d.status === "ACTIVE" && d.availableCount >= dorm.occupiedCount)
+                    .map((d) => (
+                      <option key={d.id} value={d.id}>{d.name} ({d.availableCount} spaces free)</option>
+                    ))}
                 </select>
               </FormField>
             )}
           </>
         )}
+
         <FormField label="Notes (optional)">
-          <textarea className={`${inputClass} resize-none`} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)}
+          <textarea className={`${inputClass} resize-none`} rows={2} value={notes}
+            onChange={(e) => setNotes(e.target.value)}
             placeholder={isClosing ? "Additional details about the maintenance work…" : "Notes on reopening…"} />
         </FormField>
-        {isClosing && dorm.occupiedCount > 0 && !relocate && (
-          <div className="rounded-lg border border-warn/20 bg-warn-bg/40 dark:bg-warn/10 px-3 py-2.5 text-sm text-warn flex items-start gap-2">
-            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-            <span>{dorm.occupiedCount} student(s) will remain in records as allocated to this dorm. Enable &ldquo;Relocate&rdquo; to move them.</span>
-          </div>
-        )}
+
         <div className="flex gap-3 justify-end pt-1">
           <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
-          <button type="submit" disabled={saving || (isClosing && !reason)}
-            className={`${isClosing ? "bg-warn text-white hover:bg-amber-600" : primaryButtonClass} inline-flex items-center gap-2 rounded-lg text-sm font-medium px-4 py-2.5 disabled:opacity-40`}>
-            {saving ? "Saving…" : isClosing ? "Close for maintenance" : "Reopen dormitory"}
+          <button type="submit" disabled={saving || (isClosing && !reason) || (relocate && !toDormId)}
+            className={`${isClosing ? "bg-warn text-white hover:bg-amber-600" : primaryButtonClass} inline-flex items-center gap-2 rounded-lg text-sm font-medium px-4 py-2.5 disabled:opacity-40 transition-all`}>
+            {saving ? "Saving…" : isClosing ? "Close for maintenance" : "Reopen & restore students"}
           </button>
         </div>
       </form>
@@ -509,6 +550,12 @@ export default function DormManagementPage() {
                     <button onClick={() => setMaintenanceDorm(dorm)}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal text-white hover:bg-teal-dark text-xs font-medium transition-all">
                       <Unlock className="h-3.5 w-3.5" /> Reopen
+                    </button>
+                  )}
+                  {dorm.status === "CLOSED" && (
+                    <button onClick={() => setMaintenanceDorm(dorm)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal text-white hover:bg-teal-dark text-xs font-medium transition-all">
+                      <Unlock className="h-3.5 w-3.5" /> Reactivate
                     </button>
                   )}
                 </div>

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { emitSSE } from "@/lib/sse";
+import { autoAssignDorm } from "@/lib/accommodation/autoAssign";
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   const user = await requireRole("PRINCIPAL");
@@ -45,6 +46,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   const existing = await prisma.student.findFirst({
     where: { id: params.id, schoolId: user.schoolId },
+    include: { schoolClass: { select: { form: true } } },
   });
   if (!existing) return NextResponse.json({ error: "Student not found." }, { status: 404 });
 
@@ -85,6 +87,49 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         },
       });
     });
+
+    // ── Auto-allocate dorm when boarding status is changed to BOARDING ─────
+    // Only fires when:
+    //   1. The incoming update explicitly sets boardingStatus to "BOARDING"
+    //   2. The student wasn't already recorded as BOARDING (avoids re-allocating
+    //      a student who already has a dorm just because their record was edited)
+    //   3. The school has autoAllocateDorms enabled
+    //   4. The student doesn't already have a current allocation
+    const becomingBoarder =
+      rest.boardingStatus === "BOARDING" &&
+      existing.boardingStatus !== "BOARDING";
+
+    if (becomingBoarder) {
+      const [school, existingAllocation] = await Promise.all([
+        prisma.school.findUnique({
+          where: { id: user.schoolId },
+          select: { autoAllocateDorms: true },
+        }),
+        prisma.allocationRecord.findFirst({
+          where: { studentId: params.id, schoolId: user.schoolId, status: "CURRENT" },
+          select: { id: true },
+        }),
+      ]);
+
+      if (school?.autoAllocateDorms && !existingAllocation) {
+        // Determine form: use the updated class if classId was changed, otherwise the existing one.
+        const form = rest.classId
+          ? (await prisma.schoolClass.findUnique({
+              where: { id: rest.classId },
+              select: { form: true },
+            }))?.form ?? existing.schoolClass.form
+          : existing.schoolClass.form;
+
+        // Non-fatal — student is already updated; staff can allocate manually if no slot found.
+        await autoAssignDorm({
+          schoolId: user.schoolId,
+          studentId: params.id,
+          studentForm: form,
+          allocatedById: user.id,
+        }).catch(() => undefined);
+      }
+    }
+
     emitSSE(user.schoolId, "student.updated", student);
     return NextResponse.json(student);
   } catch {
@@ -103,3 +148,4 @@ export async function DELETE() {
     { status: 405 }
   );
 }
+

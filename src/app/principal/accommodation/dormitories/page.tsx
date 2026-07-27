@@ -95,8 +95,10 @@ function Step1Basics({
   studentList: StudentOption[];
   schoolPolicy: SchoolPolicy;
 }) {
-  const genderLocked = schoolPolicy.genderPolicy === "BOYS_ONLY" || schoolPolicy.genderPolicy === "GIRLS_ONLY";
-  const lockedGenderLabel = schoolPolicy.genderPolicy === "BOYS_ONLY" ? "Boys only" : "Girls only";
+  // Single-gender school → gender is fixed; mixed school → must choose Boys or Girls
+  const schoolIsMixed  = schoolPolicy.genderPolicy === "MIXED";
+  const genderLocked   = !schoolIsMixed;
+  const lockedLabel    = schoolPolicy.genderPolicy === "BOYS_ONLY" ? "Boys only" : "Girls only";
 
   return (
     <div className="space-y-5">
@@ -107,37 +109,63 @@ function Step1Basics({
         />
       </FormField>
 
-      <div className="grid grid-cols-2 gap-4">
-        <FormField label="Gender" required>
-          {genderLocked ? (
-            <>
-              <input
-                readOnly
-                value={lockedGenderLabel}
-                className={`${inputClass} bg-paper cursor-not-allowed`}
-              />
-              <p className="text-xs text-slate mt-1.5 dark:text-dark-muted">
-                Fixed by the school gender policy.
-              </p>
-            </>
-          ) : (
-            <select className={inputClass} value={data.genderPolicy}
-              onChange={(e) => onChange({ genderPolicy: e.target.value })}>
-              <option value="MIXED">Mixed</option>
-              <option value="BOYS_ONLY">Boys only</option>
-              <option value="GIRLS_ONLY">Girls only</option>
-            </select>
-          )}
+      {/* ── Gender field ───────────────────────────────────────────────────── */}
+      {genderLocked ? (
+        // Single-gender school — show read-only pill, no choice needed
+        <FormField label="Gender" helper="Set by the school gender policy — cannot be changed here.">
+          <input
+            readOnly
+            value={lockedLabel}
+            className={`${inputClass} bg-paper cursor-not-allowed opacity-75`}
+          />
         </FormField>
-        <FormField label="Status" required>
-          <select className={inputClass} value={data.status}
-            onChange={(e) => onChange({ status: e.target.value })}>
-            <option value="ACTIVE">Active</option>
-            <option value="UNDER_MAINTENANCE">Under Maintenance</option>
-            <option value="CLOSED">Closed</option>
-          </select>
-        </FormField>
-      </div>
+      ) : (
+        // Mixed school — every dorm must be BOYS_ONLY or GIRLS_ONLY; MIXED is not allowed
+        <div>
+          <p className="text-sm font-medium text-ink mb-1.5 dark:text-dark-text">
+            Gender <span className="text-danger">*</span>
+          </p>
+          <p className="text-xs text-slate dark:text-dark-muted mb-3">
+            This school is mixed. Each dormitory must be dedicated to one gender — boys and girls cannot share a dorm.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            {([
+              { value: "BOYS_ONLY",  label: "Boys only",  color: "border-blue-400 bg-blue-50 dark:bg-blue-900/20",  activeRing: "ring-2 ring-blue-400",  dot: "bg-blue-500"  },
+              { value: "GIRLS_ONLY", label: "Girls only", color: "border-pink-400 bg-pink-50 dark:bg-pink-900/20", activeRing: "ring-2 ring-pink-400", dot: "bg-pink-500" },
+            ] as { value: string; label: string; color: string; activeRing: string; dot: string }[]).map(({ value, label, color, activeRing, dot }) => {
+              const active = data.genderPolicy === value;
+              return (
+                <button
+                  key={value} type="button"
+                  onClick={() => onChange({ genderPolicy: value })}
+                  className={`rounded-xl border-2 p-3.5 text-left transition-all ${
+                    active
+                      ? `${color} ${activeRing}`
+                      : "border-line hover:border-slate-300 dark:border-dark-border dark:hover:border-dark-muted"
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className={`h-3 w-3 rounded-full shrink-0 ${active ? dot : "bg-slate-300 dark:bg-dark-border"}`} />
+                    <span className={`text-sm font-semibold ${active ? "text-ink dark:text-dark-text" : "text-slate dark:text-dark-muted"}`}>
+                      {label}
+                    </span>
+                    {active && <Check className="h-4 w-4 ml-auto text-teal shrink-0" />}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <FormField label="Status" required>
+        <select className={inputClass} value={data.status}
+          onChange={(e) => onChange({ status: e.target.value })}>
+          <option value="ACTIVE">Active</option>
+          <option value="UNDER_MAINTENANCE">Under Maintenance</option>
+          <option value="CLOSED">Closed</option>
+        </select>
+      </FormField>
 
       <FormField label="Boarding master / matron" helper="The teacher responsible for this dormitory.">
         <SearchableSelect
@@ -320,10 +348,11 @@ function DormWizard({
 }) {
   const dormWizardDraftKey = `bidii_draft_dorm_wizard_${editDorm?.id ?? "new"}`;
 
-  // Derive the correct default genderPolicy from school settings for new dorms
+  // Derive the correct default genderPolicy from school settings for new dorms.
+  // Mixed school → default to BOYS_ONLY (user must pick Boys or Girls; MIXED is not allowed).
+  // Single-gender school → locked to that gender.
   const schoolGenderDefault =
-    schoolPolicy.genderPolicy === "BOYS_ONLY" ? "BOYS_ONLY" :
-    schoolPolicy.genderPolicy === "GIRLS_ONLY" ? "GIRLS_ONLY" : "MIXED";
+    schoolPolicy.genderPolicy === "GIRLS_ONLY" ? "GIRLS_ONLY" : "BOYS_ONLY";
 
   const defaultData: WizardData = editDorm
     ? {
@@ -359,7 +388,12 @@ function DormWizard({
   };
 
   const canNext = () => {
-    if (step === 0) return data.name.trim().length > 0;
+    if (step === 0) {
+      if (!data.name.trim()) return false;
+      // For mixed schools, gender must be explicitly set to BOYS_ONLY or GIRLS_ONLY
+      if (schoolPolicy.genderPolicy === "MIXED" && data.genderPolicy === "MIXED") return false;
+      return true;
+    }
     if (step === 2 && data.allocationPolicy === "RESTRICTED_BY_FORM") return data.permittedForms.length > 0;
     return true;
   };

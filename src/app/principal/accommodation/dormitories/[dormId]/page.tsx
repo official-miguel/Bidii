@@ -639,11 +639,6 @@ function CubicleSection({
             aria-label="Edit cubicle">
             <Pencil className="h-3.5 w-3.5" />
           </button>
-          <button onClick={() => onAddBeds(cubicle.id)}
-            className="p-1.5 rounded-md text-slate hover:text-teal hover:bg-teal/10 transition-all shrink-0"
-            aria-label="Add beds">
-            <Plus className="h-4 w-4" />
-          </button>
         </div>
 
         {expanded && (
@@ -656,10 +651,6 @@ function CubicleSection({
             {!loadingBeds && beds.length === 0 && (
               <div className="text-center py-6">
                 <p className="text-slate text-sm dark:text-dark-muted">No beds in this cubicle yet.</p>
-                <button onClick={() => onAddBeds(cubicle.id)}
-                  className="mt-2 inline-flex items-center gap-1.5 text-sm text-teal font-medium hover:underline">
-                  <Plus className="h-3.5 w-3.5" /> Add beds
-                </button>
               </div>
             )}
             {!loadingBeds && beds.length > 0 && (
@@ -761,11 +752,17 @@ export default function DormDetailPage() {
     );
   }
 
-  const occupancyPct = dorm.totalCapacity > 0
-    ? Math.round((dorm._count.allocations / dorm.totalCapacity) * 100) : 0;
-  const available = Math.max(0, dorm.totalCapacity - dorm._count.allocations);
-  const statusMeta = STATUS_META[dorm.status];
   const isCubicleBased = dorm.structure === "CUBICLE_BASED";
+  // For cubicle-based dorms derive capacity from the sum of each cubicle's
+  // target capacity (set at generation time) so the number is non-zero as soon
+  // as cubicles exist — even before individual beds have been added.
+  const displayCapacity = isCubicleBased
+    ? dorm.cubicles.reduce((sum, c) => sum + c.capacity, 0)
+    : dorm.totalCapacity;
+  const occupancyPct = displayCapacity > 0
+    ? Math.round((dorm._count.allocations / displayCapacity) * 100) : 0;
+  const available = Math.max(0, displayCapacity - dorm._count.allocations);
+  const statusMeta = STATUS_META[dorm.status];
 
   return (
     <div>
@@ -830,9 +827,9 @@ export default function DormDetailPage() {
         {/* Occupancy summary row */}
         <div className="mt-4 pt-4 border-t border-line dark:border-dark-border grid grid-cols-2 sm:grid-cols-4 gap-4">
           {[
-            { label: "Total capacity", value: dorm.totalCapacity },
-            { label: "Occupied", value: dorm._count.allocations, highlight: dorm._count.allocations === dorm.totalCapacity && dorm.totalCapacity > 0 },
-            { label: "Available", value: available, highlight: available === 0 && dorm.totalCapacity > 0 },
+            { label: "Total capacity", value: displayCapacity },
+            { label: "Occupied", value: dorm._count.allocations, highlight: dorm._count.allocations === displayCapacity && displayCapacity > 0 },
+            { label: "Available", value: available, highlight: available === 0 && displayCapacity > 0 },
             { label: "Occupancy", value: `${occupancyPct}%`, highlight: occupancyPct >= 90 },
           ].map(({ label, value, highlight }) => (
             <div key={label}>
