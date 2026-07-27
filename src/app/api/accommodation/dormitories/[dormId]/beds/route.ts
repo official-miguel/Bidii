@@ -151,8 +151,21 @@ export async function POST(
     if (mode === "bulk" && names && names.length > 0) {
       bedLabels = names;
     } else if (mode === "auto" && count) {
-      const p = prefix?.trim() || "Bed ";
-      bedLabels = Array.from({ length: count }, (_, i) => `${p}${i + 1}`);
+      // Get the highest bed number in the dormitory to continue sequencing
+      const lastBed = await prisma.bed.findFirst({
+        where: { dormId: params.dormId },
+        orderBy: { createdAt: "desc" },
+      });
+      let nextBedNumber = 1;
+      if (lastBed && lastBed.label) {
+        // Extract number from label like "Bed 42"
+        const match = lastBed.label.match(/Bed (\d+)/);
+        if (match) {
+          nextBedNumber = parseInt(match[1]) + 1;
+        }
+      }
+      // Generate sequential labels
+      bedLabels = Array.from({ length: count }, (_, i) => `Bed ${nextBedNumber + i}`);
     }
 
     if (bedLabels.length === 0) {

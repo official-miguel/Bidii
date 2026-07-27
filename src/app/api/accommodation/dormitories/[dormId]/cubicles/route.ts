@@ -116,6 +116,20 @@ export async function POST(
       console.log("[POST /cubicles bulk] Starting bulk create:", { count: cubicleNames.length, capacityEach, bedType, customOccupancy });
       
       const created = await prisma.$transaction(async (tx) => {
+        // Get the highest bed number in the dormitory to continue sequencing
+        const lastBed = await tx.bed.findFirst({
+          where: { dormId: params.dormId },
+          orderBy: { createdAt: "desc" },
+        });
+        let nextBedNumber = 1;
+        if (lastBed && lastBed.label) {
+          // Extract number from label like "Bed 42"
+          const match = lastBed.label.match(/Bed (\d+)/);
+          if (match) {
+            nextBedNumber = parseInt(match[1]) + 1;
+          }
+        }
+
         // Create all cubicles first
         const cubicles = await Promise.all(
           cubicleNames.map((name) =>
@@ -133,18 +147,19 @@ export async function POST(
 
         // For each cubicle, auto-generate beds based on capacity and bed type
         for (const cubicle of cubicles) {
-          console.log(`[POST /cubicles bulk] Auto-generating ${capacityEach} ${bedType} beds for cubicle ${cubicle.name}`);
+          console.log(`[POST /cubicles bulk] Auto-generating ${capacityEach} ${bedType} beds for cubicle ${cubicle.name}, starting from bed #${nextBedNumber}`);
           for (let i = 1; i <= capacityEach; i++) {
             const bed = await tx.bed.create({
               data: {
                 dormId: params.dormId,
                 cubicleId: cubicle.id,
                 schoolId: user.schoolId,
-                label: `${cubicle.name} - Bed ${i}`,
+                label: `Bed ${nextBedNumber}`,
                 bedType,
                 customOccupancy: bedType === "CUSTOM" ? (customOccupancy || 1) : null,
               },
             });
+            nextBedNumber++;
 
             // Create sleeping positions based on bed type
             const positionsCount = getPositionsPerBed(bedType, customOccupancy);
@@ -310,17 +325,34 @@ export async function POST(
 
       // Auto-generate beds based on capacity and bed type
       console.log(`[POST /cubicles single] Auto-generating ${capacity} ${bedType} beds for cubicle ${newCubicle.name}`);
+      
+      // Get the highest bed number in the dormitory to continue sequencing
+      const lastBed = await tx.bed.findFirst({
+        where: { dormId: params.dormId },
+        orderBy: { createdAt: "desc" },
+      });
+      let nextBedNumber = 1;
+      if (lastBed && lastBed.label) {
+        // Extract number from label like "Bed 42"
+        const match = lastBed.label.match(/Bed (\d+)/);
+        if (match) {
+          nextBedNumber = parseInt(match[1]) + 1;
+        }
+      }
+
+      console.log(`[POST /cubicles single] Starting bed numbering from Bed ${nextBedNumber}`);
       for (let i = 1; i <= capacity; i++) {
         const bed = await tx.bed.create({
           data: {
             dormId: params.dormId,
             cubicleId: newCubicle.id,
             schoolId: user.schoolId,
-            label: `${newCubicle.name} - Bed ${i}`,
+            label: `Bed ${nextBedNumber}`,
             bedType,
             customOccupancy: bedType === "CUSTOM" ? (customOccupancy || 1) : null,
           },
         });
+        nextBedNumber++;
 
         // Create sleeping positions based on bed type
         const positionsCount = getPositionsPerBed(bedType, customOccupancy);
