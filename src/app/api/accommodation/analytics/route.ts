@@ -10,20 +10,8 @@ async function guard() {
   );
 }
 
-/**
- * GET /api/accommodation/analytics
- *
- * Returns cross-module analytics for all dorms. Combines data from:
- *  - Accommodation (occupancy, capacity, movement)
- *  - Discipline (cases per dorm)
- *  - Attendance (rates per dorm)
- *  - Assessment (academic performance per dorm — where data exists)
- *  - Inspections (last inspection score per dorm)
- *
- * Query params:
- *  - dormId  — restrict to a single dorm
- *  - months  — how many months of historical data (default 6)
- */
+// Cross-module analytics for dormitories (occupancy, discipline, attendance, academic, inspections)
+// Query: dormId (optional), months (default 6)
 export async function GET(req: NextRequest) {
   const user = await guard();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

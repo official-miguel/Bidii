@@ -28,7 +28,7 @@ const bulkCreateSchema = z.object({
   cubicleId: z.string().optional().nullable(),
 });
 
-/** Creates SleepingPosition rows for a bed based on its type. */
+// Create sleeping positions for bed
 async function createPositionsForBed(
   tx: Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">,
   bedId: string,
@@ -63,7 +63,7 @@ async function createPositionsForBed(
   }
 }
 
-/** Recalculates and updates Dormitory.totalCapacity based on SleepingPosition count. */
+// Update dormitory total capacity
 async function recalcCapacity(
   tx: Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">,
   dormId: string

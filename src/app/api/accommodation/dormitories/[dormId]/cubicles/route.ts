@@ -105,7 +105,7 @@ export async function POST(
       return NextResponse.json({ error: "No cubicle names provided." }, { status: 400 });
     }
 
-    // Helper function to determine positions per bed type
+    // Get positions per bed
     function getPositionsPerBed(type: string, customOcc: number | undefined) {
       if (type === "DOUBLE_DECKER") return 2;
       if (type === "CUSTOM") return Math.max(1, customOcc || 1);
@@ -116,7 +116,7 @@ export async function POST(
       console.log("[POST /cubicles bulk] Starting bulk create:", { count: cubicleNames.length, capacityEach, bedType, customOccupancy });
       
       const created = await prisma.$transaction(async (tx) => {
-        // Get the highest bed number in the dormitory to continue sequencing
+        // Continue bed numbering from highest existing
         const lastBed = await tx.bed.findFirst({
           where: { dormId: params.dormId },
           orderBy: { createdAt: "desc" },
@@ -295,7 +295,7 @@ export async function POST(
     );
   }
 
-  // Helper function to determine positions per bed type
+  // Get positions per bed
   function getPositionsPerBed(type: string, customOcc: number | undefined) {
     if (type === "DOUBLE_DECKER") return 2;
     if (type === "CUSTOM") return Math.max(1, customOcc || 1);
@@ -323,10 +323,7 @@ export async function POST(
       });
       console.log("[POST /cubicles single] Created cubicle:", { id: newCubicle.id, name: newCubicle.name, capacity: newCubicle.capacity });
 
-      // Auto-generate beds based on capacity and bed type
-      console.log(`[POST /cubicles single] Auto-generating ${capacity} ${bedType} beds for cubicle ${newCubicle.name}`);
-      
-      // Get the highest bed number in the dormitory to continue sequencing
+      // Continue bed numbering from highest existing
       const lastBed = await tx.bed.findFirst({
         where: { dormId: params.dormId },
         orderBy: { createdAt: "desc" },
