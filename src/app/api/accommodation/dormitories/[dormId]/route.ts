@@ -153,10 +153,13 @@ export async function PATCH(
     resolvedGenderPolicy = requiredDormGenderPolicy(schoolGenderPolicy) ?? rest.genderPolicy;
   }
 
-  // Build the data payload, substituting the coerced gender policy when it changed
+  // Build the data payload, substituting the coerced gender policy when it changed.
+  // boardingMasterId / dormCaptainId are kept separate — they must go through
+  // Prisma's connect/disconnect API and must NOT appear in the scalar spread.
+  const { boardingMasterId, dormCaptainId, ...scalarRest } = rest;
   const updateData = resolvedGenderPolicy !== rest.genderPolicy
-    ? { ...rest, genderPolicy: resolvedGenderPolicy }
-    : rest;
+    ? { ...scalarRest, genderPolicy: resolvedGenderPolicy as "BOYS_ONLY" | "GIRLS_ONLY" | undefined }
+    : scalarRest;
 
   // ── Status transition side-effects ────────────────────────────────────────
   // When a dorm is changed to UNDER_MAINTENANCE or CLOSED via the generic PATCH
@@ -268,14 +271,12 @@ export async function PATCH(
       }
     }
 
-    // Pull out relation ID fields and map them to Prisma connect/disconnect syntax
-    // so the update data satisfies DormitoryUpdateInput without type conflicts.
-    const { boardingMasterId, dormCaptainId, ...scalarData } = updateData;
-
+    // boardingMasterId / dormCaptainId were already separated from updateData above.
+    // Use Prisma connect/disconnect so the data object satisfies DormitoryUpdateInput.
     return tx.dormitory.update({
       where: { id: params.dormId },
       data: {
-        ...scalarData,
+        ...updateData,
         ...(boardingMasterId !== undefined
           ? boardingMasterId === null
             ? { boardingMaster: { disconnect: true } }
