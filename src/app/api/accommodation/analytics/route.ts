@@ -269,7 +269,7 @@ export async function GET(req: NextRequest) {
           ? [{ type: "LOW_ATTENDANCE", message: `Attendance is ${attendancePct}% (below 80%)`, severity: "high" }]
           : []),
         ...(openCases > 3
-          ? [{ type: "HIGH_DISCIPLINE", message: `${openCases} open discipline cases`, severity: "medium" }]
+          ? [{ type: "HIGH_INDISCIPLINE", message: `${openCases} open indiscipline cases`, severity: "medium" }]
           : []),
         ...(occupancyPct > 95
           ? [{ type: "NEAR_CAPACITY", message: `${occupancyPct}% occupancy — almost full`, severity: "medium" }]
