@@ -102,6 +102,8 @@ export async function POST(
     }
 
     try {
+      console.log("[POST /cubicles bulk] Starting bulk create:", { count: cubicleNames.length, capacityEach });
+      
       const created = await prisma.$transaction(async (tx) => {
         // Create all cubicles first
         const cubicles = await Promise.all(
@@ -116,9 +118,11 @@ export async function POST(
             })
           )
         );
+        console.log("[POST /cubicles bulk] Created cubicles:", cubicles.map(c => ({ id: c.id, name: c.name })));
 
         // For each cubicle, auto-generate beds based on capacity
         for (const cubicle of cubicles) {
+          console.log(`[POST /cubicles bulk] Auto-generating ${capacityEach} beds for cubicle ${cubicle.name}`);
           for (let i = 1; i <= capacityEach; i++) {
             const bed = await tx.bed.create({
               data: {
@@ -141,6 +145,7 @@ export async function POST(
               },
             });
           }
+          console.log(`[POST /cubicles bulk] Generated ${capacityEach} beds for cubicle ${cubicle.id}`);
         }
 
         // Update dorm's totalCapacity
@@ -151,6 +156,7 @@ export async function POST(
           where: { id: params.dormId },
           data: { totalCapacity: positionCount },
         });
+        console.log("[POST /cubicles bulk] Updated dorm totalCapacity to:", positionCount);
 
         // Fetch cubicles with counts for response
         const createdWithCounts = await tx.cubicle.findMany({
@@ -166,6 +172,12 @@ export async function POST(
             },
           },
         });
+
+        console.log("[POST /cubicles bulk] Response cubicles with counts:", createdWithCounts.map(c => ({
+          id: c.id,
+          name: c.name,
+          _count: c._count,
+        })));
 
         return createdWithCounts;
       });
@@ -218,6 +230,8 @@ export async function POST(
   }
 
   try {
+    console.log("[POST /cubicles single] Starting single cubicle create:", { name, capacity });
+    
     const cubicle = await prisma.$transaction(async (tx) => {
       // Create the cubicle
       const newCubicle = await tx.cubicle.create({
@@ -234,8 +248,10 @@ export async function POST(
               : undefined,
         },
       });
+      console.log("[POST /cubicles single] Created cubicle:", { id: newCubicle.id, name: newCubicle.name, capacity: newCubicle.capacity });
 
       // Auto-generate beds based on capacity
+      console.log(`[POST /cubicles single] Auto-generating ${capacity} beds for cubicle ${newCubicle.name}`);
       for (let i = 1; i <= capacity; i++) {
         const bed = await tx.bed.create({
           data: {
@@ -258,6 +274,7 @@ export async function POST(
           },
         });
       }
+      console.log(`[POST /cubicles single] Generated ${capacity} beds for cubicle ${newCubicle.id}`);
 
       // Update dorm's totalCapacity
       const positionCount = await tx.sleepingPosition.count({
@@ -267,9 +284,10 @@ export async function POST(
         where: { id: params.dormId },
         data: { totalCapacity: positionCount },
       });
+      console.log("[POST /cubicles single] Updated dorm totalCapacity to:", positionCount);
 
       // Fetch with full counts for response
-      return tx.cubicle.findUnique({
+      const result = await tx.cubicle.findUnique({
         where: { id: newCubicle.id },
         include: {
           permittedForms: true,
@@ -282,6 +300,14 @@ export async function POST(
           },
         },
       });
+      
+      console.log("[POST /cubicles single] Response cubicle with counts:", {
+        id: result?.id,
+        name: result?.name,
+        _count: result?._count,
+      });
+
+      return result;
     });
 
     return NextResponse.json(cubicle, { status: 201 });
