@@ -202,13 +202,20 @@ export async function GET(req: NextRequest) {
     const dormHistory = historicalAllocations.filter((h) => h.dormId === dorm.id);
     const movementByMonth: Record<string, { in: number; out: number }> = {};
     for (const h of dormHistory) {
-      const key = `${h.allocationDate.getFullYear()}-${String(h.allocationDate.getMonth() + 1).padStart(2, "0")}`;
-      if (!movementByMonth[key]) movementByMonth[key] = { in: 0, out: 0 };
-      movementByMonth[key].in++;
+      // Count allocation as "in"
+      const allocKey = `${h.allocationDate.getFullYear()}-${String(h.allocationDate.getMonth() + 1).padStart(2, "0")}`;
+      if (!movementByMonth[allocKey]) movementByMonth[allocKey] = { in: 0, out: 0 };
+      
+      // Only count as "in" if status indicates an active allocation
+      if (h.status === "CURRENT" || h.status === "MAINTENANCE_HOLD") {
+        movementByMonth[allocKey].in++;
+      }
+      
+      // Count as "out" when vacated or transferred
       if (h.vacatedDate) {
-        const vKey = `${h.vacatedDate.getFullYear()}-${String(h.vacatedDate.getMonth() + 1).padStart(2, "0")}`;
-        if (!movementByMonth[vKey]) movementByMonth[vKey] = { in: 0, out: 0 };
-        movementByMonth[vKey].out++;
+        const vacateKey = `${h.vacatedDate.getFullYear()}-${String(h.vacatedDate.getMonth() + 1).padStart(2, "0")}`;
+        if (!movementByMonth[vacateKey]) movementByMonth[vacateKey] = { in: 0, out: 0 };
+        movementByMonth[vacateKey].out++;
       }
     }
 
@@ -237,7 +244,7 @@ export async function GET(req: NextRequest) {
         open: openCases,
         resolved: resolvedCases,
         casesPer10Students: studentIds.length > 0
-          ? Math.round((totalCases / studentIds.length) * 10 * 10) / 10 : 0,
+          ? Math.round((totalCases / studentIds.length) * 100) / 10 : 0,
       },
       // Academic
       academic: {
