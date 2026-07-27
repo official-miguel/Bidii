@@ -18,6 +18,8 @@ const createSchema = z.object({
   allocationPolicy: z.enum(["RESTRICTED_BY_FORM", "MIXED_FORMS"]).nullable().optional(),
   description: z.string().trim().max(300).optional().nullable(),
   permittedForms: z.array(z.coerce.number().int().min(1).max(12)).default([]),
+  bedType: z.enum(["SINGLE", "DOUBLE_DECKER", "CUSTOM"]).default("SINGLE"),
+  customOccupancy: z.coerce.number().int().min(1).max(20).optional(),
 });
 
 const bulkCreateSchema = z.object({
@@ -28,6 +30,8 @@ const bulkCreateSchema = z.object({
   count: z.coerce.number().int().min(1).max(200).optional(),
   prefix: z.string().trim().max(20).optional(),
   capacityEach: z.coerce.number().int().min(1).max(100).default(4),
+  bedType: z.enum(["SINGLE", "DOUBLE_DECKER", "CUSTOM"]).default("SINGLE"),
+  customOccupancy: z.coerce.number().int().min(1).max(20).optional(),
 });
 
 export async function GET(
@@ -87,7 +91,7 @@ export async function POST(
       );
     }
 
-    const { mode, names, count, prefix, capacityEach } = parsed.data;
+    const { mode, names, count, prefix, capacityEach, bedType, customOccupancy } = parsed.data;
 
     let cubicleNames: string[] = [];
     if (mode === "bulk" && names && names.length > 0) {
@@ -101,8 +105,15 @@ export async function POST(
       return NextResponse.json({ error: "No cubicle names provided." }, { status: 400 });
     }
 
+    // Helper function to determine positions per bed type
+    function getPositionsPerBed(type: string, customOcc: number | undefined) {
+      if (type === "DOUBLE_DECKER") return 2;
+      if (type === "CUSTOM") return Math.max(1, customOcc || 1);
+      return 1; // SINGLE
+    }
+
     try {
-      console.log("[POST /cubicles bulk] Starting bulk create:", { count: cubicleNames.length, capacityEach });
+      console.log("[POST /cubicles bulk] Starting bulk create:", { count: cubicleNames.length, capacityEach, bedType, customOccupancy });
       
       const created = await prisma.$transaction(async (tx) => {
         // Create all cubicles first
@@ -120,9 +131,9 @@ export async function POST(
         );
         console.log("[POST /cubicles bulk] Created cubicles:", cubicles.map(c => ({ id: c.id, name: c.name })));
 
-        // For each cubicle, auto-generate beds based on capacity
+        // For each cubicle, auto-generate beds based on capacity and bed type
         for (const cubicle of cubicles) {
-          console.log(`[POST /cubicles bulk] Auto-generating ${capacityEach} beds for cubicle ${cubicle.name}`);
+          console.log(`[POST /cubicles bulk] Auto-generating ${capacityEach} ${bedType} beds for cubicle ${cubicle.name}`);
           for (let i = 1; i <= capacityEach; i++) {
             const bed = await tx.bed.create({
               data: {
@@ -130,22 +141,61 @@ export async function POST(
                 cubicleId: cubicle.id,
                 schoolId: user.schoolId,
                 label: `${cubicle.name} - Bed ${i}`,
-                bedType: "SINGLE",
+                bedType,
+                customOccupancy: bedType === "CUSTOM" ? (customOccupancy || 1) : null,
               },
             });
 
-            // Create a single sleeping position for each bed
-            await tx.sleepingPosition.create({
-              data: {
-                bedId: bed.id,
-                dormId: params.dormId,
-                cubicleId: cubicle.id,
-                schoolId: user.schoolId,
-                position: null,
-              },
-            });
+            // Create sleeping positions based on bed type
+            const positionsCount = getPositionsPerBed(bedType, customOccupancy);
+            if (bedType === "DOUBLE_DECKER") {
+              // Create UPPER and LOWER positions
+              await tx.sleepingPosition.create({
+                data: {
+                  bedId: bed.id,
+                  dormId: params.dormId,
+                  cubicleId: cubicle.id,
+                  schoolId: user.schoolId,
+                  position: "UPPER",
+                },
+              });
+              await tx.sleepingPosition.create({
+                data: {
+                  bedId: bed.id,
+                  dormId: params.dormId,
+                  cubicleId: cubicle.id,
+                  schoolId: user.schoolId,
+                  position: "LOWER",
+                },
+              });
+            } else if (bedType === "CUSTOM") {
+              // Create N positions with numeric labels
+              for (let j = 1; j <= positionsCount; j++) {
+                await tx.sleepingPosition.create({
+                  data: {
+                    bedId: bed.id,
+                    dormId: params.dormId,
+                    cubicleId: cubicle.id,
+                    schoolId: user.schoolId,
+                    position: null,
+                    customLabel: `Space ${j}`,
+                  },
+                });
+              }
+            } else {
+              // SINGLE bed - one position with null position
+              await tx.sleepingPosition.create({
+                data: {
+                  bedId: bed.id,
+                  dormId: params.dormId,
+                  cubicleId: cubicle.id,
+                  schoolId: user.schoolId,
+                  position: null,
+                },
+              });
+            }
           }
-          console.log(`[POST /cubicles bulk] Generated ${capacityEach} beds for cubicle ${cubicle.id}`);
+          console.log(`[POST /cubicles bulk] Generated ${capacityEach} ${bedType} beds for cubicle ${cubicle.id}`);
         }
 
         // Update dorm's totalCapacity
@@ -217,7 +267,7 @@ export async function POST(
     );
   }
 
-  const { name, capacity, allocationPolicy, description, permittedForms } =
+  const { name, capacity, allocationPolicy, description, permittedForms, bedType, customOccupancy } =
     parsed.data;
 
   const existing = await prisma.cubicle.findUnique({
@@ -230,8 +280,15 @@ export async function POST(
     );
   }
 
+  // Helper function to determine positions per bed type
+  function getPositionsPerBed(type: string, customOcc: number | undefined) {
+    if (type === "DOUBLE_DECKER") return 2;
+    if (type === "CUSTOM") return Math.max(1, customOcc || 1);
+    return 1; // SINGLE
+  }
+
   try {
-    console.log("[POST /cubicles single] Starting single cubicle create:", { name, capacity });
+    console.log("[POST /cubicles single] Starting single cubicle create:", { name, capacity, bedType, customOccupancy });
     
     const cubicle = await prisma.$transaction(async (tx) => {
       // Create the cubicle
@@ -251,8 +308,8 @@ export async function POST(
       });
       console.log("[POST /cubicles single] Created cubicle:", { id: newCubicle.id, name: newCubicle.name, capacity: newCubicle.capacity });
 
-      // Auto-generate beds based on capacity
-      console.log(`[POST /cubicles single] Auto-generating ${capacity} beds for cubicle ${newCubicle.name}`);
+      // Auto-generate beds based on capacity and bed type
+      console.log(`[POST /cubicles single] Auto-generating ${capacity} ${bedType} beds for cubicle ${newCubicle.name}`);
       for (let i = 1; i <= capacity; i++) {
         const bed = await tx.bed.create({
           data: {
@@ -260,22 +317,61 @@ export async function POST(
             cubicleId: newCubicle.id,
             schoolId: user.schoolId,
             label: `${newCubicle.name} - Bed ${i}`,
-            bedType: "SINGLE",
+            bedType,
+            customOccupancy: bedType === "CUSTOM" ? (customOccupancy || 1) : null,
           },
         });
 
-        // Create a single sleeping position for each bed
-        await tx.sleepingPosition.create({
-          data: {
-            bedId: bed.id,
-            dormId: params.dormId,
-            cubicleId: newCubicle.id,
-            schoolId: user.schoolId,
-            position: null,
-          },
-        });
+        // Create sleeping positions based on bed type
+        const positionsCount = getPositionsPerBed(bedType, customOccupancy);
+        if (bedType === "DOUBLE_DECKER") {
+          // Create UPPER and LOWER positions
+          await tx.sleepingPosition.create({
+            data: {
+              bedId: bed.id,
+              dormId: params.dormId,
+              cubicleId: newCubicle.id,
+              schoolId: user.schoolId,
+              position: "UPPER",
+            },
+          });
+          await tx.sleepingPosition.create({
+            data: {
+              bedId: bed.id,
+              dormId: params.dormId,
+              cubicleId: newCubicle.id,
+              schoolId: user.schoolId,
+              position: "LOWER",
+            },
+          });
+        } else if (bedType === "CUSTOM") {
+          // Create N positions with numeric labels
+          for (let j = 1; j <= positionsCount; j++) {
+            await tx.sleepingPosition.create({
+              data: {
+                bedId: bed.id,
+                dormId: params.dormId,
+                cubicleId: newCubicle.id,
+                schoolId: user.schoolId,
+                position: null,
+                customLabel: `Space ${j}`,
+              },
+            });
+          }
+        } else {
+          // SINGLE bed - one position with null position
+          await tx.sleepingPosition.create({
+            data: {
+              bedId: bed.id,
+              dormId: params.dormId,
+              cubicleId: newCubicle.id,
+              schoolId: user.schoolId,
+              position: null,
+            },
+          });
+        }
       }
-      console.log(`[POST /cubicles single] Generated ${capacity} beds for cubicle ${newCubicle.id}`);
+      console.log(`[POST /cubicles single] Generated ${capacity} ${bedType} beds for cubicle ${newCubicle.id}`);
 
       // Update dorm's totalCapacity
       const positionCount = await tx.sleepingPosition.count({

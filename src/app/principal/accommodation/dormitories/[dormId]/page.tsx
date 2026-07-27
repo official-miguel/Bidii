@@ -303,13 +303,17 @@ function AddCubiclesModal({ dormId, onClose, onAdded }: { dormId: string; onClos
       const payload = mode === "auto"
         ? {
             mode: "auto",
-            count:        parseInt(count),
-            prefix:       prefix.trim() || "Cubicle ",
-            capacityEach: parseInt(bedsEach),
+            count:           parseInt(count),
+            prefix:          prefix.trim() || "Cubicle ",
+            capacityEach:    parseInt(bedsEach),
+            bedType,
+            customOccupancy: bedType === "CUSTOM" ? parseInt(customOccupancy) : undefined,
           }
         : {
-            name:     singleName.trim(),
-            capacity: parseInt(singleBeds),
+            name:            singleName.trim(),
+            capacity:        parseInt(singleBeds),
+            bedType:         singleBedType,
+            customOccupancy: singleBedType === "CUSTOM" ? parseInt(singleCustomOcc) : undefined,
           };
       const res = await fetch(`/api/accommodation/dormitories/${dormId}/cubicles`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
