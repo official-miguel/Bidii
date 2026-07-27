@@ -91,18 +91,58 @@ export async function POST(
     }
 
     try {
-      const created = await prisma.$transaction(
-        cubicleNames.map((name) =>
-          prisma.cubicle.create({
-            data: {
-              dormId: params.dormId,
-              schoolId: user.schoolId,
-              name,
-              capacity: capacityEach,
-            },
-          })
-        )
-      );
+      const created = await prisma.$transaction(async (tx) => {
+        // Create all cubicles first
+        const cubicles = await Promise.all(
+          cubicleNames.map((name) =>
+            tx.cubicle.create({
+              data: {
+                dormId: params.dormId,
+                schoolId: user.schoolId,
+                name,
+                capacity: capacityEach,
+              },
+            })
+          )
+        );
+
+        // For each cubicle, auto-generate beds based on capacity
+        for (const cubicle of cubicles) {
+          for (let i = 1; i <= capacityEach; i++) {
+            const bed = await tx.bed.create({
+              data: {
+                dormId: params.dormId,
+                cubicleId: cubicle.id,
+                schoolId: user.schoolId,
+                label: `${cubicle.name} - Bed ${i}`,
+                bedType: "SINGLE",
+              },
+            });
+
+            // Create a single sleeping position for each bed
+            await tx.sleepingPosition.create({
+              data: {
+                bedId: bed.id,
+                dormId: params.dormId,
+                cubicleId: cubicle.id,
+                schoolId: user.schoolId,
+                position: null,
+              },
+            });
+          }
+        }
+
+        // Update dorm's totalCapacity
+        const positionCount = await tx.sleepingPosition.count({
+          where: { dormId: params.dormId },
+        });
+        await tx.dormitory.update({
+          where: { id: params.dormId },
+          data: { totalCapacity: positionCount },
+        });
+
+        return cubicles;
+      });
 
       return NextResponse.json({ created: created.length, cubicles: created }, { status: 201 });
     } catch (err) {
@@ -152,20 +192,58 @@ export async function POST(
   }
 
   try {
-    const cubicle = await prisma.cubicle.create({
-      data: {
-        dormId: params.dormId,
-        schoolId: user.schoolId,
-        name,
-        capacity,
-        allocationPolicy: allocationPolicy ?? null,
-        description,
-        permittedForms:
-          allocationPolicy === "RESTRICTED_BY_FORM" && permittedForms.length > 0
-            ? { create: permittedForms.map((form) => ({ form })) }
-            : undefined,
-      },
-      include: { permittedForms: true },
+    const cubicle = await prisma.$transaction(async (tx) => {
+      // Create the cubicle
+      const newCubicle = await tx.cubicle.create({
+        data: {
+          dormId: params.dormId,
+          schoolId: user.schoolId,
+          name,
+          capacity,
+          allocationPolicy: allocationPolicy ?? null,
+          description,
+          permittedForms:
+            allocationPolicy === "RESTRICTED_BY_FORM" && permittedForms.length > 0
+              ? { create: permittedForms.map((form) => ({ form })) }
+              : undefined,
+        },
+        include: { permittedForms: true },
+      });
+
+      // Auto-generate beds based on capacity
+      for (let i = 1; i <= capacity; i++) {
+        const bed = await tx.bed.create({
+          data: {
+            dormId: params.dormId,
+            cubicleId: newCubicle.id,
+            schoolId: user.schoolId,
+            label: `${newCubicle.name} - Bed ${i}`,
+            bedType: "SINGLE",
+          },
+        });
+
+        // Create a single sleeping position for each bed
+        await tx.sleepingPosition.create({
+          data: {
+            bedId: bed.id,
+            dormId: params.dormId,
+            cubicleId: newCubicle.id,
+            schoolId: user.schoolId,
+            position: null,
+          },
+        });
+      }
+
+      // Update dorm's totalCapacity
+      const positionCount = await tx.sleepingPosition.count({
+        where: { dormId: params.dormId },
+      });
+      await tx.dormitory.update({
+        where: { id: params.dormId },
+        data: { totalCapacity: positionCount },
+      });
+
+      return newCubicle;
     });
 
     return NextResponse.json(cubicle, { status: 201 });

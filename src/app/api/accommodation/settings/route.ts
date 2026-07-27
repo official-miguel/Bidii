@@ -33,11 +33,25 @@ export async function GET() {
   const user = await guard();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const settings = await prisma.accommodationSettings.findUnique({
-    where: { schoolId: user.schoolId },
-  });
+  const [settings, dormCount, freePositionsCount] = await Promise.all([
+    prisma.accommodationSettings.findUnique({
+      where: { schoolId: user.schoolId },
+    }),
+    prisma.dormitory.count({
+      where: { schoolId: user.schoolId, status: "ACTIVE" },
+    }),
+    prisma.sleepingPosition.count({
+      where: { schoolId: user.schoolId, isOccupied: false },
+    }),
+  ]);
 
-  return NextResponse.json(settings ?? { ...DEFAULT_SETTINGS, updatedAt: null });
+  return NextResponse.json({
+    ...(settings ?? { ...DEFAULT_SETTINGS, updatedAt: null }),
+    // Dorm availability info (helpful for debugging auto-allocation issues)
+    activeDormsCount: dormCount,
+    freePositionsCount: freePositionsCount,
+    canAllocate: dormCount > 0 && freePositionsCount > 0,
+  });
 }
 
 const updateSchema = z.object({

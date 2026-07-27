@@ -8,20 +8,35 @@ export async function GET() {
   const user = await requireRole("PRINCIPAL");
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const school = await prisma.school.findUnique({
-    where: { id: user.schoolId },
-    select: {
-      name: true,
-      logoUrl: true,
-      stampUrl: true,
-      motto: true,
-      boardingType: true,
-      genderPolicy: true,
-      autoAllocateDorms: true,
-    },
-  });
+  const [school, dormCount, freePositionsCount] = await Promise.all([
+    prisma.school.findUnique({
+      where: { id: user.schoolId },
+      select: {
+        name: true,
+        logoUrl: true,
+        stampUrl: true,
+        motto: true,
+        boardingType: true,
+        genderPolicy: true,
+        autoAllocateDorms: true,
+      },
+    }),
+    prisma.dormitory.count({
+      where: { schoolId: user.schoolId, status: "ACTIVE" },
+    }),
+    prisma.sleepingPosition.count({
+      where: { schoolId: user.schoolId, isOccupied: false },
+    }),
+  ]);
 
-  return NextResponse.json(school ?? {});
+  const result = school ?? {};
+  return NextResponse.json({
+    ...result,
+    // Dorm availability (helps diagnose auto-allocation issues)
+    activeDormsCount: dormCount,
+    freePositionsCount: freePositionsCount,
+    canAutoAllocate: dormCount > 0 && freePositionsCount > 0,
+  });
 }
 
 // Accept full URLs (https://…) OR relative paths (/uploads/…) OR empty string to clear.
