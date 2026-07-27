@@ -148,8 +148,8 @@ export async function POST(req: NextRequest) {
 
   // For single-gender schools, coerce the dorm policy to the required value
   // as a safety net (even though the UI already locks the field).
-  const resolvedGenderPolicy: string =
-    requiredDormGenderPolicy(schoolGenderPolicy) ?? genderPolicy;
+  const resolvedGenderPolicy =
+    (requiredDormGenderPolicy(schoolGenderPolicy) ?? genderPolicy) as "BOYS_ONLY" | "GIRLS_ONLY";
 
   const dorm = await prisma.dormitory.create({
     data: {
