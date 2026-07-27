@@ -203,7 +203,8 @@ export async function POST(
         );
       }
       console.error("[POST /cubicles] bulk create error:", err);
-      return NextResponse.json({ error: "Failed to create cubicles. Please try again." }, { status: 500 });
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      return NextResponse.json({ error: `Failed to create cubicles: ${errorMsg}` }, { status: 500 });
     }
   }
 
@@ -322,6 +323,7 @@ export async function POST(
       );
     }
     console.error("[POST /cubicles] single create error:", err);
-    return NextResponse.json({ error: "Failed to create cubicle. Please try again." }, { status: 500 });
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: `Failed to create cubicle: ${errorMsg}` }, { status: 500 });
   }
 }
