@@ -3,6 +3,11 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { requirePermission } from "@/lib/permissions";
+import {
+  type GenderPolicy,
+  validateDormGenderPolicy,
+  requiredDormGenderPolicy,
+} from "@/lib/accommodation/genderPolicy";
 
 async function guard() {
   return (
@@ -89,7 +94,10 @@ export async function GET(
 
 const updateSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
-  genderPolicy: z.enum(["BOYS_ONLY", "GIRLS_ONLY", "MIXED"]).optional(),
+  // MIXED is never a valid dorm gender policy.
+  genderPolicy: z.enum(["BOYS_ONLY", "GIRLS_ONLY"], {
+    errorMap: () => ({ message: "Dormitory gender must be Boys Only or Girls Only." }),
+  }).optional(),
   structure: z.enum(["OPEN_HALL", "CUBICLE_BASED"]).optional(),
   status: z.enum(["ACTIVE", "UNDER_MAINTENANCE", "CLOSED"]).optional(),
   allocationPolicy: z.enum(["RESTRICTED_BY_FORM", "MIXED_FORMS"]).optional(),
@@ -122,7 +130,135 @@ export async function PATCH(
 
   const { permittedForms, ...rest } = parsed.data;
 
+  // ── Enforce school gender policy on genderPolicy changes ──────────────────
+  // Only run when the caller is actually changing the gender policy.
+  // Fetch School.genderPolicy once; validate + coerce the requested value.
+  let resolvedGenderPolicy: string | undefined = rest.genderPolicy;
+  if (rest.genderPolicy !== undefined) {
+    const school = await prisma.school.findUnique({
+      where: { id: user.schoolId },
+      select: { genderPolicy: true },
+    });
+    const schoolGenderPolicy = (school?.genderPolicy ?? "MIXED") as GenderPolicy;
+
+    const genderError = validateDormGenderPolicy(
+      schoolGenderPolicy,
+      rest.genderPolicy as GenderPolicy,
+    );
+    if (genderError) {
+      return NextResponse.json({ error: genderError }, { status: 409 });
+    }
+
+    // Coerce to the required value for single-gender schools
+    resolvedGenderPolicy = requiredDormGenderPolicy(schoolGenderPolicy) ?? rest.genderPolicy;
+  }
+
+  // Build the data payload, substituting the coerced gender policy when it changed
+  const updateData = resolvedGenderPolicy !== rest.genderPolicy
+    ? { ...rest, genderPolicy: resolvedGenderPolicy }
+    : rest;
+
+  // ── Status transition side-effects ────────────────────────────────────────
+  // When a dorm is changed to UNDER_MAINTENANCE or CLOSED via the generic PATCH
+  // (e.g. the dormitories edit form), automatically snapshot all CURRENT
+  // allocations as MAINTENANCE_HOLD so students become "unallocated" in the UI
+  // and can be restored when the dorm is reactivated.
+  //
+  // When a dorm is changed back to ACTIVE, restore any MAINTENANCE_HOLD
+  // allocations for students who are still enrolled, skipping those who have
+  // since been archived (graduated / transferred / expelled).
+  const newStatus = rest.status;
+  const statusChangingToInactive =
+    newStatus !== undefined &&
+    newStatus !== dorm.status &&
+    (newStatus === "UNDER_MAINTENANCE" || newStatus === "CLOSED") &&
+    dorm.status === "ACTIVE";
+
+  const statusChangingToActive =
+    newStatus === "ACTIVE" &&
+    newStatus !== dorm.status &&
+    (dorm.status === "UNDER_MAINTENANCE" || dorm.status === "CLOSED");
+
   const updated = await prisma.$transaction(async (tx) => {
+    // ── Snapshot: ACTIVE → inactive ─────────────────────────────────────────
+    if (statusChangingToInactive) {
+      const currentAllocations = await tx.allocationRecord.findMany({
+        where: { dormId: params.dormId, status: "CURRENT", schoolId: user.schoolId },
+      });
+      for (const alloc of currentAllocations) {
+        await tx.allocationRecord.update({
+          where: { id: alloc.id },
+          data: {
+            status: "MAINTENANCE_HOLD",
+            vacatedDate: new Date(),
+            notes: `Auto-snapshot: dorm status changed to ${newStatus}`,
+          },
+        });
+        if (alloc.sleepingPositionId) {
+          await tx.sleepingPosition.update({
+            where: { id: alloc.sleepingPositionId },
+            data: { isOccupied: false },
+          });
+        }
+      }
+    }
+
+    // ── Restore: inactive → ACTIVE ──────────────────────────────────────────
+    if (statusChangingToActive) {
+      const heldAllocations = await tx.allocationRecord.findMany({
+        where: { dormId: params.dormId, status: "MAINTENANCE_HOLD", schoolId: user.schoolId },
+        include: {
+          student: { select: { archivedAt: true } },
+          sleepingPosition: { select: { id: true, isOccupied: true } },
+        },
+      });
+
+      for (const alloc of heldAllocations) {
+        // Skip students who have left the school
+        if (alloc.student.archivedAt !== null) {
+          await tx.allocationRecord.update({
+            where: { id: alloc.id },
+            data: { status: "VACATED", notes: "Student no longer enrolled at time of dorm reactivation." },
+          });
+          continue;
+        }
+
+        // Skip students who got a new allocation while the dorm was closed
+        const activeCurrent = await tx.allocationRecord.findFirst({
+          where: { studentId: alloc.studentId, schoolId: user.schoolId, status: "CURRENT" },
+        });
+        if (activeCurrent) {
+          await tx.allocationRecord.update({
+            where: { id: alloc.id },
+            data: { status: "VACATED", notes: "Student already re-allocated during dorm closure." },
+          });
+          continue;
+        }
+
+        // Skip if the bed was taken by someone else in the meantime
+        if (alloc.sleepingPositionId && alloc.sleepingPosition?.isOccupied) {
+          await tx.allocationRecord.update({
+            where: { id: alloc.id },
+            data: { status: "VACATED", notes: "Original sleeping position was re-assigned during dorm closure." },
+          });
+          continue;
+        }
+
+        // Restore to CURRENT
+        await tx.allocationRecord.update({
+          where: { id: alloc.id },
+          data: { status: "CURRENT", vacatedDate: null, notes: "Restored on dorm reactivation." },
+        });
+        if (alloc.sleepingPositionId) {
+          await tx.sleepingPosition.update({
+            where: { id: alloc.sleepingPositionId },
+            data: { isOccupied: true },
+          });
+        }
+      }
+    }
+
+    // ── Apply permitted forms update ─────────────────────────────────────────
     if (permittedForms !== undefined) {
       await tx.dormPermittedForm.deleteMany({ where: { dormId: params.dormId } });
       if (permittedForms.length > 0) {
@@ -135,9 +271,9 @@ export async function PATCH(
     return tx.dormitory.update({
       where: { id: params.dormId },
       data: {
-        ...rest,
-        boardingMasterId: rest.boardingMasterId ?? undefined,
-        dormCaptainId: rest.dormCaptainId ?? undefined,
+        ...updateData,
+        boardingMasterId: updateData.boardingMasterId ?? undefined,
+        dormCaptainId: updateData.dormCaptainId ?? undefined,
       },
       include: {
         permittedForms: true,
@@ -145,7 +281,7 @@ export async function PATCH(
         dormCaptain: { select: { id: true, fullName: true, admissionNumber: true } },
       },
     });
-  });
+  }, { timeout: 30_000 });
 
   return NextResponse.json(updated);
 }

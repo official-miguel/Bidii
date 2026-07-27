@@ -3,6 +3,10 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { requirePermission } from "@/lib/permissions";
+import {
+  type GenderPolicy,
+  studentMatchesDormGender,
+} from "@/lib/accommodation/genderPolicy";
 
 async function manageGuard() {
   return (
@@ -123,6 +127,16 @@ export async function POST(req: NextRequest) {
 
   const { dormIds, filter, strategy, dryRun, notes } = parsed.data;
 
+  // ── Load school gender policy ──────────────────────────────────────────────
+  // This is the outer constraint: a BOYS_ONLY school never needs per-student
+  // gender checks because all enrolled students are boys by definition.
+  // For MIXED schools we check each student's gender against the dorm policy.
+  const school = await prisma.school.findUnique({
+    where: { id: user.schoolId },
+    select: { genderPolicy: true },
+  });
+  const schoolGenderPolicy = (school?.genderPolicy ?? "MIXED") as GenderPolicy;
+
   // ── Resolve target dorms ───────────────────────────────────────────────────
   const dormQuery = dormIds && dormIds.length > 0 ? { id: { in: dormIds } } : {};
   const dorms = await prisma.dormitory.findMany({
@@ -181,6 +195,7 @@ export async function POST(req: NextRequest) {
       id: true,
       fullName: true,
       admissionNumber: true,
+      gender: true,
       schoolClass: { select: { name: true, form: true } },
       accommodationAllocations: {
         where: { status: "CURRENT" },
@@ -239,6 +254,18 @@ export async function POST(req: NextRequest) {
     const eligibleDorms = dorms.filter((d) => {
       if ((availableCount.get(d.id) ?? 0) <= 0) return false;
 
+      // ── Gender check via school-aware helper ──────────────────────────────
+      // Single-gender school → helper always returns true (no per-student check).
+      // Mixed school → compares student.gender against the dorm's effective policy.
+      if (
+        !studentMatchesDormGender(
+          schoolGenderPolicy,
+          d.genderPolicy as GenderPolicy,
+          student.gender,
+        )
+      ) return false;
+
+      // ── Form restriction check ────────────────────────────────────────────
       if (
         d.allocationPolicy === "RESTRICTED_BY_FORM" &&
         d.permittedForms.length > 0
@@ -250,10 +277,15 @@ export async function POST(req: NextRequest) {
     });
 
     if (eligibleDorms.length === 0) {
+      // Build a useful reason string
+      const genderNote =
+        schoolGenderPolicy === "MIXED" && student.gender
+          ? ` / ${student.gender}`
+          : "";
       unplaceable.push({
         studentId: student.id,
         studentName: student.fullName,
-        reason: `No eligible dormitory with available capacity for Form ${studentForm}`,
+        reason: `No eligible dormitory with available capacity for Form ${studentForm}${genderNote}`,
       });
       continue;
     }
