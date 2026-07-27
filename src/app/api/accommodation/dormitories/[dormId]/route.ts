@@ -268,12 +268,24 @@ export async function PATCH(
       }
     }
 
+    // Pull out relation ID fields and map them to Prisma connect/disconnect syntax
+    // so the update data satisfies DormitoryUpdateInput without type conflicts.
+    const { boardingMasterId, dormCaptainId, ...scalarData } = updateData;
+
     return tx.dormitory.update({
       where: { id: params.dormId },
       data: {
-        ...updateData,
-        boardingMasterId: updateData.boardingMasterId ?? undefined,
-        dormCaptainId: updateData.dormCaptainId ?? undefined,
+        ...scalarData,
+        ...(boardingMasterId !== undefined
+          ? boardingMasterId === null
+            ? { boardingMaster: { disconnect: true } }
+            : { boardingMaster: { connect: { id: boardingMasterId } } }
+          : {}),
+        ...(dormCaptainId !== undefined
+          ? dormCaptainId === null
+            ? { dormCaptain: { disconnect: true } }
+            : { dormCaptain: { connect: { id: dormCaptainId } } }
+          : {}),
       },
       include: {
         permittedForms: true,
