@@ -53,7 +53,7 @@ export async function PATCH(
   }
 
   // Handle capacity changes: add/remove beds accordingly
-  let updateData: any = {
+  const updateData: any = {
     ...(name !== undefined ? { name } : {}),
     ...(capacity !== undefined ? { capacity } : {}),
   };
