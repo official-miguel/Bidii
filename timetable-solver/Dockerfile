@@ -24,6 +24,8 @@ COPY solver.py .
 RUN useradd -m -u 1001 solver
 USER solver
 
+# Railway injects $PORT at runtime. EXPOSE is documentation only —
+# the actual port the container binds to is controlled by $PORT.
 EXPOSE 8080
 
 CMD ["python", "solver.py"]

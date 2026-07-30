@@ -550,9 +550,13 @@ def _solve(req: SolverRequest) -> SolverResponse:
 if __name__ == "__main__":
     import uvicorn
 
+    # Railway injects $PORT at runtime.  SOLVER_PORT is a fallback for local
+    # dev and Docker Compose.  The service always binds to 0.0.0.0 so Railway's
+    # reverse proxy can reach it.
+    port = int(os.getenv("PORT", os.getenv("SOLVER_PORT", "8080")))
     uvicorn.run(
         "solver:app",
         host="0.0.0.0",
-        port=int(os.getenv("SOLVER_PORT", "8080")),
+        port=port,
         reload=False,
     )
