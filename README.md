@@ -159,25 +159,17 @@ results entry will show anything.
   "configured, ending •••1234" status. Managing these is deliberately kept
   Principal-only and outside the RBAC module system — delegating "Settings"
   to a role would let that role swap in its own credentials.
-- **AI proposes, a deterministic scheduler guarantees.** The AI Timetable
-  Generator splits responsibility deliberately: Gemini's only jobs are (1)
-  turning a chat instruction like "prioritize Mathematics in the morning"
-  into a structured hint (`src/lib/ai/constraintParser.ts`) and (2) writing
-  a plain-English summary of the result afterwards. The actual schedule
-  comes from a plain TypeScript constraint solver
-  (`src/lib/ai/timetableGenerator.ts`) that tracks every class's and every
-  teacher's occupied slots directly — it physically cannot double-book a
-  teacher or a class, because it checks before placing every lesson rather
-  than asking an LLM to emit a whole valid grid in one shot. If Gemini is
-  unreachable or misconfigured, generation still works (constraints just
-  fall back to their raw text with no structured hint, and the "AI notes"
-  summary is silently skipped) — nothing about generating or saving a
-  timetable depends on the AI call succeeding. `POST /api/timetable/generate`
-  never writes to the database; it returns a draft the Principal reviews,
-  and `POST /api/timetable/generate/apply` re-validates every id in that
-  draft against the current database state before saving, inside a single
-  transaction — so a save either fully succeeds or fully fails, never
-  partially.
+- **AI translates preferences, a deterministic scheduler guarantees.** The timetable
+  engine (`src/lib/timetable/deterministicEngine.ts`) is pure TypeScript — no LLM calls,
+  no curriculum assumptions. It satisfies hard constraints (no double-booking, complete
+  lesson counts, stable teacher assignments) and optimizes soft preferences through a
+  scoring system. AI's only role is translating a natural-language instruction like
+  "prioritize Mathematics in the morning" into a small structured rule
+  (`src/lib/timetable/preferenceTranslator.ts`) that the engine then reads as a session
+  constraint. If Gemini is unreachable, pattern-based parsing takes over and generation
+  still works. The engine automatically re-generates until all validation passes before
+  allowing publish. `POST /api/timetable/generate` uses the deterministic engine,
+  validates all constraints, and only persists when every check passes.
 - **One teacher per class, per subject — and it stays that way.** If two
   teachers are both assigned to teach Maths, the generator picks one of them
   (whoever currently has the lightest total load, for rough balance across

@@ -1,64 +1,109 @@
-import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
-import { prisma } from "@/lib/prisma";
+/**
+ * API Route: /api/timetable/config
+ *
+ * Redirects to the new template-based configuration system.
+ * The old flat config (periodsPerDay, dayStartTime, etc.) is replaced by:
+ *   GET/PUT /api/timetable/template  — template columns + operating days
+ *   GET     /api/timetable/v2/config  — full config including special periods
+ */
+
+import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth";
+import { requirePermission } from "@/lib/permissions";
+import { prisma } from "@/lib/prisma";
+import { TimetableSlotType, TimetableSession } from "@prisma/client";
+import { generateDefaultTemplate, getTemplateSummary } from "@/lib/timetable/templateManager";
+import type { TemplateColumnInput } from "@/lib/timetable/templateManager";
 
-const DEFAULTS = {
-  periodsPerDay: 8,
-  breakAfterPeriod: null as number | null,
-  lunchAfterPeriod: null as number | null,
-  gamesDayOfWeek: null as number | null,
-  gamesPeriod: null as number | null,
-  maxLessonsPerTeacherPerDay: 6,
-  dayStartTime: "08:00",
-  periodDurationMinutes: 40,
-  breakDurationMinutes: 15,
-  lunchDurationMinutes: 45,
-};
-
+/**
+ * GET — returns config in a format compatible with both old and new clients:
+ * includes the legacy flat fields (computed from the template) plus the
+ * full new template, so both old and new UIs can read from one endpoint.
+ */
 export async function GET() {
-  const user = await requireRole("PRINCIPAL");
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const config = await prisma.timetableConfig.findUnique({ where: { schoolId: user.schoolId } });
-  return NextResponse.json(config ?? { schoolId: user.schoolId, ...DEFAULTS });
-}
-
-const TIME_RE = /^([01]?\d|2[0-3]):([0-5]\d)$/;
-
-const schema = z.object({
-  periodsPerDay: z.number().int().min(4).max(12),
-  breakAfterPeriod: z.number().int().min(1).nullable(),
-  lunchAfterPeriod: z.number().int().min(1).nullable(),
-  gamesDayOfWeek: z.number().int().min(0).max(4).nullable(),
-  gamesPeriod: z.number().int().min(1).nullable(),
-  maxLessonsPerTeacherPerDay: z.number().int().min(1).max(12),
-  // The school's own timetable format — when the day starts and how long a
-  // lesson/break/lunch run. Different schools run very different daily
-  // shapes, so this is freeform per-school config rather than a fixed
-  // assumption baked into the generator.
-  dayStartTime: z.string().regex(TIME_RE, "Use 24-hour HH:MM, e.g. 08:00."),
-  periodDurationMinutes: z.number().int().min(10).max(180),
-  breakDurationMinutes: z.number().int().min(0).max(120),
-  lunchDurationMinutes: z.number().int().min(0).max(180),
-});
-
-export async function PUT(req: NextRequest) {
-  const user = await requireRole("PRINCIPAL");
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const parsed = schema.safeParse(await req.json().catch(() => null));
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.errors[0]?.message || "Invalid input." },
-      { status: 400 }
-    );
+  const user =
+    (await requireRole("PRINCIPAL")) ??
+    (await requirePermission("TIMETABLE", "view"));
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const config = await prisma.timetableConfig.upsert({
-    where: { schoolId: user.schoolId },
-    update: parsed.data,
-    create: { schoolId: user.schoolId, ...parsed.data },
+  const schoolId = user.schoolId;
+
+  let config = await prisma.timetableConfig.findUnique({
+    where: { schoolId },
+    include: {
+      columns: { orderBy: { position: "asc" } },
+    },
   });
-  return NextResponse.json(config);
+
+  // Create default if missing
+  if (!config) {
+    const defaultColumns = generateDefaultTemplate();
+    config = await prisma.timetableConfig.create({
+      data: {
+        schoolId,
+        operatingDays: [0, 1, 2, 3, 4],
+        maxLessonsPerTeacherPerDay: 6,
+        columns: {
+          create: defaultColumns.map((col) => ({
+            position: col.position,
+            startTime: col.startTime,
+            endTime: col.endTime,
+            slotType: col.slotType,
+            label: col.label ?? null,
+            session: col.session,
+          })),
+        },
+      },
+      include: {
+        columns: { orderBy: { position: "asc" } },
+      },
+    });
+  }
+
+  const lessonColumns = config.columns.filter((c) => c.slotType === TimetableSlotType.LESSON);
+
+  // Compute legacy fields from template for backward compatibility
+  const summary = getTemplateSummary(
+    config.columns.map((col) => ({
+      position: col.position,
+      startTime: col.startTime,
+      endTime: col.endTime,
+      slotType: col.slotType as TimetableSlotType,
+      label: col.label,
+      session: col.session as TimetableSession,
+    }))
+  );
+
+  return NextResponse.json({
+    // New template fields
+    schoolId: config.schoolId,
+    academicYear: config.academicYear,
+    term: config.term,
+    operatingDays: config.operatingDays,
+    maxLessonsPerTeacherPerDay: config.maxLessonsPerTeacherPerDay,
+    columns: config.columns,
+    summary,
+    // Legacy computed fields for backward compatibility
+    periodsPerDay: lessonColumns.length,
+    dayStartTime: lessonColumns[0]?.startTime ?? "08:00",
+    periodDurationMinutes: summary.averagePeriodMinutes || 40,
+    updatedAt: config.updatedAt,
+  });
+}
+
+/**
+ * PUT — redirects to new template endpoint with 301.
+ * Old code that PUTs to /api/timetable/config should migrate to
+ * PUT /api/timetable/template.
+ */
+export async function PUT() {
+  return NextResponse.json(
+    {
+      error: "This endpoint is read-only. Use PUT /api/timetable/template to update the configuration.",
+      migration: "PUT /api/timetable/template",
+    },
+    { status: 405 }
+  );
 }

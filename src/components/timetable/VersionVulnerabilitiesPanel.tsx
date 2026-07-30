@@ -1,0 +1,436 @@
+"use client";
+
+/**
+ * VersionVulnerabilitiesPanel
+ *
+ * Slide-in drawer that shows the vulnerability snapshot stored on a
+ * TimetableVersion row.  It has three sections:
+ *
+ *  1. At-a-glance summary row  (errors / warnings / shortages)
+ *  2. Staff Shortage Suggestions  — prioritised list with level badge,
+ *     affected classes, and exactly what to do
+ *  3. Timetable Conflicts  — grouped by category with plain-language headings
+ *
+ * Designed so that anyone — not just developers — can read and act on the
+ * information.  Every item explains WHY it matters and WHAT to do.
+ */
+
+import { X, Users, AlertCircle, AlertTriangle, Info, CheckCircle2, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
+import { useState } from "react";
+import type { VersionVulnerabilities, VersionStaffShortage, VersionConflictEntry } from "@/lib/stores/timetableStore";
+
+// ── Severity colours ──────────────────────────────────────────────────────
+
+const SHORTAGE_LEVEL = {
+  critical: {
+    bg: "bg-danger/8 border-danger/25",
+    badge: "bg-danger/10 text-danger border-danger/20",
+    dot: "bg-danger",
+    label: "Critical",
+  },
+  high: {
+    bg: "bg-warn-bg border-warn/25",
+    badge: "bg-warn/10 text-warn border-warn/20",
+    dot: "bg-warn",
+    label: "High priority",
+  },
+  moderate: {
+    bg: "bg-blue-50 border-blue-200",
+    badge: "bg-blue-100 text-blue-700 border-blue-200",
+    dot: "bg-blue-400",
+    label: "Moderate",
+  },
+} as const;
+
+// ── Conflict type → plain-language category ───────────────────────────────
+
+const CONFLICT_CATEGORIES: Record<string, { heading: string; detail: string; Icon: React.ElementType; color: string }> = {
+  NO_TEACHER_DOUBLE_BOOKING: {
+    heading: "Teacher scheduled twice at the same time",
+    detail: "A teacher can only teach one class per period. These conflicts must be fixed before publishing.",
+    Icon: AlertCircle, color: "text-danger",
+  },
+  NO_CLASS_DOUBLE_BOOKING: {
+    heading: "Class has two subjects in one slot",
+    detail: "A class can only have one lesson per period. Remove the duplicate.",
+    Icon: AlertCircle, color: "text-danger",
+  },
+  COMPLETE_LESSON_COUNT: {
+    heading: "Not enough lessons scheduled",
+    detail: "Some subjects don't have their required number of lessons per week.",
+    Icon: AlertTriangle, color: "text-warn",
+  },
+  TEACHER_ASSIGNMENT_INTEGRITY: {
+    heading: "Teacher–subject assignment mismatch",
+    detail: "A teacher has been assigned to a subject they're not qualified to teach in this timetable.",
+    Icon: AlertCircle, color: "text-danger",
+  },
+  SUBJECT_SELECTION_CORRECTNESS: {
+    heading: "Subject selection issue",
+    detail: "A student's subject selection doesn't match what's scheduled.",
+    Icon: AlertTriangle, color: "text-warn",
+  },
+  SESSION_CONSTRAINTS: {
+    heading: "Session preference not met",
+    detail: "A subject that should be in morning/afternoon is scheduled at the wrong time.",
+    Icon: Info, color: "text-blue-500",
+  },
+  TEACHER_AVAILABILITY: {
+    heading: "Teacher unavailable in their scheduled slot",
+    detail: "A teacher is booked during a period they've marked as unavailable.",
+    Icon: AlertCircle, color: "text-danger",
+  },
+  FORMAT_COMPLIANCE: {
+    heading: "Timetable format issue",
+    detail: "The timetable doesn't match the school's configured template.",
+    Icon: AlertTriangle, color: "text-warn",
+  },
+  DOUBLE_LESSON_CONSECUTIVE: {
+    heading: "Double lesson not back-to-back",
+    detail: "A subject requiring a double period has its two lessons scheduled apart.",
+    Icon: AlertTriangle, color: "text-warn",
+  },
+};
+
+const DEFAULT_CONFLICT_CATEGORY = {
+  heading: "Other issue",
+  detail: "Review the timetable for this item.",
+  Icon: Info,
+  color: "text-slate",
+};
+
+// ── Props ──────────────────────────────────────────────────────────────────
+
+type Props = {
+  versionName: string;
+  vulnerabilities: VersionVulnerabilities;
+  onClose: () => void;
+  /** Optional: re-run validation live on demand */
+  onRevalidate?: () => void;
+  revalidating?: boolean;
+};
+
+// ── Component ──────────────────────────────────────────────────────────────
+
+export default function VersionVulnerabilitiesPanel({
+  versionName,
+  vulnerabilities,
+  onClose,
+  onRevalidate,
+  revalidating,
+}: Props) {
+  const [showConflicts, setShowConflicts] = useState(true);
+  const [showShortages, setShowShortages] = useState(true);
+
+  const { staffShortages, conflicts, totalErrors, totalWarnings, capturedAt } = vulnerabilities;
+
+  // Group conflicts by their category key
+  const grouped = new Map<string, VersionConflictEntry[]>();
+  for (const c of conflicts) {
+    const list = grouped.get(c.type) ?? [];
+    list.push(c);
+    grouped.set(c.type, list);
+  }
+
+  const isClean = totalErrors === 0 && totalWarnings === 0 && staffShortages.length === 0;
+
+  const capturedLabel = (() => {
+    try {
+      return new Date(capturedAt).toLocaleString("en-GB", {
+        day: "numeric", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit",
+      });
+    } catch { return capturedAt; }
+  })();
+
+  return (
+    <div
+      role="complementary"
+      aria-label={`Vulnerabilities for ${versionName}`}
+      className="flex flex-col bg-white border border-line rounded-2xl shadow-xl
+                 w-full max-w-md max-h-[calc(100vh-6rem)] overflow-hidden"
+    >
+      {/* ── Header ──────────────────────────────────────────────────────── */}
+      <div className="flex items-start justify-between gap-3 px-5 pt-4 pb-3
+                      border-b border-line shrink-0">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-ink truncate">
+            Health report — {versionName}
+          </p>
+          <p className="text-[11px] text-slate mt-0.5">
+            Checked {capturedLabel}
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {onRevalidate && (
+            <button
+              onClick={onRevalidate}
+              disabled={revalidating}
+              title="Re-run check now"
+              className="p-1.5 rounded-lg text-slate hover:text-teal hover:bg-teal-50
+                         transition-colors disabled:opacity-40"
+              aria-label="Re-run validation"
+            >
+              <RefreshCw className={`h-4 w-4 ${revalidating ? "animate-spin" : ""}`} aria-hidden />
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="p-1.5 rounded-lg text-slate hover:text-ink hover:bg-paper transition-colors"
+          >
+            <X className="h-4 w-4" aria-hidden />
+          </button>
+        </div>
+      </div>
+
+      {/* ── Summary pills ───────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 px-5 py-3 border-b border-line shrink-0 flex-wrap">
+        {isClean ? (
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-success">
+            <CheckCircle2 className="h-4 w-4" aria-hidden />
+            No issues found — this version is clean
+          </div>
+        ) : (
+          <>
+            {totalErrors > 0 && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold
+                               px-2 py-1 rounded-full bg-danger/10 border border-danger/20 text-danger">
+                <AlertCircle className="h-3 w-3" aria-hidden />
+                {totalErrors} critical error{totalErrors !== 1 ? "s" : ""}
+              </span>
+            )}
+            {totalWarnings > 0 && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold
+                               px-2 py-1 rounded-full bg-warn/10 border border-warn/20 text-warn">
+                <AlertTriangle className="h-3 w-3" aria-hidden />
+                {totalWarnings} warning{totalWarnings !== 1 ? "s" : ""}
+              </span>
+            )}
+            {staffShortages.length > 0 && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold
+                               px-2 py-1 rounded-full bg-blue-100 border border-blue-200 text-blue-700">
+                <Users className="h-3 w-3" aria-hidden />
+                {staffShortages.length} staffing gap{staffShortages.length !== 1 ? "s" : ""}
+              </span>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* ── Scrollable body ──────────────────────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+
+        {/* ── Staff shortage suggestions ───────────────────────────────── */}
+        {staffShortages.length > 0 && (
+          <section>
+            <button
+              onClick={() => setShowShortages((v) => !v)}
+              className="w-full flex items-center justify-between mb-2.5 group"
+            >
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-blue-500 shrink-0" aria-hidden />
+                <span className="text-sm font-semibold text-ink">
+                  Staffing Suggestions
+                </span>
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full
+                                 bg-blue-100 text-blue-700 border border-blue-200">
+                  {staffShortages.length}
+                </span>
+              </div>
+              {showShortages
+                ? <ChevronUp   className="h-3.5 w-3.5 text-slate" aria-hidden />
+                : <ChevronDown className="h-3.5 w-3.5 text-slate" aria-hidden />
+              }
+            </button>
+
+            {/* Explanation callout */}
+            {showShortages && (
+              <p className="text-xs text-slate bg-paper rounded-lg px-3 py-2 mb-2.5 leading-relaxed">
+                These subjects don&apos;t have enough teachers to cover all required lessons per week.
+                Adding more staff will reduce scheduling pressure and improve timetable quality.
+              </p>
+            )}
+
+            {showShortages && staffShortages.map((s, i) => (
+              <StaffShortageCard key={`shortage-${i}`} shortage={s} />
+            ))}
+          </section>
+        )}
+
+        {/* ── Conflict groups ─────────────────────────────────────────── */}
+        {conflicts.length > 0 && (
+          <section>
+            <button
+              onClick={() => setShowConflicts((v) => !v)}
+              className="w-full flex items-center justify-between mb-2.5 group"
+            >
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-danger shrink-0" aria-hidden />
+                <span className="text-sm font-semibold text-ink">
+                  Timetable Conflicts
+                </span>
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full
+                                 bg-danger/10 text-danger border border-danger/20">
+                  {conflicts.length}
+                </span>
+              </div>
+              {showConflicts
+                ? <ChevronUp   className="h-3.5 w-3.5 text-slate" aria-hidden />
+                : <ChevronDown className="h-3.5 w-3.5 text-slate" aria-hidden />
+              }
+            </button>
+
+            {showConflicts && [...grouped.entries()].map(([type, items]) => (
+              <ConflictGroup key={type} type={type} items={items} />
+            ))}
+          </section>
+        )}
+
+        {isClean && (
+          <div className="text-center py-10">
+            <CheckCircle2 className="h-10 w-10 text-success mx-auto mb-3" aria-hidden />
+            <p className="text-sm font-semibold text-ink">All clear</p>
+            <p className="text-xs text-slate mt-1 max-w-xs mx-auto">
+              No conflicts or staffing gaps were found at the time this version was last checked.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Staff shortage card ───────────────────────────────────────────────────
+
+function StaffShortageCard({ shortage }: { shortage: VersionStaffShortage }) {
+  const lvl = SHORTAGE_LEVEL[shortage.level];
+  const [expanded, setExpanded] = useState(shortage.level === "critical");
+
+  return (
+    <div className={`rounded-xl border p-3.5 mb-2 ${lvl.bg}`}>
+      <div className="flex items-start gap-2.5">
+        <span className={`mt-1 h-2 w-2 rounded-full shrink-0 ${lvl.dot}`} aria-hidden />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-xs font-semibold text-ink">
+              {shortage.subjectCode}
+              {shortage.subjectName !== shortage.subjectCode && (
+                <span className="font-normal text-slate ml-1">— {shortage.subjectName}</span>
+              )}
+            </p>
+            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${lvl.badge}`}>
+              {lvl.label}
+            </span>
+          </div>
+
+          {/* Core message — always visible */}
+          <p className="text-xs text-ink mt-1 leading-snug">{shortage.message}</p>
+
+          {/* What to do — always visible */}
+          <p className="text-[11px] text-teal mt-1 leading-snug font-medium">
+            → {shortage.suggestion}
+          </p>
+
+          {/* Detail toggle */}
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="mt-1.5 text-[10px] text-slate hover:text-teal transition-colors flex items-center gap-1"
+          >
+            {expanded ? "Hide details" : "Show details"}
+            {expanded
+              ? <ChevronUp   className="h-3 w-3" aria-hidden />
+              : <ChevronDown className="h-3 w-3" aria-hidden />
+            }
+          </button>
+
+          {expanded && (
+            <div className="mt-2 space-y-1">
+              <DetailRow label="Required lessons/week" value={String(shortage.totalLessonsRequired)} />
+              <DetailRow label="Teacher capacity/week"
+                value={shortage.totalLessonsCapacity > 0
+                  ? String(shortage.totalLessonsCapacity)
+                  : "0 (no teachers assigned)"}
+              />
+              <DetailRow label="Shortfall" value={`${shortage.deficit} lesson${shortage.deficit !== 1 ? "s" : ""}`} />
+              <DetailRow label="Currently assigned" value={`${shortage.assignedTeachers} teacher${shortage.assignedTeachers !== 1 ? "s" : ""}`} />
+              <DetailRow
+                label="Affected classes"
+                value={shortage.affectedClasses.length <= 4
+                  ? shortage.affectedClasses.join(", ")
+                  : `${shortage.affectedClasses.slice(0, 4).join(", ")} +${shortage.affectedClasses.length - 4} more`
+                }
+              />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="text-[10px] text-slate">{label}</span>
+      <span className="text-[10px] font-medium text-ink text-right">{value}</span>
+    </div>
+  );
+}
+
+// ── Conflict group ────────────────────────────────────────────────────────
+
+function ConflictGroup({ type, items }: { type: string; items: VersionConflictEntry[] }) {
+  const [expanded, setExpanded] = useState(items.some((i) => i.severity === "error"));
+  const meta = CONFLICT_CATEGORIES[type] ?? DEFAULT_CONFLICT_CATEGORY;
+  const { Icon, color, heading, detail } = meta;
+
+  const hasErrors = items.some((i) => i.severity === "error");
+
+  return (
+    <div className={`rounded-xl border mb-2 overflow-hidden
+                     ${hasErrors ? "border-danger/20 bg-danger/4" : "border-warn/20 bg-warn-bg"}`}>
+      {/* Group header */}
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-start gap-2.5 px-3.5 py-2.5 text-left hover:bg-black/[0.02] transition-colors"
+      >
+        <Icon className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${color}`} aria-hidden />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-semibold text-ink leading-snug">{heading}</p>
+          <p className="text-[10px] text-slate mt-0.5 leading-snug">{detail}</p>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full
+                            ${hasErrors
+                              ? "bg-danger/10 text-danger border border-danger/20"
+                              : "bg-warn/10 text-warn border border-warn/20"}`}>
+            {items.length}
+          </span>
+          {expanded
+            ? <ChevronUp   className="h-3 w-3 text-slate" aria-hidden />
+            : <ChevronDown className="h-3 w-3 text-slate" aria-hidden />
+          }
+        </div>
+      </button>
+
+      {/* Individual items */}
+      {expanded && (
+        <div className="border-t border-inherit divide-y divide-inherit">
+          {items.map((item, i) => (
+            <div key={i} className="px-3.5 py-2 flex items-start gap-2">
+              <span className={`mt-1 h-1.5 w-1.5 rounded-full shrink-0
+                                ${item.severity === "error" ? "bg-danger" : "bg-warn"}`}
+                aria-hidden
+              />
+              <div className="min-w-0">
+                <p className="text-[11px] text-ink leading-snug">{item.message}</p>
+                <p className="text-[10px] text-teal mt-0.5 leading-snug">{item.action}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

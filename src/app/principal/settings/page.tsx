@@ -176,7 +176,7 @@ function RankingConfigForm() {
   if (!config && !error) return (
     <div className="space-y-3">
       <SkeletonBar height="1rem" width="70%" />
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <SkeletonBar height="3.5rem" /><SkeletonBar height="3.5rem" /><SkeletonBar height="3.5rem" />
       </div>
       <SkeletonBar height="2.25rem" width="8rem" />
@@ -200,7 +200,7 @@ function RankingConfigForm() {
         These three weights must sum to <strong className="text-ink dark:text-dark-text">1.0</strong>.
         They determine how the composite teacher ranking score is calculated each term.
       </div>
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {fields.map(({ label, key, value, set, hint }) => (
           <div key={key}>
             <label className={labelClass}>{label}</label>
@@ -335,7 +335,7 @@ function LibrarySettingsForm() {
   if (!data && !error) return (
     <div className="space-y-3">
       <SkeletonBar height="1rem" width="80%" />
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <SkeletonBar height="3.5rem" /><SkeletonBar height="3.5rem" /><SkeletonBar height="3.5rem" />
       </div>
       <SkeletonBar height="2.25rem" width="8rem" />
@@ -491,13 +491,6 @@ function IntegrationsPanel() {
 
   return (
     <>
-      <div className="mb-6">
-        <h2 className="text-base font-semibold text-ink dark:text-dark-text">API Integrations</h2>
-        <p className="text-sm text-slate dark:text-dark-muted mt-1">
-          Connect external services. Keys are stored encrypted and never exposed to the browser.
-        </p>
-      </div>
-
       <div className="space-y-3 max-w-3xl">
         {PROVIDER_ORDER.map((provider) => {
           const info   = PROVIDER_INFO[provider];
@@ -505,40 +498,44 @@ function IntegrationsPanel() {
           const { Icon } = info;
           return (
             <div key={provider}
-              className="rounded-xl bg-white border border-line shadow-sm p-5 flex items-start gap-4
+              className="rounded-xl bg-white border border-line shadow-sm p-4 sm:p-5
                          hover:shadow-md transition-shadow dark:bg-dark-surface dark:border-dark-border">
-              <div className={`flex items-center justify-center h-10 w-10 rounded-lg shrink-0 ${
-                status?.configured ? "bg-teal-50 text-teal dark:bg-teal/10" : "bg-paper text-slate dark:bg-dark-bg dark:text-dark-muted"
-              }`}>
-                <Icon className="h-5 w-5" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-sm font-semibold text-ink dark:text-dark-text">{info.label}</p>
-                  {status?.configured ? (
-                    <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full
-                                     bg-success-bg text-success border border-success/20">
-                      <CheckCircle2 className="h-3 w-3" />
-                      Configured · ···{status.keyPreview}
-                    </span>
-                  ) : (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-line text-slate border border-line
-                                     dark:bg-dark-border dark:text-dark-muted dark:border-dark-border">
-                      Not configured
-                    </span>
+              {/* Top row: icon + info */}
+              <div className="flex items-start gap-3 sm:gap-4">
+                <div className={`flex items-center justify-center h-9 w-9 sm:h-10 sm:w-10 rounded-lg shrink-0 ${
+                  status?.configured ? "bg-teal-50 text-teal dark:bg-teal/10" : "bg-paper text-slate dark:bg-dark-bg dark:text-dark-muted"
+                }`}>
+                  <Icon className="h-5 w-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-semibold text-ink dark:text-dark-text">{info.label}</p>
+                    {status?.configured ? (
+                      <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full
+                                       bg-success-bg text-success border border-success/20">
+                        <CheckCircle2 className="h-3 w-3" />
+                        Configured · ···{status.keyPreview}
+                      </span>
+                    ) : (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-line text-slate border border-line
+                                       dark:bg-dark-border dark:text-dark-muted dark:border-dark-border">
+                        Not configured
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-slate dark:text-dark-muted mt-1 leading-relaxed">{info.description}</p>
+                  {testResult?.provider === provider && (
+                    <div className={`mt-2 flex items-center gap-1.5 text-sm ${testResult.ok ? "text-success" : "text-danger"}`}>
+                      {testResult.ok
+                        ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                        : <AlertCircle  className="h-3.5 w-3.5 shrink-0" />}
+                      {testResult.message}
+                    </div>
                   )}
                 </div>
-                <p className="text-sm text-slate dark:text-dark-muted mt-1 leading-relaxed">{info.description}</p>
-                {testResult?.provider === provider && (
-                  <div className={`mt-2 flex items-center gap-1.5 text-sm ${testResult.ok ? "text-success" : "text-danger"}`}>
-                    {testResult.ok
-                      ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                      : <AlertCircle  className="h-3.5 w-3.5 shrink-0" />}
-                    {testResult.message}
-                  </div>
-                )}
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              {/* Action buttons — full-width row on mobile, inline on sm+ */}
+              <div className="flex flex-wrap items-center gap-2 mt-3 sm:mt-0 sm:justify-end">
                 {info.testable && status?.configured && (
                   <button className={secondaryButtonClass} disabled={testing === provider} onClick={() => handleTest(provider)}>
                     {testing === provider
@@ -1298,27 +1295,61 @@ function SchoolConfigForm() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Main SettingsPage — IG-style left sidebar + content panel
+// Section content map
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SECTION_CONTENT: Record<SectionId, { heading: string; description: string; Content: React.ComponentType }> = {
+  school: {
+    heading: "School Configuration",
+    description: "School identity, branding, gender policy, boarding type, and dormitory auto-allocation settings.",
+    Content: SchoolConfigForm,
+  },
+  integrations: {
+    heading: "API Integrations",
+    description: "Connect external services. Keys are stored encrypted and never exposed to the browser.",
+    Content: IntegrationsPanel,
+  },
+  ranking: {
+    heading: "Ranking Configuration",
+    description: "Adjust how the composite teacher performance score is weighted. Changes apply to all future ranking calculations.",
+    Content: RankingConfigForm,
+  },
+  library: {
+    heading: "Library Settings",
+    description: "Configure borrowing limits, due dates, identification method, and overdue fines for the school library.",
+    Content: LibrarySettingsForm,
+  },
+  dormitory: {
+    heading: "Dormitory Configuration",
+    description: "Module-wide preferences for boarding management. Individual dormitory structures and bed layouts are configured per dorm under Student Life → Accommodation.",
+    Content: DormitorySettingsForm,
+  },
+  ai: {
+    heading: "AI Configuration",
+    description: "Configure Soma AI — the intelligent assistant powered by Google Gemini. API keys are encrypted at rest and never exposed to the browser.",
+    Content: SomaAIConfigPanel,
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main SettingsPage — sidebar on desktop, tab strip on mobile
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
   const [active, setActive] = useState<SectionId>("integrations");
   const rankingRef = useRef<HTMLDivElement>(null);
+  const mobileTabsRef = useRef<HTMLDivElement>(null);
 
-  // Honour ?tab= or #ranking deep-links, and the internal tab-switch event
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab") as SectionId | null;
-    if (t && SECTIONS.some((s) => s.id === t)) {
-      setActive(t);
-      if (t === "ranking")
+    const target = t ?? (window.location.hash === "#ranking" ? "ranking" : null);
+    if (target && SECTIONS.some((s) => s.id === target)) {
+      setActive(target);
+      if (target === "ranking")
         setTimeout(() => rankingRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
-    } else if (window.location.hash === "#ranking") {
-      setActive("ranking");
-      setTimeout(() => rankingRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     }
 
-    // Allow child components to switch tabs without prop-drilling
     const handler = (e: Event) => {
       const tab = (e as CustomEvent<SectionId>).detail;
       if (SECTIONS.some((s) => s.id === tab)) setActive(tab);
@@ -1327,6 +1358,17 @@ export default function SettingsPage() {
     return () => window.removeEventListener("bidii:settings:tab", handler);
   }, []);
 
+  // Scroll the active mobile tab button into view when active changes
+  useEffect(() => {
+    const container = mobileTabsRef.current;
+    if (!container) return;
+    const btn = container.querySelector<HTMLButtonElement>(`[data-tab="${active}"]`);
+    btn?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+  }, [active]);
+
+  const section = SECTION_CONTENT[active];
+  const { Content } = section;
+
   return (
     <div>
       <PageHeader
@@ -1334,16 +1376,49 @@ export default function SettingsPage() {
         description="Manage school configuration, API integrations, AI, teacher ranking weights, library rules, and dormitory settings."
       />
 
-      {/* ── Two-column shell ─────────────────────────────────────────────── */}
-      <div className="flex gap-0 min-h-[600px] rounded-2xl border border-line overflow-hidden
-                      dark:border-dark-border mt-2">
+      {/* ── Mobile tab strip (hidden on md+) ─────────────────────────── */}
+      <div
+        ref={mobileTabsRef}
+        className="flex md:hidden overflow-x-auto gap-1 pb-1 mb-3 mt-2 scrollbar-none"
+        role="tablist"
+        aria-label="Settings sections"
+      >
+        {SECTIONS.map(({ id, label, Icon }) => {
+          const isActive = active === id;
+          return (
+            <button
+              key={id}
+              data-tab={id}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => setActive(id)}
+              className={`
+                flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap
+                shrink-0 transition-colors border
+                ${isActive
+                  ? "bg-teal/10 text-teal border-teal/30"
+                  : "bg-white text-slate border-line hover:bg-paper hover:text-ink dark:bg-dark-surface dark:text-dark-muted dark:border-dark-border dark:hover:text-dark-text"
+                }
+              `}
+            >
+              <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              {label}
+            </button>
+          );
+        })}
+      </div>
 
-        {/* ── Left sidebar nav ──────────────────────────────────────────── */}
+      {/* ── Two-column shell (md+) ───────────────────────────────────── */}
+      <div className="flex gap-0 min-h-[600px] rounded-2xl border border-line overflow-hidden
+                      dark:border-dark-border">
+
+        {/* ── Left sidebar nav — desktop only ─────────────────────────── */}
         <nav
           aria-label="Settings sections"
-          className="w-64 shrink-0 bg-paper border-r border-line
+          className="hidden md:flex w-60 xl:w-64 shrink-0 bg-paper border-r border-line
                      dark:bg-dark-surface dark:border-dark-border
-                     flex flex-col py-2"
+                     flex-col py-2"
         >
           {SECTIONS.map(({ id, label, sublabel, Icon }) => {
             const isActive = active === id;
@@ -1383,85 +1458,18 @@ export default function SettingsPage() {
         </nav>
 
         {/* ── Content panel ─────────────────────────────────────────────── */}
-        <div className="flex-1 min-w-0 bg-white dark:bg-dark-bg px-8 py-8 overflow-y-auto">
-
-          {active === "school" && (
-            <div>
-              <div className="mb-6">
-                <h2 className="text-base font-semibold text-ink dark:text-dark-text">
-                  School Configuration
-                </h2>
-                <p className="text-sm text-slate dark:text-dark-muted mt-1">
-                  School identity, branding, gender policy, boarding type, and dormitory
-                  auto-allocation settings.
-                </p>
-              </div>
-              <SchoolConfigForm />
+        <div className="flex-1 min-w-0 bg-white dark:bg-dark-bg px-4 py-5 sm:px-6 sm:py-6 md:px-8 md:py-8 overflow-y-auto">
+          <div ref={active === "ranking" ? rankingRef : undefined}>
+            <div className="mb-5 md:mb-6">
+              <h2 className="text-base font-semibold text-ink dark:text-dark-text">
+                {section.heading}
+              </h2>
+              <p className="text-sm text-slate dark:text-dark-muted mt-1">
+                {section.description}
+              </p>
             </div>
-          )}
-
-          {active === "integrations" && <IntegrationsPanel />}
-
-          {active === "ranking" && (
-            <div ref={rankingRef}>
-              <div className="mb-6">
-                <h2 className="text-base font-semibold text-ink dark:text-dark-text">
-                  Ranking Configuration
-                </h2>
-                <p className="text-sm text-slate dark:text-dark-muted mt-1">
-                  Adjust how the composite teacher performance score is weighted. Changes apply to
-                  all future ranking calculations.
-                </p>
-              </div>
-              <RankingConfigForm />
-            </div>
-          )}
-
-          {active === "library" && (
-            <div>
-              <div className="mb-6">
-                <h2 className="text-base font-semibold text-ink dark:text-dark-text">
-                  Library Settings
-                </h2>
-                <p className="text-sm text-slate dark:text-dark-muted mt-1">
-                  Configure borrowing limits, due dates, identification method, and overdue fines
-                  for the school library.
-                </p>
-              </div>
-              <LibrarySettingsForm />
-            </div>
-          )}
-
-          {active === "dormitory" && (
-            <div>
-              <div className="mb-6">
-                <h2 className="text-base font-semibold text-ink dark:text-dark-text">
-                  Dormitory Configuration
-                </h2>
-                <p className="text-sm text-slate dark:text-dark-muted mt-1">
-                  Module-wide preferences for boarding management. Individual dormitory structures
-                  and bed layouts are configured per dorm under Student Life → Accommodation.
-                </p>
-              </div>
-              <DormitorySettingsForm />
-            </div>
-          )}
-
-          {active === "ai" && (
-            <div>
-              <div className="mb-6">
-                <h2 className="text-base font-semibold text-ink dark:text-dark-text">
-                  AI Configuration
-                </h2>
-                <p className="text-sm text-slate dark:text-dark-muted mt-1">
-                  Configure Soma AI — the intelligent assistant powered by Google Gemini. API keys
-                  are encrypted at rest and never exposed to the browser.
-                </p>
-              </div>
-              <SomaAIConfigPanel />
-            </div>
-          )}
-
+            <Content />
+          </div>
         </div>
       </div>
     </div>

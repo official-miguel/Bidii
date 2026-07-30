@@ -23,13 +23,14 @@ export async function GET() {
       slotCount: bigint; createdAt: Date; updatedAt: Date;
       publishedAt: Date | null; generatedAt: Date | null;
       clonedFromId: string | null;
+      vulnerabilities: unknown | null;
     }>
   >`
     SELECT v.id, v.name, v.description, v.status,
            v."academicYear", v.term,
            COUNT(s.id) AS "slotCount",
            v."createdAt", v."updatedAt", v."publishedAt", v."generatedAt",
-           v."clonedFromId"
+           v."clonedFromId", v."vulnerabilities"
     FROM "TimetableVersion" v
     LEFT JOIN "TimetableVersionSlot" s ON s."versionId" = v.id
     WHERE v."schoolId" = ${user.schoolId}

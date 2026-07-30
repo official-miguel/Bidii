@@ -1,7 +1,7 @@
 import { callGemini } from "./gemini";
 
 /// AI helpers for the Records module. Both return null instead of throwing —
-/// summaries are a nice-to-have and must never block saving the record.
+/// summaries are optional and must never block saving the record.
 /// Results are persisted on the record (cached), so each is generated once.
 
 export async function summarizeDisciplineFile(
