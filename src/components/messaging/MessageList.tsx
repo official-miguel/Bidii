@@ -23,8 +23,6 @@ interface Props {
   refreshKey?: number;
 }
 
-const PAGE_SIZE = 20;
-
 function relativeTime(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
   const m = Math.floor(diff / 60000);

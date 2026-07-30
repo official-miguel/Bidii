@@ -103,8 +103,8 @@ const updateSchema = z.object({
   allocationPolicy: z.enum(["RESTRICTED_BY_FORM", "MIXED_FORMS"]).optional(),
   cubiclesInheritPolicy: z.boolean().optional(),
   description: z.string().trim().max(500).optional().nullable(),
-  boardingMasterId: z.string().optional().nullable(),
-  dormCaptainId: z.string().optional().nullable(),
+  boardingMasterId: z.preprocess((v) => (v == null ? v : String(v)), z.string().optional().nullable()),
+  dormCaptainId: z.preprocess((v) => (v == null ? v : String(v)), z.string().optional().nullable()),
   permittedForms: z.array(z.coerce.number().int().min(1).max(12)).optional(),
 });
 

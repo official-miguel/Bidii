@@ -303,13 +303,17 @@ function AddCubiclesModal({ dormId, onClose, onAdded }: { dormId: string; onClos
       const payload = mode === "auto"
         ? {
             mode: "auto",
-            count:        parseInt(count),
-            prefix:       prefix.trim() || "Cubicle ",
-            capacityEach: parseInt(bedsEach),
+            count:           parseInt(count),
+            prefix:          prefix.trim() || "Cubicle ",
+            capacityEach:    parseInt(bedsEach),
+            bedType,
+            customOccupancy: bedType === "CUSTOM" ? parseInt(customOccupancy) : undefined,
           }
         : {
-            name:     singleName.trim(),
-            capacity: parseInt(singleBeds),
+            name:            singleName.trim(),
+            capacity:        parseInt(singleBeds),
+            bedType:         singleBedType,
+            customOccupancy: singleBedType === "CUSTOM" ? parseInt(singleCustomOcc) : undefined,
           };
       const res = await fetch(`/api/accommodation/dormitories/${dormId}/cubicles`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
@@ -586,17 +590,24 @@ function CubicleSection({
   async function fetchBeds() {
     if (beds.length > 0) { setExpanded((e) => !e); return; }
     setExpanded(true); setLoadingBeds(true);
+    console.log(`[CubicleSection] Fetching beds for cubicle ${cubicle.id} (${cubicle.name}), dormId: ${dormId}`);
     const res = await fetch(`/api/accommodation/dormitories/${dormId}/beds?cubicleId=${cubicle.id}`);
-    if (res.ok) setBeds(await res.json());
+    const data = await res.json();
+    console.log(`[CubicleSection] Got ${data.length || 0} beds from API:`, data);
+    if (res.ok) setBeds(data);
     setLoadingBeds(false);
   }
 
   function refreshBeds() {
     setBeds([]);
     setLoadingBeds(true);
+    console.log(`[CubicleSection] Refreshing beds for cubicle ${cubicle.id} (${cubicle.name}), dormId: ${dormId}`);
     fetch(`/api/accommodation/dormitories/${dormId}/beds?cubicleId=${cubicle.id}`)
       .then((r) => r.ok ? r.json() : [])
-      .then(setBeds)
+      .then((data) => {
+        console.log(`[CubicleSection] Refreshed got ${data.length || 0} beds:`, data);
+        setBeds(data);
+      })
       .finally(() => setLoadingBeds(false));
   }
 
@@ -648,7 +659,14 @@ function CubicleSection({
                 {[...Array(4)].map((_, i) => <div key={i} className="h-20 rounded-lg bg-line/40 animate-pulse" />)}
               </div>
             )}
-            {!loadingBeds && beds.length === 0 && (
+            {!loadingBeds && beds.length === 0 && cubicle._count.beds > 0 && (
+              <div className="text-center py-6">
+                <p className="text-slate text-sm dark:text-dark-muted">
+                  {cubicle._count.beds} bed{cubicle._count.beds !== 1 ? 's' : ''} created but details unavailable. This cubicle has {cubicle._count.sleepingPositions} sleeping position{cubicle._count.sleepingPositions !== 1 ? 's' : ''}.
+                </p>
+              </div>
+            )}
+            {!loadingBeds && beds.length === 0 && cubicle._count.beds === 0 && (
               <div className="text-center py-6">
                 <p className="text-slate text-sm dark:text-dark-muted">No beds in this cubicle yet.</p>
               </div>

@@ -275,12 +275,26 @@ export async function POST(req: NextRequest) {
         if (school?.autoAllocateDorms) {
           // Non-fatal: if no eligible dorm or free position exists the student
           // is still registered; staff can allocate manually afterwards.
-          await autoAssignDorm({
-            schoolId: user.schoolId,
-            studentId: student.id,
-            studentForm: student.schoolClass.form,
-            allocatedById: user.id,
-          }).catch(() => undefined);
+          // Log allocation attempts for debugging.
+          try {
+            const result = await autoAssignDorm({
+              schoolId: user.schoolId,
+              studentId: student.id,
+              studentForm: student.schoolClass.form,
+              allocatedById: user.id,
+            });
+            if (!result) {
+              // Log: allocation failed silently (no eligible dorms or free positions)
+              console.warn(
+                `[Accommodation] Auto-allocation failed for student ${student.id} in school ${user.schoolId}: no eligible dorms or free positions available`
+              );
+            }
+          } catch (err) {
+            console.error(
+              `[Accommodation] Auto-allocation error for student ${student.id}:`,
+              err
+            );
+          }
         }
       }
 

@@ -153,7 +153,7 @@ function DormAnalyticsCard({ dorm, rank }: { dorm: DormAnalytics; rank?: number 
             <p className={`text-sm font-bold tabular-nums ${dorm.discipline.open > 3 ? "text-danger" : dorm.discipline.open > 0 ? "text-warn" : "text-success"}`}>
               {dorm.discipline.open}
             </p>
-            <p className="text-[9px] text-slate dark:text-dark-muted uppercase tracking-wide">Cases</p>
+            <p className="text-[9px] text-slate dark:text-dark-muted uppercase tracking-wide">Indiscipline</p>
           </div>
           <div>
             {dorm.inspection ? (
@@ -210,9 +210,9 @@ function DormAnalyticsCard({ dorm, rank }: { dorm: DormAnalytics; rank?: number 
               </div>
             ) : <p className="text-xs text-slate dark:text-dark-muted">No assessment data in period</p>}
           </div>
-          {/* Discipline */}
+          {/* Discipline / Indiscipline */}
           <div>
-            <p className="text-xs font-semibold text-ink dark:text-dark-text mb-1.5">Discipline</p>
+            <p className="text-xs font-semibold text-ink dark:text-dark-text mb-1.5">Indiscipline cases</p>
             <div className="flex gap-4 text-xs">
               <span className="text-slate dark:text-dark-muted">Total: <strong className="text-ink dark:text-dark-text">{dorm.discipline.total}</strong></span>
               <span className="text-slate dark:text-dark-muted">Open: <strong className={dorm.discipline.open > 0 ? "text-warn" : "text-success"}>{dorm.discipline.open}</strong></span>
@@ -380,7 +380,7 @@ export default function AccommodationAnalyticsPage() {
               { label: "Overall occupancy", value: `${overallOccupancy}%`, sub: `${totalOccupied}/${totalCapacity} spaces`, icon: BedDouble, color: overallOccupancy >= 90 ? "text-warn" : "text-teal", bg: "bg-teal/10" },
               { label: "Avg. attendance",   value: avgAttendance !== null ? `${avgAttendance}%` : "—", sub: `across ${withAttendance.length} dorms`, icon: Calendar, color: avgAttendance && avgAttendance >= 80 ? "text-success" : "text-warn", bg: "bg-success/10" },
               { label: "Avg. academic",     value: avgAcademic !== null ? `${avgAcademic}` : "—",    sub: `${withAcademic.length} dorms with data`, icon: BookOpen, color: avgAcademic && avgAcademic >= 60 ? "text-teal" : "text-warn", bg: "bg-teal/10" },
-              { label: "Open discipline",   value: `${totalOpen}`,                                    sub: `cases across all dorms`,               icon: Shield,   color: totalOpen > 5 ? "text-danger" : totalOpen > 0 ? "text-warn" : "text-success", bg: totalOpen > 5 ? "bg-danger/10" : "bg-success/10" },
+              { label: "Open indiscipline", value: `${totalOpen}`,                                    sub: `cases across all dorms`,               icon: Shield,   color: totalOpen > 5 ? "text-danger" : totalOpen > 0 ? "text-warn" : "text-success", bg: totalOpen > 5 ? "bg-danger/10" : "bg-success/10" },
             ].map(({ label, value, sub, icon: Icon, color, bg }) => (
               <div key={label} className="rounded-xl border border-line bg-card p-4 dark:bg-dark-surface dark:border-dark-border">
                 <div className="flex items-start justify-between gap-2">
@@ -420,7 +420,7 @@ export default function AccommodationAnalyticsPage() {
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
               {bestAttendance && <AchievementBadge icon={Calendar} title="Best attendance" dormName={bestAttendance.name} value={`${bestAttendance.attendance.pct}% attendance rate`} color="border-success/30 bg-success/5 text-success dark:bg-success/10" />}
               {bestAcademic && <AchievementBadge icon={BookOpen} title="Top academic" dormName={bestAcademic.name} value={`Avg score ${bestAcademic.academic.avgScore}`} color="border-teal/30 bg-teal/5 text-teal dark:bg-teal/10" />}
-              {bestDiscipline && bestDiscipline.discipline.open === 0 && <AchievementBadge icon={Shield} title="Most disciplined" dormName={bestDiscipline.name} value="Zero open cases" color="border-blue-300 bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300" />}
+              {bestDiscipline && bestDiscipline.discipline.open === 0 && <AchievementBadge icon={Shield} title="Best conduct" dormName={bestDiscipline.name} value="Zero indiscipline cases" color="border-blue-300 bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300" />}
               {bestInspection && <AchievementBadge icon={Star} title="Cleanest dorm" dormName={bestInspection.name} value={`Inspection score ${Math.round(bestInspection.inspection?.score ?? 0)}/100`} color="border-amber-300 bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300" />}
               {highestOccupancy && highestOccupancy.occupancyPct >= 90 && <AchievementBadge icon={Flame} title="Highest demand" dormName={highestOccupancy.name} value={`${highestOccupancy.occupancyPct}% full`} color="border-orange-300 bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-300" />}
             </div>
@@ -436,7 +436,7 @@ export default function AccommodationAnalyticsPage() {
                 <option value="occupancy">Sort: Occupancy</option>
                 <option value="attendance">Sort: Attendance</option>
                 <option value="academic">Sort: Academic</option>
-                <option value="discipline">Sort: Discipline (best)</option>
+                <option value="discipline">Sort: Indiscipline (fewest)</option>
                 <option value="inspection">Sort: Inspection</option>
               </select>
             </div>

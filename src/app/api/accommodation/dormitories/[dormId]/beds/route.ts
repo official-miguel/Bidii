@@ -28,7 +28,7 @@ const bulkCreateSchema = z.object({
   cubicleId: z.string().optional().nullable(),
 });
 
-/** Creates SleepingPosition rows for a bed based on its type. */
+// Create sleeping positions for bed
 async function createPositionsForBed(
   tx: Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">,
   bedId: string,
@@ -63,7 +63,7 @@ async function createPositionsForBed(
   }
 }
 
-/** Recalculates and updates Dormitory.totalCapacity based on SleepingPosition count. */
+// Update dormitory total capacity
 async function recalcCapacity(
   tx: Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">,
   dormId: string
@@ -85,6 +85,7 @@ export async function GET(
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const cubicleId = req.nextUrl.searchParams.get("cubicleId");
+  console.log("[GET /beds] Fetching beds for dormId:", params.dormId, "cubicleId:", cubicleId, "schoolId:", user.schoolId);
 
   const beds = await prisma.bed.findMany({
     where: {
@@ -113,6 +114,11 @@ export async function GET(
       },
     },
   });
+
+  console.log("[GET /beds] Found", beds.length, "beds");
+  if (beds.length > 0) {
+    console.log("[GET /beds] First bed:", beds[0]);
+  }
 
   return NextResponse.json(beds);
 }
@@ -145,8 +151,21 @@ export async function POST(
     if (mode === "bulk" && names && names.length > 0) {
       bedLabels = names;
     } else if (mode === "auto" && count) {
-      const p = prefix?.trim() || "Bed ";
-      bedLabels = Array.from({ length: count }, (_, i) => `${p}${i + 1}`);
+      // Get the highest bed number in the dormitory to continue sequencing
+      const lastBed = await prisma.bed.findFirst({
+        where: { dormId: params.dormId },
+        orderBy: { createdAt: "desc" },
+      });
+      let nextBedNumber = 1;
+      if (lastBed && lastBed.label) {
+        // Extract number from label like "Bed 42"
+        const match = lastBed.label.match(/Bed (\d+)/);
+        if (match) {
+          nextBedNumber = parseInt(match[1]) + 1;
+        }
+      }
+      // Generate sequential labels
+      bedLabels = Array.from({ length: count }, (_, i) => `Bed ${nextBedNumber + i}`);
     }
 
     if (bedLabels.length === 0) {

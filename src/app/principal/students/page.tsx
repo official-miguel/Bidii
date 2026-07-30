@@ -45,7 +45,14 @@ function useDebounced<T>(value: T, ms: number): T {
 
 type SchoolClass = { id: string; name: string; form: number; frameworkType?: "EIGHT_FOUR_FOUR" | "CBC" | "CBE" };
 type Subject     = { id: string; name: string; code: string; type: "CORE" | "ELECTIVE"; applicableForms: number[] };
-type SchoolPolicy = { genderPolicy: string; boardingType: string; autoAllocateDorms: boolean };
+type SchoolPolicy = {
+  genderPolicy: string;
+  boardingType: string;
+  autoAllocateDorms: boolean;
+  activeDormsCount?: number;
+  freePositionsCount?: number;
+  canAutoAllocate?: boolean;
+};
 type Student     = {
   id: string;
   fullName: string;
@@ -959,9 +966,30 @@ export default function StudentsPage() {
                             <option value="BOARDING">Boarding</option>
                           </select>
                           {schoolPolicy.autoAllocateDorms && selectedBoarding === "BOARDING" && (
-                            <p className="text-xs text-success mt-1.5 font-medium">
-                              ✓ Dorm will be auto-assigned on registration.
-                            </p>
+                            <>
+                              {schoolPolicy.canAutoAllocate ? (
+                                <p className="text-xs text-success mt-1.5 font-medium">
+                                  ✓ Dorm will be auto-assigned on registration.
+                                </p>
+                              ) : (
+                                <div className="mt-1.5 space-y-1">
+                                  <p className="text-xs text-warn font-medium">
+                                    ⚠ Auto-allocation is enabled but:
+                                  </p>
+                                  <ul className="text-xs text-warn/80 list-disc list-inside space-y-0.5">
+                                    {schoolPolicy.activeDormsCount === 0 && (
+                                      <li>No dormitories created yet</li>
+                                    )}
+                                    {(schoolPolicy.activeDormsCount ?? 0) > 0 && (schoolPolicy.freePositionsCount ?? 0) === 0 && (
+                                      <li>No free sleeping positions available</li>
+                                    )}
+                                  </ul>
+                                  <p className="text-xs text-warn/80 mt-1">
+                                    Student will be registered without dorm assignment. Staff can allocate manually later.
+                                  </p>
+                                </div>
+                              )}
+                            </>
                           )}
                         </>
                       )}

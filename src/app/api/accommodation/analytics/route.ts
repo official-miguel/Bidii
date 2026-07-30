@@ -10,20 +10,8 @@ async function guard() {
   );
 }
 
-/**
- * GET /api/accommodation/analytics
- *
- * Returns cross-module analytics for all dorms. Combines data from:
- *  - Accommodation (occupancy, capacity, movement)
- *  - Discipline (cases per dorm)
- *  - Attendance (rates per dorm)
- *  - Assessment (academic performance per dorm — where data exists)
- *  - Inspections (last inspection score per dorm)
- *
- * Query params:
- *  - dormId  — restrict to a single dorm
- *  - months  — how many months of historical data (default 6)
- */
+// Cross-module analytics for dormitories (occupancy, discipline, attendance, academic, inspections)
+// Query: dormId (optional), months (default 6)
 export async function GET(req: NextRequest) {
   const user = await guard();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -202,13 +190,20 @@ export async function GET(req: NextRequest) {
     const dormHistory = historicalAllocations.filter((h) => h.dormId === dorm.id);
     const movementByMonth: Record<string, { in: number; out: number }> = {};
     for (const h of dormHistory) {
-      const key = `${h.allocationDate.getFullYear()}-${String(h.allocationDate.getMonth() + 1).padStart(2, "0")}`;
-      if (!movementByMonth[key]) movementByMonth[key] = { in: 0, out: 0 };
-      movementByMonth[key].in++;
+      // Count allocation as "in"
+      const allocKey = `${h.allocationDate.getFullYear()}-${String(h.allocationDate.getMonth() + 1).padStart(2, "0")}`;
+      if (!movementByMonth[allocKey]) movementByMonth[allocKey] = { in: 0, out: 0 };
+      
+      // Only count as "in" if status indicates an active allocation
+      if (h.status === "CURRENT" || h.status === "MAINTENANCE_HOLD") {
+        movementByMonth[allocKey].in++;
+      }
+      
+      // Count as "out" when vacated or transferred
       if (h.vacatedDate) {
-        const vKey = `${h.vacatedDate.getFullYear()}-${String(h.vacatedDate.getMonth() + 1).padStart(2, "0")}`;
-        if (!movementByMonth[vKey]) movementByMonth[vKey] = { in: 0, out: 0 };
-        movementByMonth[vKey].out++;
+        const vacateKey = `${h.vacatedDate.getFullYear()}-${String(h.vacatedDate.getMonth() + 1).padStart(2, "0")}`;
+        if (!movementByMonth[vacateKey]) movementByMonth[vacateKey] = { in: 0, out: 0 };
+        movementByMonth[vacateKey].out++;
       }
     }
 
@@ -237,7 +232,7 @@ export async function GET(req: NextRequest) {
         open: openCases,
         resolved: resolvedCases,
         casesPer10Students: studentIds.length > 0
-          ? Math.round((totalCases / studentIds.length) * 10 * 10) / 10 : 0,
+          ? Math.round((totalCases / studentIds.length) * 100) / 10 : 0,
       },
       // Academic
       academic: {
@@ -262,7 +257,7 @@ export async function GET(req: NextRequest) {
           ? [{ type: "LOW_ATTENDANCE", message: `Attendance is ${attendancePct}% (below 80%)`, severity: "high" }]
           : []),
         ...(openCases > 3
-          ? [{ type: "HIGH_DISCIPLINE", message: `${openCases} open discipline cases`, severity: "medium" }]
+          ? [{ type: "HIGH_INDISCIPLINE", message: `${openCases} open indiscipline cases`, severity: "medium" }]
           : []),
         ...(occupancyPct > 95
           ? [{ type: "NEAR_CAPACITY", message: `${occupancyPct}% occupancy — almost full`, severity: "medium" }]
