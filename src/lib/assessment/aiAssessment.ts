@@ -360,8 +360,8 @@ async function detectCbeAtRisk(
   };
 }
 
-// Helper: rough mean-points estimate for 8-4-4 at-risk detection.
-// We don't have paper data here so we use raw item scores as proxies.
+// Estimates mean points for 8-4-4 at-risk detection.
+// Paper data is unavailable here, so raw item scores are used as proxies.
 function computeStudentMeanPoints844(
   items: Array<{ paperId?: string | null; numericScore: number | null }>
 ): number | null {

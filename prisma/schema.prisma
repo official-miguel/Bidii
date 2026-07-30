@@ -32,7 +32,6 @@ model School {
   autoAllocateDorms        Boolean                   @default(false)
   createdAt                DateTime                  @default(now())
   updatedAt                DateTime                  @updatedAt
-  aiTimetableConstraints   AiTimetableConstraint[]
   attendances              Attendance[]
   calendarEvents           CalendarEvent[]
   departments              Department[]
@@ -106,6 +105,12 @@ model School {
   allocationRecords        AllocationRecord[]
   dormInspections          DormInspection[]
   accommodationEvents      AccommodationEvent[]
+  /// Versioned timetable engine
+  timetableVersions        TimetableVersion[]
+  timetableVersionSlots    TimetableVersionSlot[]
+  timetableChangeLogs      TimetableChangeLog[]
+  /// Elective groups
+  electiveGroups           ElectiveGroup[]
 }
 
 /// One row per login. Role determines which dashboard the user lands on.
@@ -156,11 +161,11 @@ model User {
   dormInspectionsPerformed  DormInspection[]
   accommodationEvents       AccommodationEvent[]
 
+  /// Email uniqueness is scoped to one school — same email OK at different schools
+  @@unique([schoolId, email])
   @@index([role])
   @@index([schoolId])
   @@index([staffRoleId])
-  /// Email uniqueness is scoped to one school — same email OK at different schools
-  @@unique([schoolId, email])
 }
 
 /// Opaque bearer token stored server-side (not a JWT) so sessions can be
@@ -198,38 +203,41 @@ model Department {
 /// Section 2A.1 — the master subject list every downstream module reads from.
 /// Code is unique per school, not globally.
 model Subject {
-  id                  String                @id @default(cuid())
+  id                  String                     @id @default(cuid())
   name                String
+  /// School-chosen short code, e.g. "BIO" or "MAT"
   code                String
-  type                SubjectType           @default(CORE)
+  /// Auto-incrementing internal code assigned in registration order, never reused.
+  /// This is the stable join key for timetable generation, invisible to users.
+  internalCode        Int
+  type                SubjectType                @default(CORE)
   departmentId        String
   /// Forms/year groups this subject applies to, e.g. [3, 4] for Form 3 & 4 only.
   applicableForms     Int[]
-  createdAt           DateTime              @default(now())
-  updatedAt           DateTime              @updatedAt
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
   schoolId            String
-  doubleLesson        Boolean               @default(false)
-  /// Inputs for the AI Timetable Generator (Section: AI Timetable Generator).
-  /// How many periods per week a class needs of this subject, whether those
-  /// periods should be scheduled as consecutive double lessons (e.g. Physics
-  /// practicals), and whether it needs a special room (Lab, Computer Lab,
-  /// ...) — free text so it can match whatever room names a school actually
-  /// uses, same spirit as TimetableSlot.room.
-  lessonsPerWeek      Int                   @default(5)
+  /// Whether this subject requires consecutive double lesson blocks
+  doubleLesson        Boolean                    @default(false)
+  /// What kind of room this subject requires, e.g. "Lab", "Computer Lab"
   requiresSpecialRoom String?
   classTeachers       ClassSubjectTeacher[]
   studentElectives    StudentElective[]
+  electiveGroupMembers ElectiveGroupMember[]
   /// Assessment framework back-relations
   papers              Paper[]
   assessmentItems     AssessmentItem[]
   assessmentRoles     AssessmentRole[]
   pathwayWeights      PathwayWeight[]
-  department          Department            @relation(fields: [departmentId], references: [id])
-  school              School                @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  department          Department                 @relation(fields: [departmentId], references: [id])
+  school              School                     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   teacherSubjects     TeacherSubject[]
   timetableSlots      TimetableSlot[]
+  /// Per-class lesson requirements
+  lessonRequirements  SubjectLessonRequirement[]
 
   @@unique([schoolId, code])
+  @@unique([schoolId, internalCode])
   @@index([departmentId])
   @@index([schoolId])
 }
@@ -435,24 +443,25 @@ model TeacherSubject {
 
 /// e.g. "Form 3 North". Name and classTeacherId are unique per school.
 model SchoolClass {
-  id              String                @id @default(cuid())
-  name            String
-  form            Int
-  stream          String?
-  classTeacherId  String?               @unique
+  id                 String                     @id @default(cuid())
+  name               String
+  form               Int
+  stream             String?
+  classTeacherId     String?                    @unique
   /// Which curriculum framework students in this class are assessed under.
   /// Set once at class creation; immutable after that. All students in the
   /// class inherit this value — no per-student switching.
-  frameworkType   FrameworkType         @default(EIGHT_FOUR_FOUR)
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
-  schoolId        String
-  attendances     Attendance[]
-  subjectTeachers ClassSubjectTeacher[]
-  classTeacher    Teacher?              @relation("ClassTeacher", fields: [classTeacherId], references: [id])
-  school          School                @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  students        Student[]
-  timetableSlots  TimetableSlot[]
+  frameworkType      FrameworkType              @default(EIGHT_FOUR_FOUR)
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+  schoolId           String
+  attendances        Attendance[]
+  subjectTeachers    ClassSubjectTeacher[]
+  classTeacher       Teacher?                   @relation("ClassTeacher", fields: [classTeacherId], references: [id])
+  school             School                     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  students           Student[]
+  timetableSlots     TimetableSlot[]
+  lessonRequirements SubjectLessonRequirement[]
 
   @@unique([schoolId, name])
   @@index([schoolId, form])
@@ -555,49 +564,223 @@ model TimetableSlot {
   @@index([schoolId])
 }
 
-/// Section: AI Timetable Generator. The school-day shape the generator (and
-/// eventually the manual grid too) schedules around — one row per school.
-/// Kept separate from School itself since it's config, not identity, and
-/// every field has a sane default so a school that never visits this screen
-/// still gets a working generator.
+/// Section: Timetable Configuration. The school-day structure and template
+/// that defines what the timetable looks like — one row per school.
 model TimetableConfig {
-  schoolId                   String   @id
-  periodsPerDay              Int      @default(8)
-  /// A regular teaching period is inserted after this period number for a
-  /// short break, e.g. 2 means break falls between periods 2 and 3. Null =
-  /// no break.
-  breakAfterPeriod           Int?
-  lunchAfterPeriod           Int?
-  /// Reserves one afternoon slot per week for games/clubs across the whole
-  /// school — the generator never schedules a normal lesson there.
-  gamesDayOfWeek             Int?
-  gamesPeriod                Int?
-  maxLessonsPerTeacherPerDay Int      @default(6)
-  /// The school's actual timetable format — different schools start their
-  /// day at different times and run lessons/breaks/lunch for different
-  /// lengths. periodsPerDay + breakAfterPeriod/lunchAfterPeriod above stay
-  /// the scheduling unit the generator and grids work in (abstract period
-  /// numbers); these four fields describe what those periods mean in real
-  /// clock time so the school can define its own format once, here, and
-  /// have the AI (and every timetable view) follow it. "HH:MM", 24-hour.
-  dayStartTime               String   @default("08:00")
-  periodDurationMinutes      Int      @default(40)
-  breakDurationMinutes       Int      @default(15)
-  lunchDurationMinutes       Int      @default(45)
-  updatedAt                  DateTime @updatedAt
-  school                     School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  schoolId                   String                    @id
+  /// Academic year this config applies to, e.g. "2026"
+  academicYear               String?
+  /// Which term (1, 2, or 3)
+  term                       Int?
+  /// Operating days of the week, e.g. [0,1,2,3,4] for Mon-Fri
+  operatingDays              Int[]                     @default([0, 1, 2, 3, 4])
+  /// Maximum lessons a teacher can teach per day
+  maxLessonsPerTeacherPerDay Int                       @default(6)
+  createdAt                  DateTime                  @default(now())
+  updatedAt                  DateTime                  @updatedAt
+  school                     School                    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  /// The template columns that define the timetable format
+  columns                    TimetableTemplateColumn[]
+  /// Natural language scheduling preferences translated to constraints
+  preferences                TimetablePreference[]
 }
 
-/// Section: AI Timetable Generator / 2C — the standing teacher assignment
-/// for one (class, subject) pair, e.g. "Form 3 North's Mathematics teacher
-/// is Mr. Otieno." This is what makes a teacher "continue to be the teacher
-/// of that subject to that class until changed": once a row exists, the
-/// manual builder pre-fills and locks to this teacher and the AI generator
-/// always reuses it (never re-picks a different eligible teacher on its
-/// own), rather than re-deciding every time a lesson is added or the
-/// timetable is regenerated. A row is created the first time a teacher is
-/// picked for a (class, subject) — manually or by the generator — and only
-/// changes when the Principal explicitly changes it.
+/// One column in the timetable template — can be a lesson slot or non-lesson
+/// period (break, lunch, games, assembly). Admins configure this once and
+/// every class follows the same format.
+model TimetableTemplateColumn {
+  id        String            @id @default(cuid())
+  configId  String
+  /// Display order (1-indexed)
+  position  Int
+  /// Start time, e.g. "08:00" (24-hour)
+  startTime String
+  /// End time, e.g. "08:40"
+  endTime   String
+  /// LESSON | BREAK | LUNCH | GAMES | ASSEMBLY
+  slotType  TimetableSlotType @default(LESSON)
+  /// Human label for non-lesson slots, e.g. "Morning Break" or "Lunch"
+  label     String?
+  /// Which session this belongs to: MORNING | AFTERNOON | EVENING
+  session   TimetableSession  @default(MORNING)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  config    TimetableConfig   @relation(fields: [configId], references: [schoolId], onDelete: Cascade)
+
+  @@unique([configId, position])
+  @@index([configId])
+}
+
+/// How many lessons per week a specific class needs for a specific subject.
+/// Requirements differ per class/stream since 8-4-4, CBC, and CBE have
+/// different lesson counts. One row per (subject, class) pair.
+model SubjectLessonRequirement {
+  id             String      @id @default(cuid())
+  schoolId       String
+  subjectId      String
+  classId        String
+  /// Number of lessons required per week for this class
+  lessonsPerWeek Int         @default(5)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  subject        Subject     @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  class          SchoolClass @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@unique([subjectId, classId])
+  @@index([schoolId])
+  @@index([subjectId])
+  @@index([classId])
+}
+
+/// AI-translated natural language preferences stored as structured constraints
+/// that the deterministic engine reads. AI only translates, never generates
+/// the timetable itself.
+model TimetablePreference {
+  id               String            @id @default(cuid())
+  configId         String
+  /// The original natural language instruction, e.g. "Maths should be in the morning"
+  instruction      String
+  /// Which subject this applies to (null = school-wide preference)
+  subjectCode      String?
+  /// Which session to prefer: MORNING | AFTERNOON | EVENING | null
+  preferredSession TimetableSession?
+  /// Whether this is a hard constraint (must satisfy) or soft (nice to have)
+  isHard           Boolean           @default(false)
+  /// JSON blob with additional constraint details if needed
+  metadata         Json?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  config           TimetableConfig   @relation(fields: [configId], references: [schoolId], onDelete: Cascade)
+
+  @@index([configId])
+}
+
+/// Enum: What type of period a template column represents
+enum TimetableSlotType {
+  LESSON
+  BREAK
+  LUNCH
+  GAMES
+  ASSEMBLY
+}
+
+/// Enum: Teaching day divisions
+enum TimetableSession {
+  MORNING
+  AFTERNOON
+  EVENING
+}
+
+/// Lifecycle status of a versioned timetable draft
+enum TimetableVersionStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+/// Audit log action types for timetable changes
+enum TimetableChangeAction {
+  GENERATED
+  PUBLISHED
+  ARCHIVED
+  SLOT_EDITED
+  SLOT_LOCKED
+  SLOT_UNLOCKED
+  CLONED
+  DELETED
+}
+
+/// A versioned snapshot of a generated timetable. The engine always writes
+/// to a DRAFT version; a PRINCIPAL can promote a draft to PUBLISHED.
+/// Only one version per school can be PUBLISHED at a time.
+model TimetableVersion {
+  id              String                 @id @default(cuid())
+  schoolId        String
+  name            String
+  description     String?
+  status          TimetableVersionStatus @default(DRAFT)
+  academicYear    String?
+  term            Int?
+  clonedFromId    String?
+  generatedAt     DateTime?
+  publishedAt     DateTime?
+  publishedById   String?
+  createdById     String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  /// Snapshot of all vulnerabilities (conflicts + staff shortages) captured at
+  /// generation or last validation. Stored as JSON so clicking a version in the
+  /// UI shows exactly what issues were present at that point in time.
+  vulnerabilities Json?
+  school          School                 @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  slots           TimetableVersionSlot[]
+  changeLogs      TimetableChangeLog[]
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+}
+
+/// One scheduled lesson within a versioned timetable. Each slot records
+/// which teacher covers which subject for a given class at a specific
+/// day/period. isManual=true means a human overrode an engine-generated slot.
+model TimetableVersionSlot {
+  id          String           @id @default(cuid())
+  versionId   String
+  schoolId    String
+  classId     String
+  dayOfWeek   Int
+  period      Int
+  subjectId   String
+  teacherId   String
+  room        String?
+  isManual    Boolean          @default(false)
+  notes       String?
+  isLocked    Boolean          @default(false)
+  lockScope   String?
+  lockedAt    DateTime?
+  lockedById  String?
+  lockReason  String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  version     TimetableVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  school      School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, classId, dayOfWeek, period], name: "TimetableVersionSlot_class_slot_key")
+  @@unique([versionId, teacherId, dayOfWeek, period], name: "TimetableVersionSlot_teacher_slot_key")
+  @@index([versionId])
+  @@index([schoolId])
+  @@index([classId])
+  @@index([teacherId])
+  @@index([versionId, isLocked])
+}
+
+/// Audit trail for every change made to a timetable version — generation,
+/// manual edits, slot locks, publishing, and archiving.
+model TimetableChangeLog {
+  id            String                @id @default(cuid())
+  schoolId      String
+  versionId     String?
+  action        TimetableChangeAction
+  detail        Json                  @default("{}")
+  performedById String?
+  performedAt   DateTime              @default(now())
+  changeSource  String?
+  slotId        String?
+  beforeState   Json?
+  afterState    Json?
+  reason        String?
+  school        School                @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  version       TimetableVersion?     @relation(fields: [versionId], references: [id], onDelete: SetNull)
+
+  @@index([schoolId])
+  @@index([versionId])
+}
+
+/// Section: 2C — the standing teacher assignment for one (class, subject) pair.
+/// This is what makes a teacher "continue to be the teacher of that subject
+/// to that class until changed": once a row exists, it never changes unless
+/// the Principal explicitly updates it, giving timetable generation stable
+/// teacher-to-stream assignments.
 model ClassSubjectTeacher {
   classId     String
   subjectId   String
@@ -611,9 +794,8 @@ model ClassSubjectTeacher {
   @@index([teacherId])
 }
 
-/// Section: AI Timetable Generator — "teacher availability" input. A slot a
-/// specific teacher can't be scheduled in (e.g. they teach part-time and
-/// leave after period 5 on Fridays). Absence of a row means available.
+/// Teacher availability constraints — slots where a teacher can't be scheduled.
+/// E.g., part-time teachers who leave after period 5 on Fridays.
 model TeacherUnavailability {
   id        String  @id @default(cuid())
   teacherId String
@@ -625,23 +807,41 @@ model TeacherUnavailability {
   @@index([teacherId])
 }
 
-/// Section: AI Timetable Generator — one row per natural-language
-/// instruction a Principal has given the AI chat (e.g. "Prioritize
-/// Mathematics in the morning"). `parsed` is Gemini's structured
-/// interpretation (see src/lib/ai/constraintParser.ts), which is what the
-/// generator actually reads; `instruction` is kept verbatim so the Principal
-/// can see the list of standing instructions they've given and remove ones
-/// that no longer apply. Persists across generations until removed — it's a
-/// standing preference, not a one-off generation option.
-model AiTimetableConstraint {
-  id          String   @id @default(cuid())
-  schoolId    String
-  instruction String
-  parsed      Json?
-  createdAt   DateTime @default(now())
-  school      School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+/// An elective group (e.g. "GPC") that bundles several elective subjects into
+/// one atomic timetable slot. Scoped to a form (scopeForm > 0) or
+/// school-wide (scopeForm = 0). Every class in scope lands in the same
+/// period(s); per-class teacher assignments live in ElectiveGroupMember.
+model ElectiveGroup {
+  id             String                @id @default(cuid())
+  schoolId       String
+  name           String
+  /// 0 = school-wide; any positive integer = the form number (e.g. 4).
+  scopeForm      Int                   @default(0)
+  lessonsPerWeek Int                   @default(1)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  school         School                @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  members        ElectiveGroupMember[]
 
+  /// Two groups with the same name can exist on different forms.
+  @@unique([schoolId, name, scopeForm])
   @@index([schoolId])
+  @@index([schoolId, scopeForm])
+}
+
+/// One subject inside an elective group. A subject may appear in more than
+/// one group (for different scopes) — each membership is fully independent.
+model ElectiveGroupMember {
+  id        String        @id @default(cuid())
+  groupId   String
+  subjectId String
+  createdAt DateTime      @default(now())
+  group     ElectiveGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  subject   Subject       @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, subjectId])
+  @@index([groupId])
+  @@index([subjectId])
 }
 
 /// Section: School Calendar. One row per school-specific calendar entry —

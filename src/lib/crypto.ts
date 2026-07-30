@@ -8,7 +8,7 @@ import { createCipheriv, createDecipheriv, randomBytes, createHash } from "crypt
 /// provider's API.
 ///
 /// INTEGRATION_ENCRYPTION_KEY must be set in the server environment — any
-/// long random string works, it's hashed down to a 32-byte key below so the
+/// long random string is sufficient — it is hashed down to a 32-byte key so the
 /// env var itself doesn't have to be exactly 32 bytes. Losing/rotating this
 /// value makes every previously-saved key unreadable, so treat it like any
 /// other production secret: set it once, back it up, don't commit it.

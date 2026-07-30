@@ -245,7 +245,7 @@ export class PolicyEngine {
       reasons.push("This copy is archived and cannot be borrowed.");
     }
 
-    // ── Fine pause note ────────────────────────────────────────────────
+    // ── Fine pause check ──────────────────────────────────────────────
     if (finePaused) {
       warnings.push("Fine accumulation is currently paused for this student.");
     }

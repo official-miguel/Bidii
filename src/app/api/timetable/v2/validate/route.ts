@@ -1,148 +1,237 @@
-import { NextRequest, NextResponse }       from "next/server";
-import { prisma }                          from "@/lib/prisma";
-import { requireRole }                     from "@/lib/auth";
-import { requirePermission }               from "@/lib/permissions";
-import { validateTimetable,
-         type ValidatorSlot,
-         type ValidatorSubjectRequirement,
-         type ValidatorConfig,
-         type ValidatorTeacherAvailability } from "@/lib/ai/timetableValidator";
-
 /**
- * GET /api/timetable/v2/validate?versionId=...
+ * API Route: GET /api/timetable/v2/validate?versionId=...
  *
- * Runs all 8 validation passes against a saved TimetableVersion and returns
- * the full ValidationReport. If versionId is omitted, validates the live
- * published timetable (legacy TimetableSlot rows).
+ * Validates a saved version (or the live published slots) against all
+ * constraints, runs staff-shortage analysis, and returns a full report.
  *
- * Used by the generate page "Validate before publish" button and any future
- * pre-publish gate.
+ * If versionId is supplied the computed vulnerability snapshot is also
+ * written back to TimetableVersion.vulnerabilities so the versions page
+ * always reflects the latest check.
  */
-export async function GET(req: NextRequest) {
-  const user = (await requireRole("PRINCIPAL")) ?? (await requirePermission("TIMETABLE", "view"));
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { requireRole } from "@/lib/auth";
+import { requirePermission } from "@/lib/permissions";
+import { validateTimetable } from "@/lib/timetable/validator";
+import {
+  analyseStaffShortages,
+  type StaffShortageConfig,
+} from "@/lib/timetable/liveConflictDetector";
+import type { GeneratedSlot, TemplateColumn } from "@/lib/timetable/deterministicEngine";
+import { TimetableSession } from "@prisma/client";
+
+export async function GET(req: NextRequest) {
+  const user =
+    (await requireRole("PRINCIPAL")) ??
+    (await requirePermission("TIMETABLE", "view"));
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const schoolId = user.schoolId;
   const versionId = req.nextUrl.searchParams.get("versionId");
 
-  // ── Load slots ──────────────────────────────────────────────────────────
+  // ── Load slots ─────────────────────────────────────────────────────────
   type RawSlot = {
-    classId: string; className: string; dayOfWeek: number; period: number;
-    subjectId: string; subjectCode: string; teacherId: string; teacherName: string;
-    room: string | null; isDouble?: boolean;
+    classId: string;
+    dayOfWeek: number;
+    period: number;
+    subjectId: string;
+    teacherId: string;
+    room: string | null;
   };
 
   let rawSlots: RawSlot[];
 
   if (versionId) {
-    // Verify version belongs to this school
-    const versionRows = await prisma.$queryRaw<Array<{ schoolId: string }>>`
+    const vRows = await prisma.$queryRaw<Array<{ schoolId: string }>>`
       SELECT "schoolId" FROM "TimetableVersion"
-      WHERE id = ${versionId} AND "schoolId" = ${user.schoolId}`;
-    if (!versionRows[0]) return NextResponse.json({ error: "Version not found." }, { status: 404 });
-
+      WHERE id = ${versionId} AND "schoolId" = ${schoolId}`;
+    if (!vRows[0]) {
+      return NextResponse.json({ error: "Version not found" }, { status: 404 });
+    }
     rawSlots = await prisma.$queryRaw<RawSlot[]>`
-      SELECT s."classId", c.name AS "className", s."dayOfWeek", s.period,
-             s."subjectId", sub.code AS "subjectCode",
-             s."teacherId", t."fullName" AS "teacherName",
-             s.room, s."isManual" AS "isDouble"
-      FROM "TimetableVersionSlot" s
-      JOIN "SchoolClass" c   ON c.id = s."classId"
-      JOIN "Subject"     sub ON sub.id = s."subjectId"
-      JOIN "Teacher"     t   ON t.id = s."teacherId"
-      WHERE s."versionId" = ${versionId}`;
+      SELECT "classId", "dayOfWeek", period, "subjectId", "teacherId", room
+      FROM "TimetableVersionSlot"
+      WHERE "versionId" = ${versionId}`;
   } else {
     rawSlots = await prisma.$queryRaw<RawSlot[]>`
-      SELECT ts."classId", c.name AS "className", ts."dayOfWeek", ts.period,
-             ts."subjectId", sub.code AS "subjectCode",
-             ts."teacherId", t."fullName" AS "teacherName",
-             ts.room, false AS "isDouble"
-      FROM "TimetableSlot" ts
-      JOIN "SchoolClass" c   ON c.id = ts."classId"
-      JOIN "Subject"     sub ON sub.id = ts."subjectId"
-      JOIN "Teacher"     t   ON t.id = ts."teacherId"
-      WHERE ts."schoolId" = ${user.schoolId}`;
+      SELECT "classId", "dayOfWeek", period, "subjectId", "teacherId", room
+      FROM "TimetableSlot"
+      WHERE "schoolId" = ${schoolId}`;
   }
 
   if (!rawSlots.length) {
-    return NextResponse.json({ error: "No slots to validate — timetable is empty." }, { status: 422 });
+    return NextResponse.json(
+      { error: "No slots to validate — timetable is empty" },
+      { status: 422 }
+    );
   }
 
-  // ── Load config and requirements ────────────────────────────────────────
-  const [configRow, subjects, classesRaw, unavailRows, specialPeriods, operatingDays, workloadRules] =
-    await Promise.all([
-      prisma.timetableConfig.findUnique({ where: { schoolId: user.schoolId } }),
-      prisma.subject.findMany({
-        where: { schoolId: user.schoolId },
-        select: { id: true, code: true, name: true, applicableForms: true, lessonsPerWeek: true, doubleLesson: true },
-      }),
-      prisma.schoolClass.findMany({
-        where: { schoolId: user.schoolId },
-        select: { id: true, name: true, form: true },
-      }),
-      prisma.teacherUnavailability.findMany({
-        where: { teacher: { schoolId: user.schoolId } },
-        select: { teacherId: true, dayOfWeek: true, period: true },
-      }),
-      prisma.$queryRaw<Array<{ dayOfWeek: number | null; period: number; isActive: boolean }>>`
-        SELECT "dayOfWeek", period, "isActive"
-        FROM "SpecialPeriod" WHERE "schoolId" = ${user.schoolId} AND "isActive" = true`,
-      prisma.$queryRaw<Array<{ dayOfWeek: number; isActive: boolean }>>`
-        SELECT "dayOfWeek", "isActive" FROM "OperatingDay" WHERE "schoolId" = ${user.schoolId}`,
-      prisma.$queryRaw<Array<{
-        subjectId: string; form: number; lessonsPerWeek: number;
-        doubleLesson: boolean; minSpreadDays: number | null;
-      }>>`SELECT "subjectId", form, "lessonsPerWeek", "doubleLesson", "minSpreadDays"
-          FROM "SubjectWorkloadRule" WHERE "schoolId" = ${user.schoolId}`,
-    ]);
+  // ── Load supporting data ────────────────────────────────────────────────
+  const [
+    config,
+    requirements,
+    teacherAssignments,
+    teacherUnavailability,
+    classes,
+    subjects,
+    teachers,
+  ] = await Promise.all([
+    prisma.timetableConfig.findUnique({
+      where: { schoolId },
+      include: {
+        columns: { orderBy: { position: "asc" } },
+        preferences: true,
+      },
+    }),
+    prisma.subjectLessonRequirement.findMany({
+      where: { schoolId },
+      select: { classId: true, subjectId: true, lessonsPerWeek: true },
+    }),
+    prisma.classSubjectTeacher.findMany({
+      where: { schoolClass: { schoolId } },
+      select: { classId: true, subjectId: true, teacherId: true },
+    }),
+    prisma.teacherUnavailability.findMany({
+      where: { teacher: { schoolId } },
+      select: { teacherId: true, dayOfWeek: true, period: true },
+    }),
+    prisma.schoolClass.findMany({
+      where: { schoolId },
+      select: { id: true, name: true },
+    }),
+    prisma.subject.findMany({
+      where: { schoolId },
+      select: { id: true, code: true, name: true, internalCode: true },
+    }),
+    prisma.teacher.findMany({
+      where: { schoolId },
+      select: { id: true, fullName: true },
+    }),
+  ]);
 
-  const activeDays: number[] =
-    operatingDays.filter((d) => d.isActive).map((d) => d.dayOfWeek).length > 0
-      ? operatingDays.filter((d) => d.isActive).map((d) => d.dayOfWeek)
-      : [0, 1, 2, 3, 4];
-
-  const blockedSlots = new Set<string>();
-  for (const sp of specialPeriods) {
-    if (sp.dayOfWeek !== null) blockedSlots.add(`${sp.dayOfWeek}-${sp.period}`);
-    else activeDays.forEach((d) => blockedSlots.add(`${d}-${sp.period}`));
-  }
-  if (configRow?.gamesDayOfWeek != null && configRow?.gamesPeriod != null)
-    blockedSlots.add(`${configRow.gamesDayOfWeek}-${configRow.gamesPeriod}`);
-
-  const workloadMap = new Map(workloadRules.map((r) => [`${r.subjectId}-${r.form}`, r]));
-
-  const requirements: ValidatorSubjectRequirement[] = [];
-  for (const cls of classesRaw) {
-    for (const s of subjects) {
-      if (s.applicableForms.length && !s.applicableForms.includes(cls.form)) continue;
-      const rule = workloadMap.get(`${s.id}-${cls.form}`);
-      requirements.push({
-        classId: cls.id, className: cls.name,
-        subjectId: s.id, subjectCode: s.code, subjectName: s.name,
-        lessonsPerWeek: rule?.lessonsPerWeek ?? s.lessonsPerWeek,
-        doubleLesson:   rule?.doubleLesson   ?? s.doubleLesson,
-        minSpreadDays:  rule?.minSpreadDays  ?? 1,
-      });
-    }
+  if (!config) {
+    return NextResponse.json(
+      { error: "Timetable template not configured" },
+      { status: 400 }
+    );
   }
 
-  const unavailability = new Map<string, Set<string>>();
-  for (const row of unavailRows) {
-    if (!unavailability.has(row.teacherId)) unavailability.set(row.teacherId, new Set());
-    unavailability.get(row.teacherId)!.add(`${row.dayOfWeek}-${row.period}`);
+  // ── Run conflict validator ──────────────────────────────────────────────
+  const slots: GeneratedSlot[] = rawSlots.map((s) => ({
+    classId: s.classId,
+    dayOfWeek: s.dayOfWeek,
+    period: s.period,
+    subjectId: s.subjectId,
+    teacherId: s.teacherId,
+    room: s.room,
+  }));
+
+  const sessionPrefs = config.preferences
+    .filter((p) => p.subjectCode && p.preferredSession)
+    .map((p) => ({
+      subjectCode: p.subjectCode!,
+      preferredSession: p.preferredSession as TimetableSession,
+      isHard: p.isHard,
+    }));
+
+  const report = validateTimetable({
+    slots,
+    classes: classes.map((c) => ({ id: c.id, name: c.name })),
+    subjects: subjects.map((s) => ({
+      id: s.id,
+      code: s.code,
+      name: s.name,
+      internalCode: s.internalCode,
+    })),
+    teachers: teachers.map((t) => ({ id: t.id, name: t.fullName })),
+    requirements,
+    teacherAssignments,
+    teacherUnavailability,
+    studentSelections: [],
+    sessionPreferences: sessionPrefs,
+    templateColumns: config.columns as TemplateColumn[],
+    operatingDays: config.operatingDays,
+  });
+
+  // ── Staff shortage analysis ─────────────────────────────────────────────
+  const subjectTeacherMap = new Map<string, string[]>();
+  for (const a of teacherAssignments) {
+    const list = subjectTeacherMap.get(a.subjectId) ?? [];
+    if (!list.includes(a.teacherId)) list.push(a.teacherId);
+    subjectTeacherMap.set(a.subjectId, list);
   }
 
-  const validatorSlots: ValidatorSlot[] = rawSlots.map((s) => ({ ...s, isDouble: s.isDouble ?? false }));
+  const subjectMetaMap = new Map(
+    subjects.map((s) => [s.id, { code: s.code, name: s.name }])
+  );
+  const classMetaMap = new Map(classes.map((c) => [c.id, c.name]));
+  const reqMap = new Map<string, number>();
+  for (const r of requirements) {
+    reqMap.set(`${r.classId}-${r.subjectId}`, r.lessonsPerWeek);
+  }
 
-  const validatorConfig: ValidatorConfig = {
-    operatingDays:              activeDays,
-    periodsPerDay:              configRow?.periodsPerDay              ?? 8,
-    blockedSlots,
-    maxLessonsPerTeacherPerDay: configRow?.maxLessonsPerTeacherPerDay ?? 6,
+  const shortageConfig: StaffShortageConfig = {
+    subjectTeacherMap,
+    subjectMeta: subjectMetaMap,
+    classMeta: classMetaMap,
+    maxLessonsPerTeacherPerWeek:
+      config.operatingDays.length * config.maxLessonsPerTeacherPerDay,
+    requiredLessons: reqMap,
   };
 
-  const availability: ValidatorTeacherAvailability[] = [...unavailability.entries()]
-    .map(([teacherId, unavailableSlots]) => ({ teacherId, unavailableSlots }));
+  const staffShortages = analyseStaffShortages(shortageConfig);
 
-  const report = validateTimetable({ slots: validatorSlots, requirements, config: validatorConfig, availability });
-  return NextResponse.json(report);
+  // ── Build + persist vulnerability snapshot (version only) ──────────────
+  const now = new Date();
+  const conflictEntries = report.issues.map((i) => ({
+    type: i.rule,
+    severity: (i.severity === "ERROR" ? "error" : "warning") as "error" | "warning",
+    message: i.message,
+    action: i.affectedClasses?.length
+      ? `Affects: ${i.affectedClasses.slice(0, 3).join(", ")}${
+          i.affectedClasses.length > 3 ? ` +${i.affectedClasses.length - 3} more` : ""
+        }`
+      : "Review the timetable for this issue.",
+  }));
+
+  const vulnerabilitySnapshot = {
+    capturedAt: now.toISOString(),
+    totalErrors: report.summary.errors,
+    totalWarnings: report.summary.warnings,
+    conflicts: conflictEntries,
+    staffShortages,
+  };
+
+  if (versionId) {
+    // Fire-and-forget — validation is not a write-critical path
+    prisma.$executeRaw`
+      UPDATE "TimetableVersion"
+      SET "vulnerabilities" = ${JSON.stringify(vulnerabilitySnapshot)}::jsonb,
+          "updatedAt" = ${now}
+      WHERE id = ${versionId} AND "schoolId" = ${schoolId}
+    `.catch(() => { /* non-fatal */ });
+  }
+
+  // ── Response (backward-compatible — existing fields unchanged) ──────────
+  return NextResponse.json({
+    ...report,
+    // Flattened convenience fields the versions page publish-gate uses
+    errorCount:   report.summary.errors,
+    warningCount: report.summary.warnings,
+    errors: report.issues
+      .filter((i) => i.severity === "ERROR")
+      .slice(0, 8)
+      .map((i) => ({
+        message: i.message,
+        action: i.affectedClasses?.length
+          ? `Affects: ${i.affectedClasses.slice(0, 3).join(", ")}`
+          : "Review the timetable for this issue.",
+      })),
+    // New additions
+    staffShortages,
+    vulnerabilities: vulnerabilitySnapshot,
+  });
 }

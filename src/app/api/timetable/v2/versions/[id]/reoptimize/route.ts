@@ -1,89 +1,83 @@
-import { NextRequest, NextResponse }      from "next/server";
-import { z }                              from "zod";
-import { prisma }                         from "@/lib/prisma";
-import { requireRole }                    from "@/lib/auth";
-import { requirePermission }              from "@/lib/permissions";
-import { randomUUID }                     from "crypto";
-import {
-  runEngine,
-  type EngineClass, type EngineSubject, type EngineConfig, type EnginePreferences,
-  type EngineSlot,
-} from "@/lib/ai/timetableEngine";
-import { optimizeTimetable }              from "@/lib/ai/timetableOptimizer";
-import type { ParsedConstraint }          from "@/lib/ai/constraintParser";
+/**
+ * API Route: POST /api/timetable/v2/versions/[id]/reoptimize
+ *
+ * Re-generates unlocked slots for specified classes in an existing DRAFT version.
+ * Locked slots are preserved as positional pins — the engine works around them.
+ * Returns a diff preview; add ?apply=true to persist.
+ */
+
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { prisma } from "@/lib/prisma";
+import { requireRole } from "@/lib/auth";
+import { requirePermission } from "@/lib/permissions";
+import { randomUUID } from "crypto";
+import { generateTimetable } from "@/lib/timetable/deterministicEngine";
+import { getLessonColumns } from "@/lib/timetable/engineHelpers";
+import type { TemplateColumn, EngineClass, EngineSubject } from "@/lib/timetable/deterministicEngine";
+import { TimetableSession } from "@prisma/client";
 
 type Ctx = { params: { id: string } };
 
 const schema = z.object({
-  /** Optional: only re-optimize these class IDs. Omit = all unlocked classes. */
   classIds: z.array(z.string()).optional(),
-  /** Number of optimizer passes (default 4). */
-  optimizerPasses: z.number().int().min(1).max(8).optional(),
-  /** Optional administrator reason logged in audit trail. */
   reason: z.string().trim().max(300).optional(),
 });
 
-// ── Slot snapshot helper ────────────────────────────────────────────────────
-type RawSlot = {
-  id: string; classId: string; className: string;
-  dayOfWeek: number; period: number;
-  subjectId: string; subjectCode: string;
-  teacherId: string; teacherName: string;
-  room: string | null; isManual: boolean; isLocked: boolean;
-  lockScope: string | null; lockReason: string | null;
-};
-
-// ── Diff types ──────────────────────────────────────────────────────────────
 export type DiffStatus = "unchanged" | "changed" | "added" | "removed" | "locked";
 
-export type SlotDiff = {
-  status:    DiffStatus;
-  current:   RawSlot | null;   // null when status = "added"
-  proposed:  RawSlot | null;   // null when status = "removed"
-  /** Which fields changed (only relevant when status = "changed"). */
-  changedFields: string[];
-};
-
-/**
- * POST /api/timetable/v2/versions/[id]/reoptimize
- *
- * Re-runs the scheduling engine for all UNLOCKED slots in the version.
- * Locked slots are treated as absolute positional pins — the engine sees
- * their (day, period) as occupied and their teacher as unavailable in that
- * slot, so it can never touch them.
- *
- * By default returns a preview diff without persisting. Add ?apply=true to
- * atomically apply the proposed changes to the version.
- *
- * Returns:
- *   { diff: SlotDiff[], stats, warnings }
- */
 export async function POST(req: NextRequest, { params }: Ctx) {
-  const user = (await requireRole("PRINCIPAL")) ?? (await requirePermission("TIMETABLE", "manage"));
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user =
+    (await requireRole("PRINCIPAL")) ??
+    (await requirePermission("TIMETABLE", "manage"));
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
+  const schoolId = user.schoolId;
   const apply = req.nextUrl.searchParams.get("apply") === "true";
 
   const body = schema.safeParse(await req.json().catch(() => ({})));
-  if (!body.success) return NextResponse.json({ error: "Invalid input." }, { status: 400 });
-  const { classIds: targetClassIds, optimizerPasses, reason } = body.data;
+  if (!body.success) {
+    return NextResponse.json({ error: "Invalid input" }, { status: 400 });
+  }
+
+  const { classIds: targetClassIds, reason } = body.data;
 
   // Verify version
   const vRows = await prisma.$queryRaw<Array<{ status: string }>>`
     SELECT status FROM "TimetableVersion"
-    WHERE id = ${params.id} AND "schoolId" = ${user.schoolId}`;
-  if (!vRows[0]) return NextResponse.json({ error: "Version not found." }, { status: 404 });
-  if (vRows[0].status === "ARCHIVED")
-    return NextResponse.json({ error: "Cannot re-optimize an archived version." }, { status: 409 });
+    WHERE id = ${params.id} AND "schoolId" = ${schoolId}`;
 
-  // ── Load current slots ──────────────────────────────────────────────────
+  if (!vRows[0]) return NextResponse.json({ error: "Version not found" }, { status: 404 });
+  if (vRows[0].status === "ARCHIVED") {
+    return NextResponse.json(
+      { error: "Cannot re-generate an archived version" },
+      { status: 409 }
+    );
+  }
+
+  // Load current slots
+  type RawSlot = {
+    id: string;
+    classId: string;
+    className: string;
+    dayOfWeek: number;
+    period: number;
+    subjectId: string;
+    subjectCode: string;
+    teacherId: string;
+    teacherName: string;
+    room: string | null;
+    isLocked: boolean;
+  };
+
   const currentSlots = await prisma.$queryRaw<RawSlot[]>`
     SELECT s.id, s."classId", c.name AS "className",
-           s."dayOfWeek", s.period, s."subjectId",
-           sub.code AS "subjectCode", s."teacherId",
-           t."fullName" AS "teacherName", s.room,
-           s."isManual", s."isLocked",
-           s."lockScope", s."lockReason"
+           s."dayOfWeek", s.period,
+           s."subjectId", sub.code AS "subjectCode",
+           s."teacherId", t."fullName" AS "teacherName",
+           s.room, s."isLocked"
     FROM "TimetableVersionSlot" s
     JOIN "SchoolClass" c   ON c.id = s."classId"
     JOIN "Subject"     sub ON sub.id = s."subjectId"
@@ -91,92 +85,106 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     WHERE s."versionId" = ${params.id}
     ORDER BY s."classId", s."dayOfWeek", s.period`;
 
-  const lockedSlots   = currentSlots.filter((s) => s.isLocked);
+  const lockedSlots = currentSlots.filter((s) => s.isLocked);
   const unlockedSlots = currentSlots.filter((s) => !s.isLocked);
 
-  // Determine which classes to re-optimize
+  // Determine which classes to re-generate
   const candidateClasses = targetClassIds?.length
     ? [...new Set(unlockedSlots.filter((s) => targetClassIds.includes(s.classId)).map((s) => s.classId))]
     : [...new Set(unlockedSlots.map((s) => s.classId))];
 
-  if (candidateClasses.length === 0)
-    return NextResponse.json({ error: "No unlocked slots to re-optimize." }, { status: 422 });
-
-  // ── Load engine inputs ──────────────────────────────────────────────────
-  const [classesRaw, subjectsRaw, workloadRules, teacherSubjects, unavailRows,
-         configRow, constraintsRaw, pinnedRows, specials, opDays] = await Promise.all([
-    prisma.schoolClass.findMany({
-      where: { schoolId: user.schoolId, id: { in: candidateClasses } },
-      select: { id: true, name: true, form: true },
-    }),
-    prisma.subject.findMany({
-      where: { schoolId: user.schoolId },
-      select: { id: true, code: true, name: true, applicableForms: true,
-                lessonsPerWeek: true, doubleLesson: true, requiresSpecialRoom: true },
-    }),
-    prisma.$queryRaw<Array<{
-      subjectId: string; form: number; lessonsPerWeek: number;
-      doubleLesson: boolean; consecutiveDouble: boolean;
-      requiresSpecialRoom: string | null; minSpreadDays: number | null;
-      preferMorning: boolean; preferAfternoon: boolean;
-    }>>`SELECT "subjectId", form, "lessonsPerWeek", "doubleLesson", "consecutiveDouble",
-             "requiresSpecialRoom", "minSpreadDays", "preferMorning", "preferAfternoon"
-        FROM "SubjectWorkloadRule" WHERE "schoolId" = ${user.schoolId}`,
-    prisma.teacherSubject.findMany({
-      where: { subject: { schoolId: user.schoolId } },
-      select: { subjectId: true, teacherId: true },
-    }),
-    prisma.teacherUnavailability.findMany({
-      where: { teacher: { schoolId: user.schoolId } },
-      select: { teacherId: true, dayOfWeek: true, period: true },
-    }),
-    prisma.timetableConfig.findUnique({ where: { schoolId: user.schoolId } }),
-    prisma.aiTimetableConstraint.findMany({ where: { schoolId: user.schoolId } }),
-    prisma.classSubjectTeacher.findMany({
-      where: { schoolClass: { schoolId: user.schoolId } },
-      select: { classId: true, subjectId: true, teacherId: true },
-    }),
-    prisma.$queryRaw<Array<{ dayOfWeek: number | null; period: number }>>`
-      SELECT "dayOfWeek", period FROM "SpecialPeriod"
-      WHERE "schoolId" = ${user.schoolId} AND "isActive" = true`,
-    prisma.$queryRaw<Array<{ dayOfWeek: number; isActive: boolean }>>`
-      SELECT "dayOfWeek", "isActive" FROM "OperatingDay"
-      WHERE "schoolId" = ${user.schoolId}`,
-  ]);
-
-  const activeDays: number[] =
-    opDays.filter((d) => d.isActive).map((d) => d.dayOfWeek).length > 0
-      ? opDays.filter((d) => d.isActive).map((d) => d.dayOfWeek)
-      : ((configRow as Record<string,unknown>)?.operatingDaysOfWeek as number[]|undefined) ?? [0,1,2,3,4];
-
-  // Build blocked slots from special periods + legacy games
-  const blockedSlots = new Set<string>();
-  for (const sp of specials) {
-    if (sp.dayOfWeek !== null) blockedSlots.add(`${sp.dayOfWeek}-${sp.period}`);
-    else activeDays.forEach((d) => blockedSlots.add(`${d}-${sp.period}`));
+  if (candidateClasses.length === 0) {
+    return NextResponse.json({ error: "No unlocked slots to re-generate" }, { status: 422 });
   }
-  if (configRow?.gamesDayOfWeek != null && configRow?.gamesPeriod != null)
-    blockedSlots.add(`${configRow.gamesDayOfWeek}-${configRow.gamesPeriod}`);
 
-  // ── Build unavailability: teacher unavailability + ALL locked slot positions
-  //    + slots belonging to classes NOT being re-optimized
+  // Load engine data
+  const [classesRaw, requirements, teacherAssignments, unavailRows, timetableConfig, sessionPrefs] =
+    await Promise.all([
+      prisma.schoolClass.findMany({
+        where: { schoolId, id: { in: candidateClasses } },
+        select: { id: true, name: true, form: true, stream: true },
+        orderBy: [{ form: "asc" }, { name: "asc" }],
+      }),
+      prisma.subjectLessonRequirement.findMany({
+        where: { schoolId },
+        include: {
+          subject: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              internalCode: true,
+              doubleLesson: true,
+              requiresSpecialRoom: true,
+            },
+          },
+        },
+      }),
+      prisma.classSubjectTeacher.findMany({
+        where: { schoolClass: { schoolId } },
+        select: { classId: true, subjectId: true, teacherId: true },
+      }),
+      prisma.teacherUnavailability.findMany({
+        where: { teacher: { schoolId } },
+        select: { teacherId: true, dayOfWeek: true, period: true },
+      }),
+      prisma.timetableConfig.findUnique({
+        where: { schoolId },
+        include: {
+          columns: { orderBy: { position: "asc" } },
+          preferences: true,
+        },
+      }),
+      prisma.timetablePreference.findMany({
+        where: { config: { schoolId } },
+      }),
+    ]);
+
+  if (!timetableConfig) {
+    return NextResponse.json({ error: "Timetable template not configured" }, { status: 400 });
+  }
+
+  const templateColumns = timetableConfig.columns as TemplateColumn[];
+  const lessonColumns = getLessonColumns(templateColumns);
+
+  // Build engine inputs
+  const subjectMap = new Map<string, EngineSubject>();
+  for (const req of requirements) {
+    if (!subjectMap.has(req.subject.id)) {
+      subjectMap.set(req.subject.id, {
+        id: req.subject.id,
+        internalCode: req.subject.internalCode,
+        code: req.subject.code,
+        name: req.subject.name,
+        doubleLesson: req.subject.doubleLesson,
+        requiresSpecialRoom: req.subject.requiresSpecialRoom,
+      });
+    }
+  }
+
+  const formStreamCount = new Map<number, number>();
+  const engineClasses: EngineClass[] = classesRaw.map((cls) => {
+    const count = formStreamCount.get(cls.form) ?? 0;
+    formStreamCount.set(cls.form, count + 1);
+    return { id: cls.id, name: cls.name, form: cls.form, stream: cls.stream, streamIndex: count };
+  });
+
+  // Build unavailability: teacher rows + locked slots + other classes' slots
+  const regenSet = new Set(candidateClasses);
   const unavailability = new Map<string, Set<string>>();
 
-  for (const r of unavailRows) {
-    if (!unavailability.has(r.teacherId)) unavailability.set(r.teacherId, new Set());
-    unavailability.get(r.teacherId)!.add(`${r.dayOfWeek}-${r.period}`);
+  for (const row of unavailRows) {
+    if (!unavailability.has(row.teacherId)) unavailability.set(row.teacherId, new Set());
+    unavailability.get(row.teacherId)!.add(`${row.dayOfWeek}-${row.period}`);
   }
 
-  // Lock locked slots: treat them as occupied (teacher unavailable at that slot)
+  // Treat locked slots as occupied
   for (const s of lockedSlots) {
     if (!unavailability.has(s.teacherId)) unavailability.set(s.teacherId, new Set());
     unavailability.get(s.teacherId)!.add(`${s.dayOfWeek}-${s.period}`);
-    // Also block the class at that slot so no other subject can land there
-    blockedSlots.add(`${s.dayOfWeek}-${s.period}-locked-${s.classId}`);
   }
 
-  // Lock slots for classes NOT in the re-optimization set
-  const regenSet = new Set(candidateClasses);
+  // Treat other classes' slots as occupied by their teachers
   for (const s of currentSlots) {
     if (!regenSet.has(s.classId)) {
       if (!unavailability.has(s.teacherId)) unavailability.set(s.teacherId, new Set());
@@ -184,197 +192,160 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     }
   }
 
-  const workloadMap = new Map(workloadRules.map((r) => [`${r.subjectId}-${r.form}`, r]));
-
-  const subjectsByClass = new Map<string, EngineSubject[]>();
-  for (const cls of classesRaw) {
-    const applicable = subjectsRaw.filter(
-      (s) => !s.applicableForms.length || s.applicableForms.includes(cls.form)
-    );
-    // For locked slots: subtract already-placed lessons from the weekly requirement
-    const lockedForClass = lockedSlots.filter((s) => s.classId === cls.id);
-    const lockedCountBySubject = new Map<string, number>();
-    for (const ls of lockedForClass)
-      lockedCountBySubject.set(ls.subjectId, (lockedCountBySubject.get(ls.subjectId) ?? 0) + 1);
-
-    subjectsByClass.set(cls.id, applicable.map((s) => {
-      const rule = workloadMap.get(`${s.id}-${cls.form}`);
-      const totalRequired  = rule?.lessonsPerWeek ?? s.lessonsPerWeek;
-      const alreadyLocked  = lockedCountBySubject.get(s.id) ?? 0;
-      const remaining      = Math.max(0, totalRequired - alreadyLocked);
-      return {
-        id: s.id, code: s.code, name: s.name,
-        lessonsPerWeek:      remaining,  // only schedule what isn't already locked
-        doubleLesson:        rule?.doubleLesson        ?? s.doubleLesson,
-        consecutiveDouble:   rule?.consecutiveDouble    ?? false,
-        requiresSpecialRoom: rule?.requiresSpecialRoom  ?? s.requiresSpecialRoom,
-        minSpreadDays:       rule?.minSpreadDays         ?? 1,
-        preferMorning:       rule?.preferMorning         ?? false,
-        preferAfternoon:     rule?.preferAfternoon       ?? false,
-      } satisfies EngineSubject;
-    }).filter((s) => s.lessonsPerWeek > 0)); // skip subjects already fully locked
-  }
-
-  const teachersBySubject = new Map<string, string[]>();
-  for (const ts of teacherSubjects) {
-    if (!teachersBySubject.has(ts.subjectId)) teachersBySubject.set(ts.subjectId, []);
-    teachersBySubject.get(ts.subjectId)!.push(ts.teacherId);
-  }
-
-  const pinnedAssignments = new Map(pinnedRows.map((r) => [`${r.classId}-${r.subjectId}`, r.teacherId]));
-
-  const preferences: EnginePreferences = { prioritized: new Map(), avoided: new Map(), maxLessonsPerDayOverride: null };
-  for (const c of constraintsRaw) {
-    const p = c.parsed as ParsedConstraint | null;
-    if (!p) continue;
-    if (p.kind === "PRIORITIZE_SUBJECT_TIME" && p.subjectCode && p.periodStart && p.periodEnd)
-      preferences.prioritized.set(p.subjectCode.toUpperCase(), { start: p.periodStart, end: p.periodEnd });
-    if (p.kind === "AVOID_SUBJECT_TIME" && p.subjectCode && p.periodStart && p.periodEnd)
-      preferences.avoided.set(p.subjectCode.toUpperCase(), { start: p.periodStart, end: p.periodEnd });
-    if (p.kind === "MAX_LESSONS_PER_DAY" && p.maxLessonsPerDay)
-      preferences.maxLessonsPerDayOverride = preferences.maxLessonsPerDayOverride
-        ? Math.min(preferences.maxLessonsPerDayOverride, p.maxLessonsPerDay)
-        : p.maxLessonsPerDay;
-  }
-
-  // Build per-class blocked slots (excludes class-locked positions from other classes)
-  const classBlockedSlots = new Set<string>(blockedSlots);
-  for (const s of lockedSlots) {
-    if (regenSet.has(s.classId)) {
-      // This class is being re-optimized but this specific slot is locked — block it
-      classBlockedSlots.add(`${s.dayOfWeek}-${s.period}`);
-    }
-  }
-
-  const engineConfig: EngineConfig = {
-    operatingDays:              activeDays,
-    periodsPerDay:              configRow?.periodsPerDay              ?? 8,
-    maxLessonsPerTeacherPerDay: configRow?.maxLessonsPerTeacherPerDay ?? 6,
-    blockedSlots:               classBlockedSlots,
-  };
-
-  // ── Run engine ──────────────────────────────────────────────────────────
-  const engineResult = runEngine({
-    classes: classesRaw as EngineClass[],
-    subjectsByClass, teachersBySubject, unavailability, pinnedAssignments,
-    config: engineConfig, preferences,
-  });
-
-  // ── Run optimizer ────────────────────────────────────────────────────────
-  const reqMap = new Map<string, number>();
-  for (const cls of classesRaw) {
-    for (const s of (subjectsByClass.get(cls.id) ?? [])) {
-      reqMap.set(`${cls.id}-${s.id}`, s.lessonsPerWeek);
-    }
-  }
-  const { slots: optimizedSlots } = optimizeTimetable({
-    slots: engineResult.slots, config: engineConfig, preferences,
-    unavailability, requirements: reqMap,
-    targetClassIds: regenSet,
-    maxPasses: optimizerPasses ?? 4,
-  });
-
-  // ── Build diff ──────────────────────────────────────────────────────────
-  const subjectCodeMap = new Map(subjectsRaw.map((s) => [s.id, s.code]));
-  const classNameMap   = new Map(classesRaw.map((c) => [c.id, c.name]));
-
-  // Map of current (unlocked) slots: "classId|day-period" → RawSlot
-  const currentMap = new Map<string, RawSlot>();
-  for (const s of unlockedSlots.filter((s) => regenSet.has(s.classId)))
-    currentMap.set(`${s.classId}|${s.dayOfWeek}-${s.period}`, s);
-
-  // Map of proposed slots: "classId|day-period" → EngineSlot
-  const proposedMap = new Map<string, EngineSlot>();
-  for (const s of optimizedSlots)
-    proposedMap.set(`${s.classId}|${s.dayOfWeek}-${s.period}`, s);
-
-  const diff: Array<{
-    status: DiffStatus; current: RawSlot | null; proposed: RawSlot | null; changedFields: string[];
-  }> = [];
-
-  // Locked slots → always "locked" status (preserved)
+  // Subtract already-locked lessons from requirements
+  const lockedCountMap = new Map<string, number>();
   for (const s of lockedSlots.filter((s) => regenSet.has(s.classId))) {
-    diff.push({ status: "locked", current: s, proposed: null, changedFields: [] });
+    const key = `${s.classId}-${s.subjectId}`;
+    lockedCountMap.set(key, (lockedCountMap.get(key) ?? 0) + 1);
   }
 
-  // Current unlocked → check against proposed
+  const engineRequirements = requirements
+    .filter((r) => candidateClasses.includes(r.classId))
+    .map((r) => {
+      const locked = lockedCountMap.get(`${r.classId}-${r.subjectId}`) ?? 0;
+      return {
+        subjectId: r.subjectId,
+        classId: r.classId,
+        lessonsPerWeek: Math.max(0, r.lessonsPerWeek - locked),
+      };
+    })
+    .filter((r) => r.lessonsPerWeek > 0);
+
+  const engineSessionPrefs = sessionPrefs
+    .filter((p) => p.subjectCode && p.preferredSession)
+    .map((p) => ({
+      subjectCode: p.subjectCode!,
+      preferredSession: p.preferredSession as TimetableSession,
+      isHard: p.isHard,
+    }));
+
+  const teacherIds = [...new Set(teacherAssignments.map((a) => a.teacherId))];
+  const teachersRaw = await prisma.teacher.findMany({
+    where: { id: { in: teacherIds } },
+    select: { id: true, fullName: true },
+  });
+
+  // Run engine for unlocked classes only
+  const engineResult = generateTimetable({
+    subjects: Array.from(subjectMap.values()),
+    classes: engineClasses,
+    teachers: teachersRaw.map((t) => ({ id: t.id, name: t.fullName })),
+    requirements: engineRequirements,
+    teacherAssignments,
+    teacherUnavailability: [
+      ...unavailRows,
+      // Convert unavailability map entries to the expected format
+      ...Array.from(unavailability.entries()).flatMap(([teacherId, slots]) =>
+        Array.from(slots).map((key) => {
+          const [day, period] = key.split("-").map(Number);
+          return { teacherId, dayOfWeek: day, period };
+        })
+      ),
+    ],
+    studentSelections: [],
+    sessionPreferences: engineSessionPrefs,
+    config: {
+      academicYear: timetableConfig.academicYear ?? new Date().getFullYear().toString(),
+      term: timetableConfig.term ?? 1,
+      operatingDays: timetableConfig.operatingDays,
+      maxLessonsPerTeacherPerDay: timetableConfig.maxLessonsPerTeacherPerDay,
+      templateColumns,
+    },
+  });
+
+  // Build diff
+  const subjectCodeMap = new Map(Array.from(subjectMap.values()).map((s) => [s.id, s.code]));
+  const classNameMap = new Map(classesRaw.map((c) => [c.id, c.name]));
+
+  const currentMap = new Map(
+    unlockedSlots
+      .filter((s) => regenSet.has(s.classId))
+      .map((s) => [`${s.classId}|${s.dayOfWeek}-${s.period}`, s])
+  );
+  const proposedMap = new Map(
+    engineResult.slots.map((s) => [`${s.classId}|${s.dayOfWeek}-${s.period}`, s])
+  );
+
   const allKeys = new Set([...currentMap.keys(), ...proposedMap.keys()]);
+  const diff = [];
+
+  for (const s of lockedSlots.filter((s) => regenSet.has(s.classId))) {
+    diff.push({ status: "locked" as DiffStatus, current: s, proposed: null, changedFields: [] });
+  }
+
   for (const key of allKeys) {
-    const cur  = currentMap.get(key) ?? null;
+    const cur = currentMap.get(key) ?? null;
     const prop = proposedMap.get(key) ?? null;
 
     if (cur && !prop) {
-      diff.push({ status: "removed", current: cur, proposed: null, changedFields: [] });
+      diff.push({ status: "removed" as DiffStatus, current: cur, proposed: null, changedFields: [] });
     } else if (!cur && prop) {
-      // Build a pseudo RawSlot for the proposed slot for display
-      const propRow: RawSlot = {
-        id: "", classId: prop.classId,
-        className: classNameMap.get(prop.classId) ?? prop.classId,
-        dayOfWeek: prop.dayOfWeek, period: prop.period,
-        subjectId: prop.subjectId, subjectCode: subjectCodeMap.get(prop.subjectId) ?? prop.subjectId,
-        teacherId: prop.teacherId, teacherName: "",
-        room: prop.room, isManual: false, isLocked: false,
-        lockScope: null, lockReason: null,
-      };
-      diff.push({ status: "added", current: null, proposed: propRow, changedFields: [] });
+      diff.push({
+        status: "added" as DiffStatus,
+        current: null,
+        proposed: {
+          classId: prop.classId,
+          className: classNameMap.get(prop.classId) ?? prop.classId,
+          dayOfWeek: prop.dayOfWeek,
+          period: prop.period,
+          subjectId: prop.subjectId,
+          subjectCode: subjectCodeMap.get(prop.subjectId) ?? prop.subjectId,
+          teacherId: prop.teacherId,
+          room: prop.room,
+        },
+        changedFields: [],
+      });
     } else if (cur && prop) {
       const changed: string[] = [];
       if (cur.teacherId !== prop.teacherId) changed.push("teacher");
-      if (cur.room       !== prop.room)     changed.push("room");
+      if (cur.room !== prop.room) changed.push("room");
       diff.push({
-        status:        changed.length ? "changed" : "unchanged",
-        current:       cur,
-        proposed:      changed.length ? {
-          ...cur, teacherId: prop.teacherId, room: prop.room,
-        } : null,
+        status: (changed.length ? "changed" : "unchanged") as DiffStatus,
+        current: cur,
+        proposed: changed.length ? { ...cur, teacherId: prop.teacherId, room: prop.room } : null,
         changedFields: changed,
       });
     }
   }
 
   const stats = {
-    locked:    diff.filter((d) => d.status === "locked").length,
+    locked: diff.filter((d) => d.status === "locked").length,
     unchanged: diff.filter((d) => d.status === "unchanged").length,
-    changed:   diff.filter((d) => d.status === "changed").length,
-    added:     diff.filter((d) => d.status === "added").length,
-    removed:   diff.filter((d) => d.status === "removed").length,
-    warnings:  engineResult.warnings,
+    changed: diff.filter((d) => d.status === "changed").length,
+    added: diff.filter((d) => d.status === "added").length,
+    removed: diff.filter((d) => d.status === "removed").length,
+    warnings: engineResult.warnings,
   };
 
-  // ── Apply if requested ──────────────────────────────────────────────────
   if (apply) {
     const now = new Date();
 
-    // Delete unlocked slots for re-optimized classes
-    for (const cid of candidateClasses) {
-      await prisma.$executeRaw`
-        DELETE FROM "TimetableVersionSlot"
-        WHERE "versionId" = ${params.id} AND "classId" = ${cid} AND "isLocked" = false`;
-    }
+    await prisma.$transaction(async (tx) => {
+      for (const cid of candidateClasses) {
+        await tx.$executeRaw`
+          DELETE FROM "TimetableVersionSlot"
+          WHERE "versionId" = ${params.id} AND "classId" = ${cid} AND "isLocked" = false`;
+      }
 
-    // Insert proposed slots
-    for (const s of optimizedSlots) {
-      await prisma.$executeRaw`
-        INSERT INTO "TimetableVersionSlot"
-          (id, "versionId", "schoolId", "classId", "dayOfWeek", period,
-           "subjectId", "teacherId", room, "isManual", "createdAt", "updatedAt")
-        VALUES (
-          ${randomUUID()}, ${params.id}, ${user.schoolId}, ${s.classId},
-          ${s.dayOfWeek}, ${s.period}, ${s.subjectId}, ${s.teacherId},
-          ${s.room ?? null}, false, ${now}, ${now})
-        ON CONFLICT ("versionId", "classId", "dayOfWeek", period) DO NOTHING`;
-    }
+      for (const s of engineResult.slots) {
+        await tx.$executeRaw`
+          INSERT INTO "TimetableVersionSlot"
+            (id, "versionId", "schoolId", "classId", "dayOfWeek", period,
+             "subjectId", "teacherId", room, "isManual", "createdAt", "updatedAt")
+          VALUES (${randomUUID()}, ${params.id}, ${schoolId}, ${s.classId},
+                  ${s.dayOfWeek}, ${s.period}, ${s.subjectId}, ${s.teacherId},
+                  ${s.room ?? null}, false, ${now}, ${now})
+          ON CONFLICT ("versionId", "classId", "dayOfWeek", period) DO NOTHING`;
+      }
 
-    // Write audit
-    await prisma.$executeRaw`
-      INSERT INTO "TimetableChangeLog"
-        (id, "schoolId", "versionId", action, "changeSource", detail,
-         reason, "performedById", "performedAt")
-      VALUES (
-        ${randomUUID()}, ${user.schoolId}, ${params.id},
-        'REOPTIMIZED'::"TimetableChangeAction", 'AI',
-        ${JSON.stringify({ stats, classCount: candidateClasses.length })}::jsonb,
-        ${reason ?? null}, ${user.id}, ${now})`;
+      await tx.$executeRaw`
+        INSERT INTO "TimetableChangeLog"
+          (id, "schoolId", "versionId", action, detail, "performedById", "performedAt")
+        VALUES (${randomUUID()}, ${schoolId}, ${params.id},
+                'REOPTIMIZED'::"TimetableChangeAction",
+                ${JSON.stringify({ stats, classCount: candidateClasses.length, reason })}::jsonb,
+                ${user.id}, ${now})`;
+    });
   }
 
   return NextResponse.json({ diff, stats, applied: apply });

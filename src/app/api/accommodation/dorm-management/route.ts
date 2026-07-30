@@ -351,7 +351,7 @@ export async function POST(req: NextRequest) {
         }
         snapshotted++;
 
-        // Optional: also give them a temporary CURRENT allocation in another dorm
+        // Optionally assign a temporary CURRENT allocation in another dorm
         if (relocateStudents && toDormId) {
           await tx.allocationRecord.create({
             data: {

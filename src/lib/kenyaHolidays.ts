@@ -38,7 +38,7 @@ const FIXED_HOLIDAYS: { slug: string; title: string; month: number; day: number 
 
 /// Anonymous Gregorian algorithm (a.k.a. Meeus/Jones/Butcher) for the date
 /// of Easter Sunday in a given year. Good Friday and Easter Monday are
-/// simply +/- a few days from this.
+/// computed as +/- a few days from this.
 function easterSunday(year: number): Date {
   const a = year % 19;
   const b = Math.floor(year / 100);

@@ -20,6 +20,40 @@ export type LocalTimetableSlot = {
   updatedAt: string;
 };
 
+// ── Vulnerability snapshot types (mirrors liveConflictDetector exports) ────
+
+export type VersionVulnerabilityLevel = "critical" | "high" | "moderate";
+
+export type VersionStaffShortage = {
+  subjectId: string;
+  subjectCode: string;
+  subjectName: string;
+  totalLessonsRequired: number;
+  totalLessonsCapacity: number;
+  deficit: number;
+  assignedTeachers: number;
+  estimatedExtraTeachersNeeded: number;
+  affectedClasses: string[];
+  level: VersionVulnerabilityLevel;
+  message: string;
+  suggestion: string;
+};
+
+export type VersionConflictEntry = {
+  type: string;
+  severity: "error" | "warning";
+  message: string;
+  action: string;
+};
+
+export type VersionVulnerabilities = {
+  capturedAt: string;          // ISO timestamp when snapshot was taken
+  totalErrors: number;
+  totalWarnings: number;
+  conflicts: VersionConflictEntry[];
+  staffShortages: VersionStaffShortage[];
+};
+
 export type LocalTimetableVersion = {
   id: string;
   schoolId: string;
@@ -31,6 +65,8 @@ export type LocalTimetableVersion = {
   publishedAt: string | null;
   generatedAt: string | null;
   updatedAt: string;
+  /** Vulnerability snapshot stored at generation/validation time */
+  vulnerabilities: VersionVulnerabilities | null;
 };
 
 export type LocalTimetableVersionSlot = {

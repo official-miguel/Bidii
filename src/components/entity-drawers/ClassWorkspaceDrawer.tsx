@@ -34,7 +34,7 @@ interface ClassDetail {
   classTeacher: { id: string; fullName: string; email: string | null } | null;
   students: { id: string; fullName: string; admissionNumber: string }[];
   subjectTeachers: {
-    subject: { id: string; name: string; code: string };
+    subject: { id: string; name: string; code: string; type: "CORE" | "ELECTIVE" };
     teacher: { id: string; fullName: string };
   }[];
   _count: { students: number };
@@ -179,58 +179,126 @@ export default function ClassWorkspaceDrawer({
             )}
           </div>
 
-          {/* ── Subjects & teachers ── */}
-          {cls.subjectTeachers.length > 0 && (
-            <div className="bg-white border border-line rounded-xl p-5">
-              <SectionTitle>
-                <BookOpen className="h-3.5 w-3.5" />
-                Subjects
-              </SectionTitle>
-              <div className="space-y-2">
-                {cls.subjectTeachers.map(({ subject, teacher }) => (
-                  <div
-                    key={subject.id}
-                    className="flex items-center justify-between gap-3 py-1.5 border-b border-line last:border-0"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      {onOpenSubject ? (
+          {/* ── Core subject teachers ── */}
+          {(() => {
+            const coreTeachers = cls.subjectTeachers.filter(
+              ({ subject }) => subject.type === "CORE",
+            );
+            if (coreTeachers.length === 0) return null;
+            return (
+              <div className="bg-white border border-line rounded-xl p-5">
+                <SectionTitle>
+                  <BookOpen className="h-3.5 w-3.5" />
+                  Core subject teachers
+                </SectionTitle>
+                <div className="space-y-2">
+                  {coreTeachers.map(({ subject, teacher }) => (
+                    <div
+                      key={subject.id}
+                      className="flex items-center justify-between gap-3 py-2 border-b border-line last:border-0"
+                    >
+                      {/* Subject name + code */}
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-mono text-xs bg-paper border border-line rounded px-1.5 py-0.5 shrink-0 text-slate">
+                          {subject.code}
+                        </span>
+                        {onOpenSubject ? (
+                          <button
+                            type="button"
+                            onClick={() => onOpenSubject(subject.id, subject.name)}
+                            className="text-sm font-medium text-ink hover:text-teal truncate flex items-center gap-1"
+                          >
+                            {subject.name}
+                            <ExternalLink className="h-3 w-3 shrink-0 text-slate/50" />
+                          </button>
+                        ) : (
+                          <span className="text-sm font-medium text-ink truncate">
+                            {subject.name}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Teacher */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Avatar name={teacher.fullName} size="sm" />
+                        {onOpenStaff ? (
+                          <button
+                            type="button"
+                            onClick={() => onOpenStaff(teacher.id, teacher.fullName)}
+                            className="text-xs text-teal hover:underline flex items-center gap-0.5"
+                          >
+                            {teacher.fullName}
+                            <ExternalLink className="h-2.5 w-2.5" />
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate">{teacher.fullName}</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── Elective subjects ── */}
+          {(() => {
+            const electiveTeachers = cls.subjectTeachers.filter(
+              ({ subject }) => subject.type === "ELECTIVE",
+            );
+            if (electiveTeachers.length === 0) return null;
+            return (
+              <div className="bg-white border border-line rounded-xl p-5">
+                <SectionTitle>
+                  <BookOpen className="h-3.5 w-3.5" />
+                  Elective subjects
+                </SectionTitle>
+                <div className="space-y-2">
+                  {electiveTeachers.map(({ subject, teacher }) => (
+                    <div
+                      key={subject.id}
+                      className="flex items-center justify-between gap-3 py-1.5 border-b border-line last:border-0"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        {onOpenSubject ? (
+                          <button
+                            type="button"
+                            onClick={() => onOpenSubject(subject.id, subject.name)}
+                            className="text-sm font-medium text-teal hover:underline flex items-center gap-1"
+                          >
+                            <span className="font-mono text-xs bg-paper border border-line rounded px-1.5 py-0.5">
+                              {subject.code}
+                            </span>
+                            {subject.name}
+                            <ExternalLink className="h-3 w-3 shrink-0" />
+                          </button>
+                        ) : (
+                          <span className="text-sm text-ink">
+                            <span className="font-mono text-xs bg-paper border border-line rounded px-1.5 py-0.5 mr-1.5">
+                              {subject.code}
+                            </span>
+                            {subject.name}
+                          </span>
+                        )}
+                      </div>
+                      {onOpenStaff ? (
                         <button
                           type="button"
-                          onClick={() => onOpenSubject(subject.id, subject.name)}
-                          className="text-sm font-medium text-teal hover:underline flex items-center gap-1"
+                          onClick={() => onOpenStaff(teacher.id, teacher.fullName)}
+                          className="text-xs text-teal hover:underline shrink-0 flex items-center gap-0.5"
                         >
-                          <span className="font-mono text-xs bg-paper border border-line rounded px-1.5 py-0.5">
-                            {subject.code}
-                          </span>
-                          {subject.name}
-                          <ExternalLink className="h-3 w-3 shrink-0" />
+                          {teacher.fullName}
+                          <ExternalLink className="h-2.5 w-2.5" />
                         </button>
                       ) : (
-                        <span className="text-sm text-ink">
-                          <span className="font-mono text-xs bg-paper border border-line rounded px-1.5 py-0.5 mr-1.5">
-                            {subject.code}
-                          </span>
-                          {subject.name}
-                        </span>
+                        <span className="text-xs text-slate shrink-0">{teacher.fullName}</span>
                       )}
                     </div>
-                    {onOpenStaff ? (
-                      <button
-                        type="button"
-                        onClick={() => onOpenStaff(teacher.id, teacher.fullName)}
-                        className="text-xs text-teal hover:underline shrink-0 flex items-center gap-0.5"
-                      >
-                        {teacher.fullName}
-                        <ExternalLink className="h-2.5 w-2.5" />
-                      </button>
-                    ) : (
-                      <span className="text-xs text-slate shrink-0">{teacher.fullName}</span>
-                    )}
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* ── Students ── */}
           {cls.students.length > 0 && (

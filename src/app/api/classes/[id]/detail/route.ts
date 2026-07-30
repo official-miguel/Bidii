@@ -25,7 +25,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
       },
       subjectTeachers: {
         include: {
-          subject: { select: { id: true, name: true, code: true } },
+          subject: { select: { id: true, name: true, code: true, type: true } },
           teacher: { select: { id: true, fullName: true } },
         },
         orderBy: { subject: { name: "asc" } },

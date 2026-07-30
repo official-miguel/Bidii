@@ -444,6 +444,9 @@ export default function TeacherTimetablePage() {
                                     ${color!.bg} ${color!.border}
                                     ${isNow ? "ring-1 ring-success/40" : ""}`}>
                                     <p className={`font-bold text-xs leading-tight ${color!.text}`}>
+                                      {slot.subjectName}
+                                    </p>
+                                    <p className={`text-[10px] leading-tight mt-0.5 opacity-70 ${color!.text}`}>
                                       {slot.subjectCode}
                                     </p>
                                     <p className="text-[11px] text-slate/80 mt-0.5 truncate">

@@ -200,6 +200,7 @@ async function main() {
 
   // --- Subjects ---------------------------------------------------------------
   const subjectByCode = new Map<string, string>();
+  let subjectCode = 1;
   for (const s of SUBJECTS) {
     const row = await prisma.subject.create({
       data: {
@@ -207,9 +208,9 @@ async function main() {
         name: s.name,
         code: s.code,
         type: s.type,
+        internalCode: subjectCode++,
         departmentId: deptByName.get(s.dept)!,
         applicableForms: s.forms,
-        lessonsPerWeek: s.lessonsPerWeek,
         doubleLesson: s.doubleLesson ?? false,
         requiresSpecialRoom: s.room ?? null,
       },
@@ -365,20 +366,14 @@ async function main() {
     }
   }
 
-  // --- Timetable config -------------------------------------------------------------
-  await prisma.timetableConfig.create({
-    data: {
+  // --- Timetable config -------------------------------------------------------
+  await prisma.timetableConfig.upsert({
+    where: { schoolId: school.id },
+    update: {},
+    create: {
       schoolId: school.id,
-      periodsPerDay: 8,
-      breakAfterPeriod: 2,
-      lunchAfterPeriod: 5,
-      gamesDayOfWeek: 2, // Wednesday
-      gamesPeriod: 8,
       maxLessonsPerTeacherPerDay: 6,
-      dayStartTime: "08:00",
-      periodDurationMinutes: 40,
-      breakDurationMinutes: 15,
-      lunchDurationMinutes: 45,
+      operatingDays: [0, 1, 2, 3, 4],
     },
   });
 

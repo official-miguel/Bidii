@@ -30,9 +30,6 @@ const createSchema = z.object({
   type: z.enum(["CORE", "ELECTIVE"]),
   departmentId: z.string().min(1, "Choose a department."),
   applicableForms: z.array(z.number().int().min(1).max(6)).min(1, "Select at least one form."),
-  // Inputs for the AI Timetable Generator — optional so existing callers
-  // (and the API in general) keep working with just sensible defaults.
-  lessonsPerWeek: z.number().int().min(1).max(20).default(5),
   doubleLesson: z.boolean().default(false),
   requiresSpecialRoom: z.string().trim().optional().or(z.literal("")),
 });
@@ -59,10 +56,24 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    // Assign the next sequential internalCode for this school (never reused).
+    const last = await prisma.subject.findFirst({
+      where: { schoolId: user.schoolId },
+      orderBy: { internalCode: "desc" },
+      select: { internalCode: true },
+    });
+    const internalCode = (last?.internalCode ?? 0) + 1;
+
     const subject = await prisma.subject.create({
       data: {
-        ...parsed.data,
+        name: parsed.data.name,
+        code: parsed.data.code,
+        type: parsed.data.type,
+        departmentId: parsed.data.departmentId,
+        applicableForms: parsed.data.applicableForms,
+        doubleLesson: parsed.data.doubleLesson,
         requiresSpecialRoom: parsed.data.requiresSpecialRoom || null,
+        internalCode,
         schoolId: user.schoolId,
       },
     });

@@ -298,7 +298,7 @@ export default function AccommodationAnalyticsPage() {
   });
 
   // ── Achievements ──────────────────────────────────────────────────────────
-  // NOTE: Use spread copies before sorting — Array.sort() mutates in place,
+  // Spread copies are used before sorting — Array.sort() mutates in place,
   // and sorting the state array directly triggers a setState-during-render warning.
   const withAttendance  = data.filter((d) => d.attendance.pct !== null);
   const withAcademic    = data.filter((d) => d.academic.avgScore !== null);
