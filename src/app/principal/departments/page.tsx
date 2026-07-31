@@ -123,7 +123,6 @@ export default function DepartmentsPage() {
           { href: "/principal/departments",    label: "Departments" },
           { href: "/principal/classes",        label: "Classes" },
           { href: "/principal/subjects",       label: "Subjects" },
-          { href: "/principal/class-profiles", label: "Class Profiles" },
           { href: "/principal/timetable",      label: "Timetable" },
           { href: "/principal/attendance",     label: "Attendance" },
           { href: "/principal/calendar",       label: "Calendar" },

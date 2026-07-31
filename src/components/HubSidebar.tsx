@@ -44,7 +44,7 @@ export const HUB_SEG_MAP: Record<string, NavHub> = {
   academics: "academic", classes: "academic", subjects: "academic",
   timetable: "academic", attendance: "academic", assessments: "academic",
   "exam-periods": "academic", results: "academic", library: "academic", exams: "academic",
-  departments: "academic", "class-profiles": "academic",
+  departments: "academic",
   // People
   people: "people", students: "people", staff: "people",
   parents: "people", history: "people",

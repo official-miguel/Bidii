@@ -353,10 +353,10 @@ export default function SubjectsPage() {
                   <option value="ELECTIVE">Elective</option>
                 </select>
                 <p className="text-xs text-slate mt-1.5">
-                  School-wide default. Override per form in{" "}
-                  <Link href="/principal/class-profiles" className="text-teal hover:underline">
-                    Class Profiles
-                  </Link>.
+                  School-wide default. Override per class by opening the class in the{" "}
+                  <Link href="/principal/classes" className="text-teal hover:underline">
+                    Classes
+                  </Link>{" "}tab.
                 </p>
               </div>
               <div>
