@@ -32,26 +32,28 @@ async function auth() {
 
 // ── Shared include for full group shape ────────────────────────────────────
 
-const groupInclude = {
-  members: {
-    include: {
-      subject: {
-        select: { id: true, code: true, name: true, internalCode: true },
+function groupInclude() {
+  return {
+    members: {
+      include: {
+        subject: {
+          select: { id: true, code: true, name: true, internalCode: true },
+        },
       },
+      orderBy: { subject: { name: "asc" as const } },
     },
-    orderBy: { subject: { name: "asc" } },
-  },
-  teachers: {
-    include: {
-      subject: { select: { id: true, code: true, name: true } },
-      teacher: { select: { id: true, fullName: true } },
+    teachers: {
+      include: {
+        subject: { select: { id: true, code: true, name: true } },
+        teacher: { select: { id: true, fullName: true } },
+      },
+      orderBy: [
+        { subject: { name: "asc" as const } },
+        { teacher: { fullName: "asc" as const } },
+      ],
     },
-    orderBy: [
-      { subject: { name: "asc" } },
-      { teacher: { fullName: "asc" } },
-    ],
-  },
-} as const;
+  };
+}
 
 // ── GET ────────────────────────────────────────────────────────────────────
 
@@ -71,7 +73,7 @@ export async function GET(req: NextRequest) {
 
   const groups = await prisma.electiveGroup.findMany({
     where,
-    include: groupInclude,
+    include: groupInclude(),
     orderBy: [{ scopeForm: "asc" }, { name: "asc" }],
   });
 
@@ -117,7 +119,7 @@ export async function POST(req: NextRequest) {
 
   const group = await prisma.electiveGroup.create({
     data: { schoolId: user.schoolId, name, scopeForm, lessonsPerWeek, scopeStreams },
-    include: groupInclude,
+    include: groupInclude(),
   });
 
   return NextResponse.json({ group }, { status: 201 });
@@ -173,7 +175,7 @@ export async function PATCH(req: NextRequest) {
       ...(lessonsPerWeek  !== undefined ? { lessonsPerWeek }  : {}),
       ...(scopeStreams     !== undefined ? { scopeStreams }    : {}),
     },
-    include: groupInclude,
+    include: groupInclude(),
   });
 
   return NextResponse.json({ group: updated });
