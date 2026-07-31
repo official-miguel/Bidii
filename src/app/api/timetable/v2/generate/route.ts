@@ -91,6 +91,7 @@ async function _handlePost(req: NextRequest) {
             id: true,
             code: true,
             name: true,
+            type: true,
             internalCode: true,
             doubleLesson: true,
             requiresSpecialRoom: true,
@@ -162,7 +163,7 @@ async function _handlePost(req: NextRequest) {
   }
 
   // Build subject map and engine inputs
-  const subjectMap = new Map<string, EngineSubject>();
+  const subjectMap = new Map<string, EngineSubject & { type: string }>();
   for (const req of requirements) {
     if (!subjectMap.has(req.subject.id)) {
       subjectMap.set(req.subject.id, {
@@ -172,6 +173,7 @@ async function _handlePost(req: NextRequest) {
         name: req.subject.name,
         doubleLesson: req.subject.doubleLesson,
         requiresSpecialRoom: req.subject.requiresSpecialRoom,
+        type: (req.subject as unknown as { type?: string }).type ?? "CORE",
       });
     }
   }
@@ -192,17 +194,36 @@ async function _handlePost(req: NextRequest) {
     }));
 
   // ── Group-aware payload: collapse group subjects to one anchor each ────────
-  // Build GroupPayloadDescriptor for every elective group that has members
+  // Build GroupPayloadDescriptor for every elective group that has members.
+  //
+  // IMPORTANT: only include a class in a group descriptor if it actually has
+  // at least one ClassElectiveGroupTeacher row for that group. Including
+  // scope-eligible classes with no teacher assignments causes two bugs:
+  //   1. buildGroupAwarePayload adds them to groupOwnership → their anchor
+  //      requirement has no synthetic teacher assignment → pre-check fires a
+  //      false BLOCKING "no teacher" error.
+  //   2. fanOutGroupSlots produces empty fan-out entries for those classes
+  //      which are silently dropped → no timetable slots generated for them.
   const linkedClassGroupsList = buildLinkedClassGroups(electiveGroupsRaw, classesRaw);
+
+  // groupId → Set of classIds that have ≥1 ClassElectiveGroupTeacher row
+  const groupClassesWithTeachers = new Map<string, Set<string>>();
+  for (const gt of classElectiveTeachersRaw) {
+    if (!groupClassesWithTeachers.has(gt.groupId)) {
+      groupClassesWithTeachers.set(gt.groupId, new Set());
+    }
+    groupClassesWithTeachers.get(gt.groupId)!.add(gt.classId);
+  }
+
   const groupDescriptors: GroupPayloadDescriptor[] = electiveGroupsRaw
     .filter((g) => g.members.length > 0)
     .map((g) => {
-      // classIds in scope for this group — reuse the same scope logic as
-      // buildLinkedClassGroups so anchors are consistent.
+      const classesWithTeachersForGroup = groupClassesWithTeachers.get(g.id) ?? new Set<string>();
       const inScope = classesRaw.filter((cls) => {
         if (g.scopeForm !== 0 && cls.form !== g.scopeForm) return false;
         if (g.scopeForm !== 0 && g.scopeStreams.length > 0 && !g.scopeStreams.includes(cls.stream ?? "")) return false;
-        return true;
+        // Only include classes that have teachers actually assigned in this group
+        return classesWithTeachersForGroup.has(cls.id);
       });
       return {
         groupId:        g.id,
@@ -237,9 +258,9 @@ async function _handlePost(req: NextRequest) {
       // fetch it lazily so engineSubjects is complete for the validator.
       const sub = await prisma.subject.findUnique({
         where: { id: gt.subjectId },
-        select: { id: true, code: true, name: true, internalCode: true, doubleLesson: true, requiresSpecialRoom: true },
+        select: { id: true, code: true, name: true, type: true, internalCode: true, doubleLesson: true, requiresSpecialRoom: true },
       });
-      if (sub) subjectMap.set(sub.id, sub);
+      if (sub) subjectMap.set(sub.id, { ...sub, type: sub.type ?? "ELECTIVE" });
     }
   }
   const engineSubjectsWithGroups = Array.from(subjectMap.values());
@@ -277,7 +298,7 @@ async function _handlePost(req: NextRequest) {
         id: s.id,
         code: s.code,
         name: s.name,
-        type: "CORE" as const,
+        type: (s.type ?? "CORE") as "CORE" | "ELECTIVE",
       })),
       classes: engineClasses,
       requirements: groupPayload.requirements,
