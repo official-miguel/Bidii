@@ -179,12 +179,17 @@ export default function ClassProfilesPage() {
                 </div>
               </div>
 
-              {/* Classes within this form */}
-              <div className="flex flex-wrap gap-x-6 gap-y-1.5 px-5 py-3">
+              {/* Classes within this form — each links to its own class-level profile */}
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5 px-5 py-3">
                 {group.classes.map((cls) => (
-                  <div key={cls.id} className="flex items-center gap-2">
+                  <Link
+                    key={cls.id}
+                    href={`/principal/class-profiles/${cls.id}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex items-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1 hover:border-teal/50 hover:bg-teal/5 transition-all group/cls"
+                  >
                     <FrameworkBadge type={cls.frameworkType} />
-                    <span className="text-xs text-slate">
+                    <span className="text-xs text-slate group-hover/cls:text-teal transition-colors">
                       {cls.name}
                       {cls.stream && (
                         <span className="text-slate/50"> · {cls.stream}</span>
@@ -194,7 +199,7 @@ export default function ClassProfilesPage() {
                       <Users className="h-3 w-3" />
                       {cls._count.students}
                     </span>
-                  </div>
+                  </Link>
                 ))}
               </div>
             </Link>

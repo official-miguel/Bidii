@@ -12,9 +12,12 @@ import { requirePermission } from "@/lib/permissions";
  *  • Elective subjects that are NOT in any group — listed individually.
  *  • Elective groups that apply to this class — read-through from
  *    ElectiveGroup (defined in timetable/requirements). Each group contains
- *    its subjects, and for each subject its teacher-pairing rows
- *    (ElectiveGroupTeacher). The class profile is a view of what the
- *    requirements already define; groups cannot be created here.
+ *    its subjects plus TWO teacher arrays:
+ *      - teachers[]      — form-wide ElectiveGroupTeacher rows (legacy / informational)
+ *      - classTeachers[] — class-scoped ClassElectiveGroupTeacher rows (editable here)
+ *    The class profile is a view of what the requirements already define;
+ *    groups cannot be created here. Teacher assignment at the class level
+ *    uses classTeachers[] exclusively.
  *
  * Response shape:
  * {
@@ -25,8 +28,9 @@ import { requirePermission } from "@/lib/permissions";
  *   electiveGroups: [
  *     {
  *       id, name, scopeForm, scopeStreams, lessonsPerWeek,
- *       members: [{ subjectId, subject: { id, code, name } }],
- *       teachers: [{ id, subjectId, teacherId, subject: {...}, teacher: {...} }]
+ *       members:       [{ subjectId, subject: { id, code, name } }],
+ *       teachers:      [{ id, subjectId, teacherId, subject, teacher }],  // form-wide
+ *       classTeachers: [{ id, groupId, classId, subjectId, teacherId, subject, teacher }]  // class-scoped
  *     }
  *   ]
  * }
@@ -81,9 +85,46 @@ export async function GET(
 
   const overrideMap = new Map(overrides.map((o) => [o.subjectId, o.type as "CORE" | "ELECTIVE"]));
 
-  // Elective groups that apply to this class — wrapped in try/catch so a
-  // pending migration doesn't crash the whole endpoint.
-  let electiveGroups: Awaited<ReturnType<typeof prisma.electiveGroup.findMany>> = [];
+  // ── Fetch class-scoped elective group teacher pairings ─────────────────
+  // Keyed by groupId so we can attach them per group below.
+  type ClassTeacherRow = {
+    id: string;
+    groupId: string;
+    classId: string;
+    subjectId: string;
+    teacherId: string;
+    subject: { id: string; code: string; name: string };
+    teacher: { id: string; fullName: string };
+  };
+  let classTeachersByGroup: Record<string, ClassTeacherRow[]> = {};
+  try {
+    const rows = await prisma.classElectiveGroupTeacher.findMany({
+      where: { classId: params.classId, schoolId: user.schoolId },
+      include: {
+        subject: { select: { id: true, code: true, name: true } },
+        teacher: { select: { id: true, fullName: true } },
+      },
+      orderBy: [
+        { subject: { name: "asc" } },
+        { teacher: { fullName: "asc" } },
+      ],
+    });
+    for (const row of rows) {
+      if (!classTeachersByGroup[row.groupId]) classTeachersByGroup[row.groupId] = [];
+      classTeachersByGroup[row.groupId].push(row as ClassTeacherRow);
+    }
+  } catch {
+    // Table not yet migrated — degrade gracefully
+    classTeachersByGroup = {};
+  }
+
+  // ── Elective groups that apply to this class ───────────────────────────
+  // Wrapped in try/catch so a pending migration doesn't crash the endpoint.
+  type GroupWithClassTeachers = Awaited<ReturnType<typeof prisma.electiveGroup.findMany>>[number] & {
+    classTeachers: ClassTeacherRow[];
+  };
+  let electiveGroups: GroupWithClassTeachers[] = [];
+
   try {
     const allGroups = await prisma.electiveGroup.findMany({
       where: {
@@ -114,15 +155,22 @@ export async function GET(
       orderBy: [{ scopeForm: "asc" }, { name: "asc" }],
     });
 
-    electiveGroups = allGroups.filter((g) => {
-      if (g.scopeStreams.length === 0) return true;
-      if (!cls.stream) return false;
-      return g.scopeStreams.some(
-        (s) => s.toLowerCase() === cls.stream!.toLowerCase(),
-      );
-    });
+    electiveGroups = allGroups
+      .filter((g) => {
+        if (g.scopeStreams.length === 0) return true;
+        if (!cls.stream) return false;
+        return g.scopeStreams.some(
+          (s) => s.toLowerCase() === cls.stream!.toLowerCase(),
+        );
+      })
+      .map((g) => ({
+        ...g,
+        // Attach only the pairings for this class, defaulting to [] if none
+        classTeachers: classTeachersByGroup[g.id] ?? [],
+      }));
   } catch {
     // ElectiveGroupTeacher table not yet migrated — degrade gracefully
+    electiveGroups = [];
   }
 
   const subjectsWithEffectiveType = subjects.map((s) => ({
