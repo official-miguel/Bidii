@@ -139,7 +139,10 @@ export default function ClassWorkspaceDrawer({
     if (!open || !classId) return;
     setCls(null); setError(null); setLoading(true);
     fetch(`/api/classes/${classId}/detail`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`Server error ${r.status}`);
+        return r.json().catch(() => { throw new Error("Invalid response from server."); });
+      })
       .then((d) => {
         if (d.error) throw new Error(d.error);
         setCls(d);

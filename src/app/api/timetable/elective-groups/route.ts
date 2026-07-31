@@ -71,13 +71,27 @@ export async function GET(req: NextRequest) {
     where.scopeForm = Number(scopeFormParam);
   }
 
-  const groups = await prisma.electiveGroup.findMany({
-    where,
-    include: groupInclude(),
-    orderBy: [{ scopeForm: "asc" }, { name: "asc" }],
-  });
-
-  return NextResponse.json({ groups });
+  try {
+    const groups = await prisma.electiveGroup.findMany({
+      where,
+      include: groupInclude(),
+      orderBy: [{ scopeForm: "asc" }, { name: "asc" }],
+    });
+    return NextResponse.json({ groups });
+  } catch {
+    // ElectiveGroupTeacher table not yet migrated — fall back without teachers
+    const groups = await prisma.electiveGroup.findMany({
+      where,
+      include: {
+        members: {
+          include: { subject: { select: { id: true, code: true, name: true, internalCode: true } } },
+          orderBy: { subject: { name: "asc" } },
+        },
+      },
+      orderBy: [{ scopeForm: "asc" }, { name: "asc" }],
+    });
+    return NextResponse.json({ groups: groups.map((g) => ({ ...g, teachers: [] })) });
+  }
 }
 
 // ── POST ───────────────────────────────────────────────────────────────────

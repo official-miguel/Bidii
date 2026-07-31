@@ -81,46 +81,49 @@ export async function GET(
 
   const overrideMap = new Map(overrides.map((o) => [o.subjectId, o.type as "CORE" | "ELECTIVE"]));
 
-  // Elective groups that apply to this class (form-scoped or school-wide),
-  // filtered by scopeStreams if specified.
-  const allGroups = await prisma.electiveGroup.findMany({
-    where: {
-      schoolId: user.schoolId,
-      OR: [
-        { scopeForm: 0 },
-        { scopeForm: cls.form },
-      ],
-    },
-    include: {
-      members: {
-        include: {
-          subject: { select: { id: true, code: true, name: true } },
-        },
-        orderBy: { subject: { name: "asc" } },
-      },
-      teachers: {
-        include: {
-          subject: { select: { id: true, code: true, name: true } },
-          teacher: { select: { id: true, fullName: true } },
-        },
-        orderBy: [
-          { subject: { name: "asc" } },
-          { teacher: { fullName: "asc" } },
+  // Elective groups that apply to this class — wrapped in try/catch so a
+  // pending migration doesn't crash the whole endpoint.
+  let electiveGroups: Awaited<ReturnType<typeof prisma.electiveGroup.findMany>> = [];
+  try {
+    const allGroups = await prisma.electiveGroup.findMany({
+      where: {
+        schoolId: user.schoolId,
+        OR: [
+          { scopeForm: 0 },
+          { scopeForm: cls.form },
         ],
       },
-    },
-    orderBy: [{ scopeForm: "asc" }, { name: "asc" }],
-  });
+      include: {
+        members: {
+          include: {
+            subject: { select: { id: true, code: true, name: true } },
+          },
+          orderBy: { subject: { name: "asc" } },
+        },
+        teachers: {
+          include: {
+            subject: { select: { id: true, code: true, name: true } },
+            teacher: { select: { id: true, fullName: true } },
+          },
+          orderBy: [
+            { subject: { name: "asc" } },
+            { teacher: { fullName: "asc" } },
+          ],
+        },
+      },
+      orderBy: [{ scopeForm: "asc" }, { name: "asc" }],
+    });
 
-  // Filter by scopeStreams: if the group has specific streams, this class's
-  // stream must be in that list (case-insensitive). Empty scopeStreams = all.
-  const electiveGroups = allGroups.filter((g) => {
-    if (g.scopeStreams.length === 0) return true;
-    if (!cls.stream) return false;
-    return g.scopeStreams.some(
-      (s) => s.toLowerCase() === cls.stream!.toLowerCase(),
-    );
-  });
+    electiveGroups = allGroups.filter((g) => {
+      if (g.scopeStreams.length === 0) return true;
+      if (!cls.stream) return false;
+      return g.scopeStreams.some(
+        (s) => s.toLowerCase() === cls.stream!.toLowerCase(),
+      );
+    });
+  } catch {
+    // ElectiveGroupTeacher table not yet migrated — degrade gracefully
+  }
 
   const subjectsWithEffectiveType = subjects.map((s) => ({
     id: s.id,

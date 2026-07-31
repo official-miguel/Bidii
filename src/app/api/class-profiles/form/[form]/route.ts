@@ -7,31 +7,36 @@ import { requirePermission } from "@/lib/permissions";
 // ── Shared helper: fetch elective groups for a form (including school-wide) ──
 
 async function fetchElectiveGroups(schoolId: string, formNum: number) {
-  return prisma.electiveGroup.findMany({
-    where: {
-      schoolId,
-      OR: [{ scopeForm: 0 }, { scopeForm: formNum }],
-    },
-    include: {
-      members: {
-        include: {
-          subject: { select: { id: true, code: true, name: true } },
-        },
-        orderBy: { subject: { name: "asc" } },
+  try {
+    return await prisma.electiveGroup.findMany({
+      where: {
+        schoolId,
+        OR: [{ scopeForm: 0 }, { scopeForm: formNum }],
       },
-      teachers: {
-        include: {
-          subject: { select: { id: true, code: true, name: true } },
-          teacher: { select: { id: true, fullName: true } },
+      include: {
+        members: {
+          include: {
+            subject: { select: { id: true, code: true, name: true } },
+          },
+          orderBy: { subject: { name: "asc" } },
         },
-        orderBy: [
-          { subject: { name: "asc" } },
-          { teacher: { fullName: "asc" } },
-        ],
+        teachers: {
+          include: {
+            subject: { select: { id: true, code: true, name: true } },
+            teacher: { select: { id: true, fullName: true } },
+          },
+          orderBy: [
+            { subject: { name: "asc" } },
+            { teacher: { fullName: "asc" } },
+          ],
+        },
       },
-    },
-    orderBy: [{ scopeForm: "asc" }, { name: "asc" }],
-  });
+      orderBy: [{ scopeForm: "asc" }, { name: "asc" }],
+    });
+  } catch {
+    // ElectiveGroupTeacher table not yet migrated — degrade gracefully
+    return [];
+  }
 }
 
 /**
