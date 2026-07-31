@@ -7,24 +7,33 @@ import { requirePermission } from "@/lib/permissions";
 /**
  * GET /api/class-profiles/[classId]
  *
- * Returns the class detail including all subjects that apply to this class
- * (based on applicableForms matching the class's form level), along with
- * any per-class type overrides stored in ClassSubjectProfile.
+ * Returns the full subject profile for a single class:
+ *  • Core subjects — listed individually with their teacher assignment.
+ *  • Elective subjects that are NOT in any group — listed individually.
+ *  • Elective groups that apply to this class — read-through from
+ *    ElectiveGroup (defined in timetable/requirements). Each group contains
+ *    its subjects, and for each subject its teacher-pairing rows
+ *    (ElectiveGroupTeacher). The class profile is a view of what the
+ *    requirements already define; groups cannot be created here.
  *
  * Response shape:
  * {
  *   class: { id, name, form, stream, frameworkType, classTeacher },
  *   subjects: [
  *     { id, name, code, department, globalType, effectiveType }
+ *   ],
+ *   electiveGroups: [
+ *     {
+ *       id, name, scopeForm, scopeStreams, lessonsPerWeek,
+ *       members: [{ subjectId, subject: { id, code, name } }],
+ *       teachers: [{ id, subjectId, teacherId, subject: {...}, teacher: {...} }]
+ *     }
  *   ]
  * }
- *
- * effectiveType is the type that applies to THIS class — either an explicit
- * per-class override or the subject's global type.
  */
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { classId: string } }
+  { params }: { params: { classId: string } },
 ) {
   const user =
     (await requireRole("PRINCIPAL")) ?? (await requirePermission("CLASSES", "view"));
@@ -59,21 +68,10 @@ export async function GET(
     },
   });
 
-  // Per-class overrides: check if ClassSubjectProfile table exists in schema.
-  // Since it doesn't exist yet (we use SubjectLessonRequirement for timetable
-  // data), we store overrides in a lightweight JSON approach using the existing
-  // SubjectLessonRequirement metadata field is not available.
-  //
-  // We check for an existing ClassSubjectProfile prisma model. If not present,
-  // effectiveType equals globalType (no overrides yet). The PATCH endpoint
-  // below creates / updates overrides using a dedicated table.
-  //
-  // ── ClassSubjectProfile is created by the migration below. If the table
-  // doesn't exist in DB yet, the prisma call will fail gracefully in dev.
+  // Per-class type overrides
   let overrides: { subjectId: string; type: "CORE" | "ELECTIVE" }[] = [];
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    overrides = await (prisma as any).classSubjectProfile.findMany({
+    overrides = await prisma.classSubjectProfile.findMany({
       where: { classId: params.classId, schoolId: user.schoolId },
       select: { subjectId: true, type: true },
     });
@@ -81,44 +79,84 @@ export async function GET(
     // Table not yet migrated — fall back to global types silently
   }
 
-  const overrideMap = new Map(overrides.map((o) => [o.subjectId, o.type]));
+  const overrideMap = new Map(overrides.map((o) => [o.subjectId, o.type as "CORE" | "ELECTIVE"]));
+
+  // Elective groups that apply to this class (form-scoped or school-wide),
+  // filtered by scopeStreams if specified.
+  const allGroups = await prisma.electiveGroup.findMany({
+    where: {
+      schoolId: user.schoolId,
+      OR: [
+        { scopeForm: 0 },
+        { scopeForm: cls.form },
+      ],
+    },
+    include: {
+      members: {
+        include: {
+          subject: { select: { id: true, code: true, name: true } },
+        },
+        orderBy: { subject: { name: "asc" } },
+      },
+      teachers: {
+        include: {
+          subject: { select: { id: true, code: true, name: true } },
+          teacher: { select: { id: true, fullName: true } },
+        },
+        orderBy: [
+          { subject: { name: "asc" } },
+          { teacher: { fullName: "asc" } },
+        ],
+      },
+    },
+    orderBy: [{ scopeForm: "asc" }, { name: "asc" }],
+  });
+
+  // Filter by scopeStreams: if the group has specific streams, this class's
+  // stream must be in that list (case-insensitive). Empty scopeStreams = all.
+  const electiveGroups = allGroups.filter((g) => {
+    if (g.scopeStreams.length === 0) return true;
+    if (!cls.stream) return false;
+    return g.scopeStreams.some(
+      (s) => s.toLowerCase() === cls.stream!.toLowerCase(),
+    );
+  });
 
   const subjectsWithEffectiveType = subjects.map((s) => ({
     id: s.id,
     name: s.name,
     code: s.code,
-    globalType: s.type,
-    effectiveType: overrideMap.get(s.id) ?? s.type,
+    globalType: s.type as "CORE" | "ELECTIVE",
+    effectiveType: overrideMap.get(s.id) ?? (s.type as "CORE" | "ELECTIVE"),
     department: s.department,
   }));
 
-  return NextResponse.json({ class: cls, subjects: subjectsWithEffectiveType });
+  return NextResponse.json({
+    class: cls,
+    subjects: subjectsWithEffectiveType,
+    electiveGroups,
+  });
 }
 
 const patchSchema = z.object({
-  /**
-   * Array of per-class subject type assignments.
-   * Each entry sets the effectiveType for a subject within this class only.
-   * Pass the full list every save — rows not included are left unchanged.
-   */
   assignments: z.array(
     z.object({
       subjectId: z.string().min(1),
       type: z.enum(["CORE", "ELECTIVE"]),
-    })
+    }),
   ).min(1, "At least one assignment is required."),
 });
 
 /**
  * PATCH /api/class-profiles/[classId]
  *
- * Upserts per-class subject type overrides. Each assignment sets whether
- * a subject is CORE or ELECTIVE for THIS class specifically, independent
- * of the subject's global type.
+ * Upserts per-class subject type overrides (core/elective toggles for
+ * non-grouped subjects). Elective subjects that belong to a group are not
+ * managed here — their group membership is defined in timetable requirements.
  */
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { classId: string } }
+  { params }: { params: { classId: string } },
 ) {
   const user = await requireRole("PRINCIPAL");
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -133,11 +171,10 @@ export async function PATCH(
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.errors[0]?.message || "Invalid input." },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
-  // Verify all subjects belong to this school and apply to this class's form
   const subjectIds = parsed.data.assignments.map((a) => a.subjectId);
   const validSubjects = await prisma.subject.findMany({
     where: {
@@ -152,16 +189,14 @@ export async function PATCH(
   if (invalid.length > 0) {
     return NextResponse.json(
       { error: "Some subjects are not valid for this class." },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   try {
-    // Upsert each assignment using the ClassSubjectProfile table
     await Promise.all(
       parsed.data.assignments.map((a) =>
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (prisma as any).classSubjectProfile.upsert({
+        prisma.classSubjectProfile.upsert({
           where: {
             classId_subjectId: { classId: params.classId, subjectId: a.subjectId },
           },
@@ -172,10 +207,9 @@ export async function PATCH(
             type: a.type,
           },
           update: { type: a.type },
-        })
-      )
+        }),
+      ),
     );
-
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error("[class-profiles PATCH]", e);

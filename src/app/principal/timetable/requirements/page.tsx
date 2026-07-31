@@ -53,6 +53,7 @@ type ElectiveGroup = {
   id: string;
   name: string;
   scopeForm: number;
+  scopeStreams: string[];
   lessonsPerWeek: number;
   members: GroupMember[];
 };
@@ -96,8 +97,8 @@ export default function RequirementsPage() {
   const [groupsLoading, setGroupsLoading] = useState(false);
   // which group is being edited (id), or "new" for creation card
   const [editingGroup,  setEditingGroup]  = useState<string | null>(null);
-  // draft name/lessonsPerWeek for the group being created/renamed
-  const [groupDraft,    setGroupDraft]    = useState<{ name: string; lessonsPerWeek: number }>({ name: "", lessonsPerWeek: 3 });
+  // draft name/lessonsPerWeek/scopeStreams for the group being created/renamed
+  const [groupDraft,    setGroupDraft]    = useState<{ name: string; lessonsPerWeek: number; scopeStreams: string[] }>({ name: "", lessonsPerWeek: 3, scopeStreams: [] });
   // subject picker open for which groupId
   const [pickerGroupId, setPickerGroupId] = useState<string | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -274,20 +275,30 @@ export default function RequirementsPage() {
     setError(null);
     const res = await fetch("/api/timetable/elective-groups", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: groupDraft.name.trim(), scopeForm, lessonsPerWeek: groupDraft.lessonsPerWeek }),
+      body: JSON.stringify({
+        name: groupDraft.name.trim(),
+        scopeForm,
+        lessonsPerWeek: groupDraft.lessonsPerWeek,
+        scopeStreams: groupDraft.scopeStreams,
+      }),
     });
     const data = await res.json();
     if (!res.ok) { setError(data.error ?? "Failed to create group"); return; }
     setGroups((prev) => [...prev, data.group]);
     setEditingGroup(null);
-    setGroupDraft({ name: "", lessonsPerWeek: 3 });
+    setGroupDraft({ name: "", lessonsPerWeek: 3, scopeStreams: [] });
   }
 
   async function saveGroupEdits(group: ElectiveGroup) {
     setError(null);
     const res = await fetch("/api/timetable/elective-groups", {
       method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: group.id, name: groupDraft.name.trim(), lessonsPerWeek: groupDraft.lessonsPerWeek }),
+      body: JSON.stringify({
+        id: group.id,
+        name: groupDraft.name.trim(),
+        lessonsPerWeek: groupDraft.lessonsPerWeek,
+        scopeStreams: groupDraft.scopeStreams,
+      }),
     });
     const data = await res.json();
     if (!res.ok) { setError(data.error ?? "Failed to save group"); return; }
@@ -362,6 +373,16 @@ export default function RequirementsPage() {
   const selectionTitle = selectionForm != null
     ? `Form ${selectionForm} — All Streams (bulk)`
     : selectionClass?.name ?? "";
+
+  // Distinct stream names for the currently-selected form, used by GroupEditCard
+  const availableStreams = useMemo(() => {
+    const form = selectionForm ?? selectionClass?.form;
+    if (!form) return [];
+    const streams = (classesByForm.get(form) ?? [])
+      .map((c) => c.stream)
+      .filter((s): s is string => !!s);
+    return [...new Set(streams)].sort();
+  }, [selectionForm, selectionClass, classesByForm]);
 
   // Set of subjectIds that are absorbed into any group at this scope
   const absorbedSubjectIds = useMemo(
@@ -574,14 +595,15 @@ export default function RequirementsPage() {
                         pickerGroupId={pickerGroupId}
                         pickerRef={pickerRef}
                         availableForGroup={availableForGroup}
+                        availableStreams={availableStreams}
                         onStartCreate={() => {
                           setEditingGroup("new");
-                          setGroupDraft({ name: "", lessonsPerWeek: 3 });
+                          setGroupDraft({ name: "", lessonsPerWeek: 3, scopeStreams: [] });
                         }}
                         onCancelEdit={() => { setEditingGroup(null); setPickerGroupId(null); }}
                         onGroupDraftChange={setGroupDraft}
                         onCreateGroup={createGroup}
-                        onStartEdit={(g) => { setEditingGroup(g.id); setGroupDraft({ name: g.name, lessonsPerWeek: g.lessonsPerWeek }); }}
+                        onStartEdit={(g) => { setEditingGroup(g.id); setGroupDraft({ name: g.name, lessonsPerWeek: g.lessonsPerWeek, scopeStreams: g.scopeStreams ?? [] }); }}
                         onSaveEdits={saveGroupEdits}
                         onDeleteGroup={deleteGroup}
                         onAddSubject={addSubjectToGroup}
@@ -656,13 +678,14 @@ type ElectiveGroupsSectionProps = {
   groups: ElectiveGroup[];
   groupsLoading: boolean;
   editingGroup: string | null;
-  groupDraft: { name: string; lessonsPerWeek: number };
+  groupDraft: { name: string; lessonsPerWeek: number; scopeStreams: string[] };
   pickerGroupId: string | null;
   pickerRef: React.RefObject<HTMLDivElement>;
   availableForGroup: (groupId: string) => Array<{ id: string; name: string; code: string }>;
+  availableStreams: string[];
   onStartCreate: () => void;
   onCancelEdit: () => void;
-  onGroupDraftChange: (d: { name: string; lessonsPerWeek: number }) => void;
+  onGroupDraftChange: (d: { name: string; lessonsPerWeek: number; scopeStreams: string[] }) => void;
   onCreateGroup: () => void;
   onStartEdit: (g: ElectiveGroup) => void;
   onSaveEdits: (g: ElectiveGroup) => void;
@@ -674,7 +697,7 @@ type ElectiveGroupsSectionProps = {
 
 function ElectiveGroupsSection({
   groups, groupsLoading, editingGroup, groupDraft, pickerGroupId, pickerRef,
-  availableForGroup, onStartCreate, onCancelEdit, onGroupDraftChange,
+  availableForGroup, availableStreams, onStartCreate, onCancelEdit, onGroupDraftChange,
   onCreateGroup, onStartEdit, onSaveEdits, onDeleteGroup,
   onAddSubject, onRemoveSubject, onTogglePicker,
 }: ElectiveGroupsSectionProps) {
@@ -711,6 +734,7 @@ function ElectiveGroupsSection({
           <GroupEditCard
             draft={groupDraft}
             isNew
+            availableStreams={availableStreams}
             onChange={onGroupDraftChange}
             onSave={onCreateGroup}
             onCancel={onCancelEdit}
@@ -737,6 +761,7 @@ function ElectiveGroupsSection({
                   <GroupEditCard
                     draft={groupDraft}
                     isNew={false}
+                    availableStreams={availableStreams}
                     onChange={onGroupDraftChange}
                     onSave={() => onSaveEdits(group)}
                     onCancel={onCancelEdit}
@@ -746,6 +771,11 @@ function ElectiveGroupsSection({
                 <div className="flex items-center gap-2 px-3 py-2.5">
                   <Layers className="h-3.5 w-3.5 text-violet-500 shrink-0" />
                   <span className="text-sm font-semibold text-ink flex-1">{group.name}</span>
+                  {group.scopeStreams.length > 0 && (
+                    <span className="text-[10px] text-slate/60 shrink-0 hidden sm:inline">
+                      {group.scopeStreams.join(", ")}
+                    </span>
+                  )}
                   <span className="text-[10px] bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium shrink-0">
                     {group.lessonsPerWeek}/wk
                   </span>
@@ -842,15 +872,27 @@ function ElectiveGroupsSection({
 // ── GroupEditCard — inline create / rename form ───────────────────────────
 
 function GroupEditCard({
-  draft, isNew, onChange, onSave, onCancel,
+  draft, isNew, onChange, onSave, onCancel, availableStreams,
 }: {
-  draft: { name: string; lessonsPerWeek: number };
+  draft: { name: string; lessonsPerWeek: number; scopeStreams: string[] };
   isNew: boolean;
-  onChange: (d: { name: string; lessonsPerWeek: number }) => void;
+  availableStreams: string[];
+  onChange: (d: { name: string; lessonsPerWeek: number; scopeStreams: string[] }) => void;
   onSave: () => void;
   onCancel: () => void;
 }) {
   const canSave = draft.name.trim().length > 0 && draft.lessonsPerWeek >= 1;
+
+  function toggleStream(stream: string) {
+    const already = draft.scopeStreams.includes(stream);
+    onChange({
+      ...draft,
+      scopeStreams: already
+        ? draft.scopeStreams.filter((s) => s !== stream)
+        : [...draft.scopeStreams, stream],
+    });
+  }
+
   return (
     <div className="rounded-xl border border-violet-300 bg-white p-3 space-y-3">
       <p className="text-xs font-semibold text-violet-700">{isNew ? "New elective group" : "Edit group"}</p>
@@ -882,6 +924,33 @@ function GroupEditCard({
           />
         </div>
       </div>
+
+      {/* Stream scope — only shown when there are multiple streams to pick from */}
+      {availableStreams.length > 1 && (
+        <div>
+          <label className="text-[10px] font-medium text-slate uppercase tracking-wide block mb-1.5">
+            Applies to streams
+            <span className="ml-1 normal-case text-slate/50 font-normal">(leave all unselected = every stream)</span>
+          </label>
+          <div className="flex flex-wrap gap-1.5">
+            {availableStreams.map((s) => {
+              const active = draft.scopeStreams.includes(s);
+              return (
+                <button key={s} type="button"
+                  onClick={() => toggleStream(s)}
+                  className={`text-xs px-2.5 py-1 rounded-full border font-medium transition-colors ${
+                    active
+                      ? "bg-violet-600 text-white border-violet-600"
+                      : "bg-white text-slate border-line hover:border-violet-400 hover:text-violet-700"
+                  }`}>
+                  {s}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-end gap-2">
         <button type="button" onClick={onCancel} className={`${secondaryButtonClass} text-xs`}>
           Cancel

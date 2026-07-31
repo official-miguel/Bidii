@@ -1,13 +1,18 @@
 /**
  * /api/timetable/elective-groups
  *
- * GET    — list all groups for the school, optionally filtered by scopeForm
- * POST   — create a new elective group
- * PATCH  — update name / lessonsPerWeek  (body must include id)
- * DELETE — remove a group               (body must include id)
+ * GET    — list all groups for the school, optionally filtered by scopeForm.
+ *          Each group now includes its scopeStreams and the full list of
+ *          teacher-subject pairings (ElectiveGroupTeacher rows).
+ * POST   — create a new elective group (accepts scopeStreams)
+ * PATCH  — update name / lessonsPerWeek / scopeStreams  (body must include id)
+ * DELETE — remove a group  (body must include id)
  *
  * scopeForm = 0  → school-wide
  * scopeForm = N  → Form N only
+ *
+ * scopeStreams = []        → all streams in the form
+ * scopeStreams = ["North"] → only the named streams
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -18,12 +23,35 @@ import { requirePermission } from "@/lib/permissions";
 
 // ── Auth helper ────────────────────────────────────────────────────────────
 
-async function auth(req: NextRequest) {
+async function auth() {
   return (
     (await requireRole("PRINCIPAL")) ??
     (await requirePermission("TIMETABLE", "manage"))
   );
 }
+
+// ── Shared include for full group shape ────────────────────────────────────
+
+const groupInclude = {
+  members: {
+    include: {
+      subject: {
+        select: { id: true, code: true, name: true, internalCode: true },
+      },
+    },
+    orderBy: { subject: { name: "asc" } },
+  },
+  teachers: {
+    include: {
+      subject: { select: { id: true, code: true, name: true } },
+      teacher: { select: { id: true, fullName: true } },
+    },
+    orderBy: [
+      { subject: { name: "asc" } },
+      { teacher: { fullName: "asc" } },
+    ],
+  },
+} as const;
 
 // ── GET ────────────────────────────────────────────────────────────────────
 
@@ -36,28 +64,14 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const scopeFormParam = searchParams.get("scopeForm");
 
-  const where: any = { schoolId: user.schoolId };
+  const where: Record<string, unknown> = { schoolId: user.schoolId };
   if (scopeFormParam !== null) {
     where.scopeForm = Number(scopeFormParam);
   }
 
   const groups = await prisma.electiveGroup.findMany({
     where,
-    include: {
-      members: {
-        include: {
-          subject: {
-            select: {
-              id: true,
-              code: true,
-              name: true,
-              internalCode: true,
-            },
-          },
-        },
-        orderBy: { subject: { name: "asc" } },
-      },
-    },
+    include: groupInclude,
     orderBy: [{ scopeForm: "asc" }, { name: "asc" }],
   });
 
@@ -67,13 +81,16 @@ export async function GET(req: NextRequest) {
 // ── POST ───────────────────────────────────────────────────────────────────
 
 const createSchema = z.object({
-  name:          z.string().min(1).max(50),
-  scopeForm:     z.number().int().min(0),
+  name:           z.string().min(1).max(50),
+  scopeForm:      z.number().int().min(0),
   lessonsPerWeek: z.number().int().min(1).max(20),
+  /// Optional: restrict the group to specific stream names within the form.
+  /// Omitting the field (or passing []) means the group applies to all streams.
+  scopeStreams:   z.array(z.string().min(1)).optional().default([]),
 });
 
 export async function POST(req: NextRequest) {
-  const user = await auth(req);
+  const user = await auth();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const parsed = createSchema.safeParse(await req.json().catch(() => null));
@@ -84,9 +101,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { name, scopeForm, lessonsPerWeek } = parsed.data;
+  const { name, scopeForm, lessonsPerWeek, scopeStreams } = parsed.data;
 
-  // Check uniqueness
+  // Check uniqueness (name + scopeForm pair)
   const existing = await prisma.electiveGroup.findFirst({
     where: { schoolId: user.schoolId, name, scopeForm },
   });
@@ -99,8 +116,8 @@ export async function POST(req: NextRequest) {
   }
 
   const group = await prisma.electiveGroup.create({
-    data: { schoolId: user.schoolId, name, scopeForm, lessonsPerWeek },
-    include: { members: { include: { subject: { select: { id: true, code: true, name: true, internalCode: true } } } } },
+    data: { schoolId: user.schoolId, name, scopeForm, lessonsPerWeek, scopeStreams },
+    include: groupInclude,
   });
 
   return NextResponse.json({ group }, { status: 201 });
@@ -112,10 +129,12 @@ const patchSchema = z.object({
   id:             z.string().min(1),
   name:           z.string().min(1).max(50).optional(),
   lessonsPerWeek: z.number().int().min(1).max(20).optional(),
+  /// Pass an explicit array (even []) to update; omit the key to leave unchanged.
+  scopeStreams:   z.array(z.string().min(1)).optional(),
 });
 
 export async function PATCH(req: NextRequest) {
-  const user = await auth(req);
+  const user = await auth();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const parsed = patchSchema.safeParse(await req.json().catch(() => null));
@@ -126,7 +145,7 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
-  const { id, name, lessonsPerWeek } = parsed.data;
+  const { id, name, lessonsPerWeek, scopeStreams } = parsed.data;
 
   const group = await prisma.electiveGroup.findFirst({
     where: { id, schoolId: user.schoolId },
@@ -150,15 +169,11 @@ export async function PATCH(req: NextRequest) {
   const updated = await prisma.electiveGroup.update({
     where: { id },
     data: {
-      ...(name !== undefined ? { name } : {}),
-      ...(lessonsPerWeek !== undefined ? { lessonsPerWeek } : {}),
+      ...(name            !== undefined ? { name }            : {}),
+      ...(lessonsPerWeek  !== undefined ? { lessonsPerWeek }  : {}),
+      ...(scopeStreams     !== undefined ? { scopeStreams }    : {}),
     },
-    include: {
-      members: {
-        include: { subject: { select: { id: true, code: true, name: true, internalCode: true } } },
-        orderBy: { subject: { name: "asc" } },
-      },
-    },
+    include: groupInclude,
   });
 
   return NextResponse.json({ group: updated });
@@ -169,7 +184,7 @@ export async function PATCH(req: NextRequest) {
 const deleteSchema = z.object({ id: z.string().min(1) });
 
 export async function DELETE(req: NextRequest) {
-  const user = await auth(req);
+  const user = await auth();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const parsed = deleteSchema.safeParse(await req.json().catch(() => null));
@@ -182,7 +197,7 @@ export async function DELETE(req: NextRequest) {
   });
   if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
-  // ElectiveGroupMember rows cascade-delete via FK
+  // ElectiveGroupMember and ElectiveGroupTeacher rows cascade-delete via FK
   await prisma.electiveGroup.delete({ where: { id: parsed.data.id } });
 
   return NextResponse.json({ ok: true });
