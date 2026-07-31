@@ -307,6 +307,7 @@ export async function POST(req: NextRequest) {
         code: s.code,
         name: s.name,
         type: (subjectMap.get(s.id)?.type ?? "CORE") as "CORE" | "ELECTIVE",
+        doubleLesson: s.doubleLesson,
       })),
       classes: engineClasses,
       requirements: groupPayload.requirements,

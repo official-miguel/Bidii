@@ -244,13 +244,16 @@ def _solve(req: SolverRequest) -> SolverResponse:
 
     # ── 3. Adaptive daily cap per teacher ────────────────────────────────
     # A teacher with N total lessons/week needs at least ceil(N / num_days)
-    # per day.  If that exceeds the configured cap we raise it silently so
-    # the problem stays feasible, and warn the admin.
+    # per day.  For double-lesson subjects each lessonsPerWeek unit occupies
+    # 2 physical periods, so we convert to physical period count first.
     teacher_total: dict[str, int] = {}
     for r in req.requirements:
         tid = assignment_map.get((r.classId, r.subjectId))
         if tid:
-            teacher_total[tid] = teacher_total.get(tid, 0) + r.lessonsPerWeek
+            subject = subject_by_id.get(r.subjectId)
+            is_double = subject.doubleLesson if subject else False
+            physical = r.lessonsPerWeek * (2 if is_double else 1)
+            teacher_total[tid] = teacher_total.get(tid, 0) + physical
 
     effective_cap_for: dict[str, int] = {}
     for tid, total in teacher_total.items():
@@ -325,7 +328,12 @@ def _solve(req: SolverRequest) -> SolverResponse:
                     p += 1
 
         req_vars[(cid, sid)] = vars_for_req
-        needed = r.lessonsPerWeek // 2 if is_double else r.lessonsPerWeek
+        # lessonsPerWeek is the number of occurrences to schedule:
+        #   doubleLesson=True  → each occurrence is a consecutive pair (2 physical slots)
+        #   doubleLesson=False → each occurrence is a single period
+        # The solver variable x[(cid,sid,d,p)] already represents one full
+        # occurrence (pair or single), so needed == lessonsPerWeek directly.
+        needed = r.lessonsPerWeek
         req_needed[(cid, sid)] = needed
 
         available = len(vars_for_req)
@@ -610,36 +618,48 @@ def _solve(req: SolverRequest) -> SolverResponse:
                 ))
 
     # ── 12. Shortfall warnings ───────────────────────────────────────────
-    # Count what was placed vs what was required and warn per shortfall.
-    placed_count: dict[tuple[str, str], int] = {}
+    # Count occurrences placed per (class, subject).
+    # For doubles, the solver emits 2 physical slots per occurrence; we divide
+    # back to occurrence count so the comparison is against lessonsPerWeek.
+    placed_physical: dict[tuple[str, str], int] = {}
     for s in slots_out:
         key = (s.classId, s.subjectId)
-        placed_count[key] = placed_count.get(key, 0) + 1
+        placed_physical[key] = placed_physical.get(key, 0) + 1
 
     total_required = 0
     total_scheduled = 0
 
     for r in req.requirements:
         cid, sid = r.classId, r.subjectId
-        total_required += r.lessonsPerWeek
-        placed = placed_count.get((cid, sid), 0)
-        total_scheduled += placed
+        subject = subject_by_id.get(sid)
+        is_double = subject.doubleLesson if subject else False
+
+        # Convert physical slots placed back to occurrence count for doubles
+        physical = placed_physical.get((cid, sid), 0)
+        placed = physical // 2 if is_double else physical
+        # physical slots required = lessonsPerWeek * (2 for doubles, 1 for singles)
+        required_physical = r.lessonsPerWeek * (2 if is_double else 1)
+
+        total_required  += required_physical
+        total_scheduled += physical   # both in physical slots for the rate
 
         if placed < r.lessonsPerWeek:
             cls_name = class_by_id.get(cid, SchoolClass(id=cid, name=cid)).name
             sub_code = subject_by_id.get(sid, Subject(id=sid, code=sid)).code
             shortfall = r.lessonsPerWeek - placed
             tid = assignment_map.get((cid, sid))
+            unit = "double-block" if is_double else "lesson"
             if tid:
                 tname = teacher_by_id.get(tid, Teacher(id=tid, name=tid)).name
                 warnings.append(
                     f"{sub_code} for {cls_name}: scheduled {placed}/{r.lessonsPerWeek} "
-                    f"lessons (short by {shortfall}). Teacher: {tname!r}. "
+                    f"{unit}{'s' if r.lessonsPerWeek != 1 else ''} (short by {shortfall}). "
+                    f"Teacher: {tname!r}. "
                     f"Fix: reduce teacher unavailability or assign an additional teacher."
                 )
             else:
                 warnings.append(
-                    f"{sub_code} for {cls_name}: 0/{r.lessonsPerWeek} lessons scheduled "
+                    f"{sub_code} for {cls_name}: 0/{r.lessonsPerWeek} {unit}s scheduled "
                     f"(no teacher assigned)."
                 )
 

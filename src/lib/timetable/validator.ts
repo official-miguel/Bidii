@@ -54,7 +54,7 @@ export type ValidationReport = {
 export type ValidatorInput = {
   slots: GeneratedSlot[];
   classes: Array<{ id: string; name: string }>;
-  subjects: Array<{ id: string; code: string; name: string; internalCode: number }>;
+  subjects: Array<{ id: string; code: string; name: string; internalCode: number; doubleLesson?: boolean }>;
   teachers: Array<{ id: string; name: string }>;
   requirements: Array<{ classId: string; subjectId: string; lessonsPerWeek: number }>;
   teacherAssignments: Array<{ classId: string; subjectId: string; teacherId: string }>;
@@ -193,29 +193,41 @@ function checkCompleteLessonCount(
   failed: Set<ValidationRule>
 ): void {
   const rule: ValidationRule = "COMPLETE_LESSON_COUNT";
-  const scheduled = new Map<string, number>();
 
-  // Count scheduled lessons
+  // Build a set of double-lesson subject IDs for quick lookup
+  const doubleSubjectIds = new Set(
+    input.subjects.filter((s) => s.doubleLesson).map((s) => s.id)
+  );
+
+  // Count physical slots placed per (class, subject)
+  const physicalScheduled = new Map<string, number>();
   for (const slot of input.slots) {
     const key = `${slot.classId}-${slot.subjectId}`;
-    scheduled.set(key, (scheduled.get(key) ?? 0) + 1);
+    physicalScheduled.set(key, (physicalScheduled.get(key) ?? 0) + 1);
   }
 
   let hasError = false;
 
-  // Check against requirements
+  // Check against requirements.
+  // lessonsPerWeek = number of occurrences (each occurrence is a double-block
+  // pair for doubleLesson subjects, a single period otherwise).
+  // The solver emits 2 physical slots per double-block occurrence, so we
+  // convert physical count back to occurrences before comparing.
   for (const req of input.requirements) {
     const key = `${req.classId}-${req.subjectId}`;
-    const count = scheduled.get(key) ?? 0;
+    const physical = physicalScheduled.get(key) ?? 0;
+    const isDouble = doubleSubjectIds.has(req.subjectId);
+    const count = isDouble ? Math.floor(physical / 2) : physical;
 
     if (count < req.lessonsPerWeek) {
       const cls = input.classes.find((c) => c.id === req.classId);
       const subject = input.subjects.find((s) => s.id === req.subjectId);
+      const unit = isDouble ? "double-block" : "lesson";
 
       issues.push({
         rule,
         severity: "ERROR",
-        message: `${cls?.name || req.classId} has incomplete lessons for ${subject?.code || req.subjectId}: ${count}/${req.lessonsPerWeek} scheduled`,
+        message: `${cls?.name || req.classId} has incomplete lessons for ${subject?.code || req.subjectId}: ${count}/${req.lessonsPerWeek} ${unit}s scheduled`,
         affectedClasses: [req.classId],
         affectedSubjects: [req.subjectId],
         details: { scheduled: count, required: req.lessonsPerWeek },

@@ -39,8 +39,9 @@ export async function POST(req: NextRequest) {
   try {
     return await _handlePost(req);
   } catch (err: unknown) {
+    // Log the full error (stack + cause) so Vercel logs show the actual source
+    console.error("[timetable/v2/generate] Unhandled error:", err);
     const message = err instanceof Error ? err.message : String(err);
-    console.error("[timetable/v2/generate] Unhandled error:", message);
     return NextResponse.json(
       { error: "An unexpected error occurred while generating the timetable.", detail: message },
       { status: 500 }
@@ -301,6 +302,7 @@ async function _handlePost(req: NextRequest) {
         code: s.code,
         name: s.name,
         type: (s.type ?? "CORE") as "CORE" | "ELECTIVE",
+        doubleLesson: s.doubleLesson,
       })),
       classes: engineClasses,
       requirements: groupPayload.requirements,
@@ -472,8 +474,33 @@ async function _handlePost(req: NextRequest) {
   //  3. Insert slot chunks individually — each is its own short transaction
   // This keeps every individual DB call well under PgBouncer's timeout.
   const { Prisma } = await import("@prisma/client");
+
+  // ── Deduplicate slots before inserting ────────────────────────────────────
+  // TimetableVersionSlot has TWO unique constraints:
+  //   • (versionId, classId, dayOfWeek, period)   — one subject per class slot
+  //   • (versionId, teacherId, dayOfWeek, period)  — no teacher double-booking
+  //
+  // After fanOutGroupSlots expands anchor slots into multiple group subjects, a
+  // teacher who covers several group subjects for different classes can appear
+  // multiple times at the same (dayOfWeek, period).  The ON CONFLICT clause can
+  // only name one constraint, so the second unique key would throw a raw
+  // PostgreSQL error that bubbles up as a 500.
+  //
+  // We deduplicate here (keep first occurrence wins) to guarantee neither
+  // constraint is violated before we ever touch the database.
+  const classSlotSeen = new Set<string>();   // "classId|day|period"
+  const teacherSlotSeen = new Set<string>(); // "teacherId|day|period"
+  const deduplicatedSlots = result.finalResult!.slots.filter((s) => {
+    const classKey   = `${s.classId}|${s.dayOfWeek}|${s.period}`;
+    const teacherKey = `${s.teacherId}|${s.dayOfWeek}|${s.period}`;
+    if (classSlotSeen.has(classKey) || teacherSlotSeen.has(teacherKey)) return false;
+    classSlotSeen.add(classKey);
+    teacherSlotSeen.add(teacherKey);
+    return true;
+  });
+
   const CHUNK_SIZE = 200;
-  const slots = result.finalResult!.slots;
+  const slots = deduplicatedSlots;
   const slotChunks: (typeof slots)[] = [];
   for (let i = 0; i < slots.length; i += CHUNK_SIZE) {
     slotChunks.push(slots.slice(i, i + CHUNK_SIZE));
@@ -518,8 +545,12 @@ async function _handlePost(req: NextRequest) {
         (id, "versionId", "schoolId", "classId", "dayOfWeek", period,
          "subjectId", "teacherId", room, "isManual", "createdAt", "updatedAt")
       VALUES ${Prisma.join(rows)}
-      ON CONFLICT ("versionId", "classId", "dayOfWeek", period) DO NOTHING`;
+      ON CONFLICT DO NOTHING`;
   }
+
+  // Replace result slots with the deduplicated set so slotCount and the
+  // response slots array are consistent with what was actually persisted.
+  result.finalResult!.slots = deduplicatedSlots;
 
   const classNameMap = new Map(classesRaw.map((c) => [c.id, c.name]));
   const subjectCodeMap = new Map(engineSubjectsWithGroups.map((s) => [s.id, s.code]));

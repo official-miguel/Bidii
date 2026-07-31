@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
       }),
       prisma.subject.findMany({
         where: { schoolId },
-        select: { id: true, code: true, name: true, internalCode: true },
+        select: { id: true, code: true, name: true, internalCode: true, doubleLesson: true },
       }),
     ]);
 
@@ -139,6 +139,7 @@ export async function POST(req: NextRequest) {
       code: s.code,
       name: s.name,
       internalCode: s.internalCode,
+      doubleLesson: s.doubleLesson,
     })),
     teachers: [],
     requirements,
