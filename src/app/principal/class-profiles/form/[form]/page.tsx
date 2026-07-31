@@ -1,6 +1,17 @@
 "use client";
 
-import { useEffect, useState, useCallback, use, useRef } from "react";
+/**
+ * /principal/class-profiles/form/[form]
+ *
+ * Form-level class profile:
+ *  • Elective groups read-only summary — shows what groups are defined for
+ *    this form and links each class to its individual profile for teacher
+ *    assignment. Teacher assignment has moved to the per-class page.
+ *  • Subject type (core/elective) bulk editor — applies to ALL classes in
+ *    the form at once.
+ */
+
+import { useEffect, useState, useCallback, use } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -10,13 +21,12 @@ import {
   ErrorBanner,
   primaryButtonClass,
   secondaryButtonClass,
-  inputClass,
 } from "@/components/ui";
 import { SkeletonTable } from "@/components/ui/ProgressivePage";
 import ContextNavigation from "@/components/ContextNavigation";
 import {
   ArrowLeft, CheckCircle2, AlertCircle, Layers,
-  Plus, X, ExternalLink, User,
+  ExternalLink, BookOpen, Users, ChevronRight,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -46,14 +56,6 @@ type GroupMember = {
   subject: { id: string; code: string; name: string };
 };
 
-type GroupTeacher = {
-  id: string;
-  subjectId: string;
-  teacherId: string;
-  subject: { id: string; code: string; name: string };
-  teacher: { id: string; fullName: string };
-};
-
 type ElectiveGroup = {
   id: string;
   name: string;
@@ -61,13 +63,6 @@ type ElectiveGroup = {
   scopeStreams: string[];
   lessonsPerWeek: number;
   members: GroupMember[];
-  teachers: GroupTeacher[];
-};
-
-type StaffTeacher = {
-  id: string;
-  fullName: string;
-  teacherSubjects: { subject: { id: string; name: string; code: string } }[];
 };
 
 type FormData = {
@@ -112,54 +107,31 @@ function TypeToggle({
   );
 }
 
-// ── ElectiveGroupsReadView ─────────────────────────────────────────────────
-// Read-through view of groups from timetable requirements. Teacher assignment
-// happens here: each subject row can have one or more teachers, each
-// representing a distinct sub-group of students.
+// ── ElectiveGroupsSummary ──────────────────────────────────────────────────
+// Read-only overview of elective groups for this form. Teacher assignment
+// happens at the individual class level — each class card links there.
 
-function ElectiveGroupsReadView({
+function ElectiveGroupsSummary({
   groups,
-  allTeachers,
-  onAddTeacher,
-  onRemoveTeacher,
-  teacherMutating,
+  classes,
   formNum,
 }: {
   groups: ElectiveGroup[];
-  allTeachers: StaffTeacher[];
-  onAddTeacher: (groupId: string, subjectId: string, teacherId: string) => Promise<void>;
-  onRemoveTeacher: (groupId: string, subjectId: string, teacherId: string) => Promise<void>;
-  teacherMutating: Record<string, boolean>;
+  classes: ClassInfo[];
   formNum: number;
 }) {
-  const [pickerState, setPickerState] = useState<{
-    groupId: string; subjectId: string;
-  } | null>(null);
-  const [pickerQuery, setPickerQuery] = useState("");
-  const pickerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
-        setPickerState(null);
-      }
-    }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
   if (groups.length === 0) {
     return (
       <div className="rounded-xl border border-violet-100 bg-violet-50/40 px-5 py-6 text-center mb-6">
         <Layers className="h-8 w-8 text-violet-300 mx-auto mb-2" />
         <p className="text-sm font-medium text-violet-700">No elective groups for Form {formNum} yet.</p>
         <p className="text-xs text-violet-500 mt-1 max-w-sm mx-auto">
-          Elective groups are defined in{" "}
+          Create groups in{" "}
           <Link href="/principal/timetable/requirements"
             className="underline hover:text-violet-700 inline-flex items-center gap-0.5">
             Timetable → Requirements <ExternalLink className="h-3 w-3" />
-          </Link>.
-          Once created they appear here automatically.
+          </Link>
+          . They appear here automatically.
         </p>
       </div>
     );
@@ -167,149 +139,88 @@ function ElectiveGroupsReadView({
 
   return (
     <div className="space-y-4 mb-6">
-      <div className="flex items-center gap-2 mb-1">
+      {/* Section title */}
+      <div className="flex items-center gap-2">
         <Layers className="h-4 w-4 text-violet-500" />
         <span className="text-sm font-semibold text-ink">Elective Groups</span>
         <Chip variant="purple" size="xs">{groups.length}</Chip>
         <Link href="/principal/timetable/requirements"
           className="ml-auto text-xs text-violet-600 hover:underline flex items-center gap-1">
-          Manage in Requirements <ExternalLink className="h-3 w-3" />
+          Manage groups <ExternalLink className="h-3 w-3" />
         </Link>
       </div>
 
+      {/* Info callout */}
+      <div className="rounded-lg border border-violet-100 bg-violet-50/40 px-4 py-2.5 flex gap-2 text-xs text-violet-700">
+        <Layers className="h-3.5 w-3.5 shrink-0 mt-0.5 text-violet-400" />
+        <span>
+          Teacher assignment for elective subjects is done <strong>per class</strong>.
+          Click any class below to assign teachers for each subject in its groups.
+        </span>
+      </div>
+
+      {/* Group cards */}
       {groups.map((group) => {
         const streamLabel = group.scopeStreams.length > 0
           ? group.scopeStreams.join(", ")
           : "all streams";
+        // Which classes in this form are in scope for this group
+        const scopedClasses = classes.filter((cls) => {
+          if (group.scopeStreams.length === 0) return true;
+          if (!cls.stream) return false;
+          return group.scopeStreams.some(
+            (s) => s.toLowerCase() === cls.stream!.toLowerCase(),
+          );
+        });
 
         return (
-          <div key={group.id} className="rounded-xl border border-violet-200 bg-violet-50/30 overflow-hidden">
+          <div key={group.id}
+            className="rounded-xl border border-violet-200 bg-white overflow-hidden shadow-xs">
             {/* Group header */}
-            <div className="flex items-center gap-2 px-4 py-2.5 bg-violet-50/60 border-b border-violet-100">
-              <Layers className="h-3.5 w-3.5 text-violet-500 shrink-0" />
+            <div className="flex items-center gap-2.5 px-4 py-3 bg-violet-50/60 border-b border-violet-100">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100 shrink-0">
+                <Layers className="h-3.5 w-3.5 text-violet-600" />
+              </div>
               <span className="text-sm font-semibold text-ink flex-1">{group.name}</span>
-              <span className="text-[10px] bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium">
-                {group.lessonsPerWeek}/wk
+              <span className="text-[10px] bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium border border-violet-200">
+                {group.lessonsPerWeek} lessons/wk
               </span>
-              {group.scopeForm > 0 && (
-                <span className="text-[10px] text-slate/60 shrink-0">
-                  Form {group.scopeForm} · {streamLabel}
-                </span>
+              <span className="text-[10px] text-slate/60 shrink-0 hidden sm:block">
+                {group.scopeForm > 0 ? `Form ${group.scopeForm} · ` : ""}{streamLabel}
+              </span>
+            </div>
+
+            {/* Subject pills */}
+            <div className="px-4 py-3 flex flex-wrap gap-1.5 border-b border-violet-50">
+              {group.members.length === 0 ? (
+                <span className="text-xs text-slate/50 italic">No subjects yet.</span>
+              ) : (
+                group.members.map((m) => (
+                  <span key={m.subjectId}
+                    className="inline-flex items-center gap-1 text-[11px] font-medium bg-violet-50 border border-violet-200 text-violet-700 rounded-full px-2 py-0.5">
+                    <BookOpen className="h-2.5 w-2.5" />
+                    {m.subject.name}
+                  </span>
+                ))
               )}
             </div>
 
-            {/* Subjects inside the group */}
-            <div className="divide-y divide-violet-100">
-              {group.members.length === 0 && (
-                <p className="px-4 py-3 text-xs text-slate/50 italic">
-                  No subjects in this group yet — add them in Timetable Requirements.
-                </p>
-              )}
-              {group.members.map((member) => {
-                const subjectTeachers = group.teachers.filter(
-                  (t) => t.subjectId === member.subjectId,
-                );
-                const isPicking =
-                  pickerState?.groupId === group.id &&
-                  pickerState?.subjectId === member.subjectId;
-                const mutKey = `${group.id}:${member.subjectId}`;
-                const isMutating = teacherMutating[mutKey] ?? false;
-
-                // Teachers eligible to add: assigned to this subject, not already in this slot
-                const alreadyAssigned = new Set(subjectTeachers.map((t) => t.teacherId));
-                const eligible = allTeachers.filter(
-                  (t) =>
-                    t.teacherSubjects.some((ts) => ts.subject.id === member.subjectId) &&
-                    !alreadyAssigned.has(t.id),
-                );
-                const filtered = eligible.filter(
-                  (t) =>
-                    pickerQuery === "" ||
-                    t.fullName.toLowerCase().includes(pickerQuery.toLowerCase()),
-                );
-
-                return (
-                  <div key={member.subjectId} className="px-4 py-3">
-                    {/* Subject name + code */}
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-sm font-medium text-ink flex-1">
-                        {member.subject.name}
-                      </span>
-                      <span className="text-[10px] font-mono text-slate bg-line px-1.5 py-0.5 rounded">
-                        {member.subject.code}
-                      </span>
-                    </div>
-
-                    {/* Teacher rows — one per sub-group */}
-                    <div className="space-y-1.5 mb-2">
-                      {subjectTeachers.length === 0 && (
-                        <p className="text-xs text-slate/50 italic">No teacher assigned yet.</p>
-                      )}
-                      {subjectTeachers.map((t) => (
-                        <div key={t.id}
-                          className="flex items-center gap-2 bg-white border border-line rounded-lg px-3 py-1.5">
-                          <User className="h-3 w-3 text-teal shrink-0" />
-                          <span className="text-xs text-ink flex-1">{t.teacher.fullName}</span>
-                          <button type="button"
-                            disabled={isMutating}
-                            onClick={() => onRemoveTeacher(group.id, member.subjectId, t.teacherId)}
-                            className="p-0.5 rounded hover:bg-red-50 text-slate/40 hover:text-red-500 transition-colors"
-                            title="Remove this teacher from the group subject">
-                            <X className="h-3 w-3" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Add teacher picker */}
-                    <div className="relative" ref={isPicking ? pickerRef : undefined}>
-                      <button type="button"
-                        disabled={isMutating || eligible.length === 0}
-                        onClick={() => {
-                          setPickerQuery("");
-                          setPickerState(isPicking ? null : { groupId: group.id, subjectId: member.subjectId });
-                        }}
-                        className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg border transition-colors
-                          ${isPicking
-                            ? "bg-violet-100 border-violet-400 text-violet-800"
-                            : "bg-white border-violet-300 text-violet-700 hover:bg-violet-50 hover:border-violet-400"
-                          } disabled:opacity-40 disabled:cursor-not-allowed`}>
-                        <Plus className="h-3 w-3" />
-                        {eligible.length === 0 ? "No eligible teachers" : "Add teacher"}
-                      </button>
-
-                      {isPicking && (
-                        <div className="absolute left-0 top-full mt-1 z-20 bg-white border border-line rounded-xl shadow-lg w-56 overflow-hidden">
-                          <div className="p-2 border-b border-line">
-                            <input autoFocus type="text" placeholder="Search teachers…"
-                              value={pickerQuery}
-                              onChange={(e) => setPickerQuery(e.target.value)}
-                              className={`${inputClass} text-xs py-1 w-full`} />
-                          </div>
-                          <div className="max-h-44 overflow-y-auto divide-y divide-line">
-                            {filtered.length === 0 ? (
-                              <p className="px-3 py-3 text-xs text-slate/60 text-center">
-                                {eligible.length === 0 ? "No eligible teachers" : "No matches"}
-                              </p>
-                            ) : (
-                              filtered.map((t) => (
-                                <button key={t.id} type="button"
-                                  onClick={async () => {
-                                    setPickerState(null);
-                                    await onAddTeacher(group.id, member.subjectId, t.id);
-                                  }}
-                                  className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-violet-50 transition-colors">
-                                  <span className="text-xs text-ink flex-1">{t.fullName}</span>
-                                </button>
-                              ))
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+            {/* Per-class links */}
+            <div className="px-4 py-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate mb-2">
+                Assign teachers per class
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {scopedClasses.map((cls) => (
+                  <Link key={cls.id}
+                    href={`/principal/class-profiles/${cls.id}`}
+                    className="inline-flex items-center gap-1.5 text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-2.5 py-1 hover:bg-violet-100 hover:border-violet-300 transition-colors group/link">
+                    <Users className="h-3 w-3 shrink-0" />
+                    {cls.name}
+                    <ChevronRight className="h-3 w-3 opacity-0 group-hover/link:opacity-100 transition-opacity" />
+                  </Link>
+                ))}
+              </div>
             </div>
           </div>
         );
@@ -328,48 +239,32 @@ export default function FormClassProfilePage({
   const { form: formParam } = use(params);
   const router = useRouter();
 
-  const [data, setData] = useState<FormData | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [data, setData]             = useState<FormData | null>(null);
+  const [loadError, setLoadError]   = useState<string | null>(null);
   const [assignments, setAssignments] = useState<Record<string, "CORE" | "ELECTIVE">>({});
-  const [dirty, setDirty] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [dirty, setDirty]           = useState(false);
+  const [saving, setSaving]         = useState(false);
+  const [saveError, setSaveError]   = useState<string | null>(null);
+  const [saved, setSaved]           = useState(false);
 
-  // Teacher mutation — tracks in-flight add/remove per (groupId:subjectId)
-  const [teacherMutating, setTeacherMutating] = useState<Record<string, boolean>>({});
-  const [teacherError, setTeacherError] = useState<string | null>(null);
-
-  // All staff (for teacher picker)
-  const [allTeachers, setAllTeachers] = useState<StaffTeacher[]>([]);
-
-  // Filter state
   const [filterDept, setFilterDept] = useState("");
   const [filterType, setFilterType] = useState<"" | "CORE" | "ELECTIVE">("");
 
   const load = useCallback(async () => {
     setLoadError(null);
     try {
-      const [profileRes, staffRes] = await Promise.all([
-        fetch(`/api/class-profiles/form/${formParam}`),
-        fetch("/api/staff"),
-      ]);
-      if (!profileRes.ok) {
-        const body = await profileRes.json().catch(() => ({}));
+      const res = await fetch(`/api/class-profiles/form/${formParam}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
         setLoadError(body.error ?? "Failed to load form profile.");
         return;
       }
-      const fresh: FormData = await profileRes.json();
+      const fresh: FormData = await res.json();
       setData(fresh);
       const init: Record<string, "CORE" | "ELECTIVE"> = {};
       for (const s of fresh.subjects) init[s.id] = s.effectiveType;
       setAssignments(init);
       setDirty(false);
-
-      if (staffRes.ok) {
-        const staffData: StaffTeacher[] = await staffRes.json();
-        setAllTeachers(staffData.filter((t) => t.teacherSubjects.length > 0));
-      }
     } catch {
       setLoadError("Could not load form profile.");
     }
@@ -410,66 +305,9 @@ export default function FormClassProfilePage({
     setSaving(false);
   }
 
-  async function handleAddTeacher(groupId: string, subjectId: string, teacherId: string) {
-    const key = `${groupId}:${subjectId}`;
-    setTeacherMutating((p) => ({ ...p, [key]: true }));
-    setTeacherError(null);
-    try {
-      const res = await fetch(`/api/timetable/elective-groups/${groupId}/teachers`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subjectId, teacherId }),
-      });
-      const body = await res.json();
-      if (!res.ok) { setTeacherError(body.error ?? "Failed to add teacher."); return; }
-      // Patch local state without a full reload
-      setData((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          electiveGroups: prev.electiveGroups.map((g) =>
-            g.id !== groupId ? g : { ...g, teachers: [...g.teachers, body.pairing] }
-          ),
-        };
-      });
-    } finally {
-      setTeacherMutating((p) => ({ ...p, [key]: false }));
-    }
-  }
-
-  async function handleRemoveTeacher(groupId: string, subjectId: string, teacherId: string) {
-    const key = `${groupId}:${subjectId}`;
-    setTeacherMutating((p) => ({ ...p, [key]: true }));
-    setTeacherError(null);
-    try {
-      const res = await fetch(`/api/timetable/elective-groups/${groupId}/teachers`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subjectId, teacherId }),
-      });
-      if (!res.ok) {
-        const body = await res.json();
-        setTeacherError(body.error ?? "Failed to remove teacher.");
-        return;
-      }
-      setData((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          electiveGroups: prev.electiveGroups.map((g) =>
-            g.id !== groupId ? g
-              : { ...g, teachers: g.teachers.filter((t) => !(t.subjectId === subjectId && t.teacherId === teacherId)) }
-          ),
-        };
-      });
-    } finally {
-      setTeacherMutating((p) => ({ ...p, [key]: false }));
-    }
-  }
-
-  // Subjects that belong to any elective group — excluded from the plain table
+  // Subjects absorbed into any group — excluded from the type-toggle table
   const groupedSubjectIds = new Set(
-    (data?.electiveGroups ?? []).flatMap((g) => g.members.map((m) => m.subjectId))
+    (data?.electiveGroups ?? []).flatMap((g) => g.members.map((m) => m.subjectId)),
   );
 
   const departments = data
@@ -485,10 +323,10 @@ export default function FormClassProfilePage({
   });
 
   const coreCount = ungroupedSubjects.filter(
-    (s) => (assignments[s.id] ?? s.effectiveType) === "CORE"
+    (s) => (assignments[s.id] ?? s.effectiveType) === "CORE",
   ).length;
   const electiveCount = ungroupedSubjects.filter(
-    (s) => (assignments[s.id] ?? s.effectiveType) === "ELECTIVE"
+    (s) => (assignments[s.id] ?? s.effectiveType) === "ELECTIVE",
   ).length;
 
   return (
@@ -500,9 +338,6 @@ export default function FormClassProfilePage({
           { href: "/principal/subjects",       label: "Subjects" },
           { href: "/principal/class-profiles", label: "Class Profiles" },
           { href: "/principal/timetable",      label: "Timetable" },
-          { href: "/principal/attendance",     label: "Attendance" },
-          { href: "/principal/calendar",       label: "Calendar" },
-          { href: "/principal/assessments",    label: "Exams & Analysis" },
         ]}
       />
 
@@ -521,7 +356,7 @@ export default function FormClassProfilePage({
         <>
           <PageHeader
             title={`Form ${data.form} — Subject Profile`}
-            description={`Configure core/elective assignments and elective-group teacher pairings for all ${data.classes.length} class${data.classes.length !== 1 ? "es" : ""} in this form.`}
+            description={`Configure core/elective type for all ${data.classes.length} class${data.classes.length !== 1 ? "es" : ""} in this form. Teacher assignment for elective groups is done per class.`}
             action={
               <div className="flex items-center gap-2">
                 {saved && !dirty && (
@@ -531,7 +366,7 @@ export default function FormClassProfilePage({
                 )}
                 <button type="button" className={secondaryButtonClass}
                   onClick={() => router.push("/principal/class-profiles")}>
-                  Cancel
+                  Back
                 </button>
                 <button type="button" className={primaryButtonClass}
                   onClick={handleSave} disabled={saving || !dirty}>
@@ -541,53 +376,52 @@ export default function FormClassProfilePage({
             }
           />
 
-          {saveError    && <ErrorBanner message={saveError} />}
-          {teacherError && <ErrorBanner message={teacherError} onDismiss={() => setTeacherError(null)} />}
+          {saveError && <ErrorBanner message={saveError} onDismiss={() => setSaveError(null)} />}
 
-          {/* Classes in this form */}
+          {/* Classes row */}
           <div className="mb-5 flex flex-wrap gap-2">
             {data.classes.map((cls) => (
-              <span key={cls.id}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-3 py-1.5 text-xs text-ink shadow-sm">
+              <Link key={cls.id}
+                href={`/principal/class-profiles/${cls.id}`}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-3 py-1.5 text-xs text-ink shadow-sm hover:border-teal/50 hover:text-teal transition-colors">
                 <span className="font-medium">{cls.name}</span>
-                {cls.stream && <span className="text-slate">· {cls.stream}</span>}
-                <span className="text-slate/60">{cls._count.students} students</span>
-              </span>
+                {cls.stream && <span className="text-slate/60">· {cls.stream}</span>}
+                <ChevronRight className="h-3 w-3 text-slate/40" />
+              </Link>
             ))}
           </div>
 
-          {/* ── Elective groups read-through view ─────────────────── */}
-          <ElectiveGroupsReadView
+          {/* ── Elective groups read-only summary ─────────────────── */}
+          <ElectiveGroupsSummary
             groups={data.electiveGroups}
-            allTeachers={allTeachers}
-            onAddTeacher={handleAddTeacher}
-            onRemoveTeacher={handleRemoveTeacher}
-            teacherMutating={teacherMutating}
+            classes={data.classes}
             formNum={data.form}
           />
 
-          {/* ── Non-grouped subjects ──────────────────────────────── */}
-          <div className="mb-4 flex items-center gap-3 flex-wrap">
+          {/* ── Non-grouped subjects type editor ──────────────────── */}
+          <div className="mb-3 flex items-center gap-3 flex-wrap">
+            <span className="text-sm font-semibold text-ink">Subjects</span>
             <Chip variant="success" size="xs">{coreCount} core</Chip>
-            <Chip variant="warn"    size="xs">{electiveCount} elective</Chip>
-            <span className="text-xs text-slate">{ungroupedSubjects.length} non-grouped subjects</span>
+            {electiveCount > 0 && <Chip variant="warn" size="xs">{electiveCount} elective</Chip>}
             {ungroupedSubjects.some((s) => s.mixed) && (
               <span className="flex items-center gap-1 text-xs text-warn">
                 <AlertCircle className="h-3.5 w-3.5" />
-                Some subjects have mixed assignments — saving will unify them.
+                Some have mixed types — saving will unify them across the form.
               </span>
             )}
           </div>
 
           {/* Filters */}
           <div className="mb-4 flex flex-wrap items-center gap-3">
-            <select value={filterDept} onChange={(e) => setFilterDept(e.target.value)}
-              className="text-sm rounded-lg border border-line px-3 py-1.5 bg-white text-ink focus:outline-none focus:ring-2 focus:ring-teal/30">
-              <option value="">All departments</option>
-              {departments.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </select>
+            {departments.length > 1 && (
+              <select value={filterDept} onChange={(e) => setFilterDept(e.target.value)}
+                className="text-sm rounded-lg border border-line px-3 py-1.5 bg-white text-ink focus:outline-none focus:ring-2 focus:ring-teal/30">
+                <option value="">All departments</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+            )}
             <select value={filterType} onChange={(e) => setFilterType(e.target.value as "" | "CORE" | "ELECTIVE")}
               className="text-sm rounded-lg border border-line px-3 py-1.5 bg-white text-ink focus:outline-none focus:ring-2 focus:ring-teal/30">
               <option value="">All types</option>
@@ -605,7 +439,6 @@ export default function FormClassProfilePage({
             </span>
           </div>
 
-          {/* Subject table */}
           {ungroupedSubjects.length === 0 ? (
             <EmptyState
               message="All subjects for this form are covered by elective groups."
@@ -622,7 +455,7 @@ export default function FormClassProfilePage({
             <div className="bg-white border border-line rounded-xl overflow-hidden shadow-sm">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm min-w-[520px]">
-                  <thead className="sticky top-0 z-10">
+                  <thead>
                     <tr className="border-b border-line bg-slate-50/80 text-left text-xs font-semibold text-slate uppercase tracking-wide">
                       <th className="px-5 py-3.5">Subject</th>
                       <th className="px-5 py-3.5 w-[90px]">Code</th>
@@ -642,7 +475,7 @@ export default function FormClassProfilePage({
                             <span className="font-medium text-ink">{s.name}</span>
                             {s.mixed && (
                               <span className="ml-2 text-xs text-warn"
-                                title="Classes in this form currently have different types for this subject">
+                                title="Classes in this form have different types — saving will unify them.">
                                 (mixed)
                               </span>
                             )}
@@ -673,9 +506,8 @@ export default function FormClassProfilePage({
               <div className="border-t border-line px-5 py-3 bg-slate-50/60">
                 <p className="text-xs text-slate">
                   <span className="text-teal font-medium">*</span> marks subjects where the
-                  form assignment differs from the subject&apos;s school-wide default type.
-                  Changes apply to all {data.classes.length} class{data.classes.length !== 1 ? "es" : ""} in Form {data.form}.
-                  Subjects inside an elective group are shown above and excluded from this table.
+                  form assignment differs from the school-wide default. Changes apply to all{" "}
+                  {data.classes.length} class{data.classes.length !== 1 ? "es" : ""} in Form {data.form}.
                 </p>
               </div>
             </div>

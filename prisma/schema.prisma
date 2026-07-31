@@ -48,6 +48,7 @@ model School {
   achievements             Achievement[]
   studentFiles             StudentFile[]
   classSubjectProfiles     ClassSubjectProfile[]
+  classElectiveGroupTeachers ClassElectiveGroupTeacher[]
   /// Assessment framework models
   assessmentFrameworks     AssessmentFramework[]
   assessmentPeriods        AssessmentPeriod[]
@@ -227,6 +228,7 @@ model Subject {
   studentElectives    StudentElective[]
   electiveGroupMembers ElectiveGroupMember[]
   electiveGroupTeachers ElectiveGroupTeacher[]
+  classElectiveGroupTeachers ClassElectiveGroupTeacher[]
   /// Assessment framework back-relations
   papers              Paper[]
   assessmentItems     AssessmentItem[]
@@ -291,6 +293,7 @@ model Teacher {
   timetableSlots         TimetableSlot[]
   groupMemberships       GroupMember[]
   electiveGroupTeachers  ElectiveGroupTeacher[]
+  classElectiveGroupTeachers ClassElectiveGroupTeacher[]
   /// Accommodation: dorms this teacher is the boarding master for
   dormsBoardingMaster    Dormitory[]             @relation("DormBoardingMaster")
 
@@ -470,6 +473,8 @@ model SchoolClass {
   lessonRequirements SubjectLessonRequirement[]
   /// Per-class subject type overrides (class profile)
   classSubjectProfiles ClassSubjectProfile[]
+  /// Per-class elective group teacher pairings
+  classElectiveGroupTeachers ClassElectiveGroupTeacher[]
 
   @@unique([schoolId, name])
   @@index([schoolId, form])
@@ -860,6 +865,7 @@ model ElectiveGroup {
   school         School                 @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   members        ElectiveGroupMember[]
   teachers       ElectiveGroupTeacher[]
+  classTeachers  ClassElectiveGroupTeacher[]
 
   /// Two groups with the same name can exist on different forms.
   @@unique([schoolId, name, scopeForm])
@@ -903,6 +909,39 @@ model ElectiveGroupTeacher {
   /// A teacher can only be assigned once per (group, subject) pair.
   @@unique([groupId, subjectId, teacherId])
   @@index([groupId])
+  @@index([subjectId])
+  @@index([teacherId])
+  @@index([schoolId])
+}
+
+/// Per-class teacher–subject pairing within an elective group.
+/// Whereas ElectiveGroupTeacher is form-wide (shared across all classes in a
+/// form's group), this model is class-scoped: each stream/class assigns its
+/// own teachers for each subject inside the group it belongs to. A single
+/// subject in a group can have multiple rows for the same class if different
+/// students in that class have different teachers (e.g. two Geography teachers
+/// covering the same GPC group in the same class). Each row = one distinct
+/// sub-group of students. The timetable engine and teacher dashboard read
+/// these rows — not ClassSubjectTeacher — for elective subjects that are part
+/// of a group.
+model ClassElectiveGroupTeacher {
+  id        String        @id @default(cuid())
+  groupId   String
+  classId   String
+  subjectId String
+  teacherId String
+  schoolId  String
+  createdAt DateTime      @default(now())
+  group     ElectiveGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  schoolClass SchoolClass @relation(fields: [classId], references: [id], onDelete: Cascade)
+  subject   Subject       @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  teacher   Teacher       @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  school    School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  /// A teacher can only be assigned once per (group, class, subject) triple.
+  @@unique([groupId, classId, subjectId, teacherId])
+  @@index([groupId])
+  @@index([classId])
   @@index([subjectId])
   @@index([teacherId])
   @@index([schoolId])
