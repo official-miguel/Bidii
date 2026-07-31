@@ -18,7 +18,7 @@ import SlideOver from "@/components/workspace/SlideOver";
 import { Avatar, Chip, Spinner } from "@/components/ui";
 import {
   Users, BookOpen, CalendarDays, ClipboardList,
-  ExternalLink, XCircle, UserCheck, Pencil, ChevronDown,
+  ExternalLink, XCircle, UserCheck, Pencil, ChevronDown, Layers,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -37,7 +37,7 @@ interface ClassDetail {
     subject: { id: string; name: string; code: string; type: "CORE" | "ELECTIVE" };
     teacher: { id: string; fullName: string };
   }[];
-  /** All subjects applicable to this class's form, with optional assigned teacher */
+  /** Non-grouped subjects applicable to this class's form */
   allSubjects: {
     id: string;
     name: string;
@@ -45,8 +45,28 @@ interface ClassDetail {
     type: "CORE" | "ELECTIVE";
     assignedTeacher: { id: string; fullName: string } | null;
   }[];
-  /** Qualified teachers per subject (only those who have that subject in their profile) */
+  /** Qualified teachers per ungrouped subject */
   teachersBySubject: Record<string, { id: string; fullName: string }[]>;
+  /** Elective groups that apply to this class — read-through from requirements */
+  electiveGroups: {
+    id: string;
+    name: string;
+    scopeForm: number;
+    scopeStreams: string[];
+    lessonsPerWeek: number;
+    members: {
+      id: string;
+      subjectId: string;
+      subject: { id: string; code: string; name: string };
+    }[];
+    teachers: {
+      id: string;
+      subjectId: string;
+      teacherId: string;
+      subject: { id: string; code: string; name: string };
+      teacher: { id: string; fullName: string };
+    }[];
+  }[];
   _count: { students: number };
 }
 
@@ -415,10 +435,8 @@ export default function ClassWorkspaceDrawer({
           {/* ── Subject teachers ── */}
           {(() => {
             const subjects = cls.allSubjects ?? [];
-            if (subjects.length === 0) return null;
-
             const coreSubjects     = subjects.filter((s) => s.type === "CORE");
-            const electiveSubjects = subjects.filter((s) => s.type === "ELECTIVE");
+            const ungroupedElectives = subjects.filter((s) => s.type === "ELECTIVE");
 
             const renderSubjectRow = (s: ClassDetail["allSubjects"][0]) => {
               const qualifiedTeachers = (cls.teachersBySubject?.[s.id] ?? []).filter(
@@ -432,101 +450,70 @@ export default function ClassWorkspaceDrawer({
               return (
                 <div key={s.id} className="py-2.5 border-b border-line last:border-0">
                   <div className="flex items-center justify-between gap-3">
-                    {/* Subject name + code */}
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="font-mono text-xs bg-paper border border-line rounded px-1.5 py-0.5 shrink-0 text-slate">
                         {s.code}
                       </span>
                       {onOpenSubject ? (
-                        <button
-                          type="button"
-                          onClick={() => onOpenSubject(s.id, s.name)}
-                          className="text-sm font-medium text-ink hover:text-teal truncate flex items-center gap-1"
-                        >
-                          {s.name}
-                          <ExternalLink className="h-3 w-3 shrink-0 text-slate/40" />
+                        <button type="button" onClick={() => onOpenSubject(s.id, s.name)}
+                          className="text-sm font-medium text-ink hover:text-teal truncate flex items-center gap-1">
+                          {s.name}<ExternalLink className="h-3 w-3 shrink-0 text-slate/40" />
                         </button>
                       ) : (
                         <span className="text-sm font-medium text-ink truncate">{s.name}</span>
                       )}
                     </div>
-
-                    {/* Assigned teacher or assign button */}
                     <div className="flex items-center gap-1.5 shrink-0">
                       {s.assignedTeacher ? (
                         <>
                           {onOpenStaff ? (
-                            <button
-                              type="button"
+                            <button type="button"
                               onClick={() => onOpenStaff(s.assignedTeacher!.id, s.assignedTeacher!.fullName)}
-                              className="text-xs text-teal hover:underline flex items-center gap-0.5"
-                            >
-                              {s.assignedTeacher.fullName}
-                              <ExternalLink className="h-2.5 w-2.5" />
+                              className="text-xs text-teal hover:underline flex items-center gap-0.5">
+                              {s.assignedTeacher.fullName}<ExternalLink className="h-2.5 w-2.5" />
                             </button>
                           ) : (
                             <span className="text-xs text-slate">{s.assignedTeacher.fullName}</span>
                           )}
-                          <button
-                            type="button"
-                            title="Change teacher"
-                            onClick={() => {
-                              setAssigningSubjectId(isOpen ? null : s.id);
-                              setSubjectTeacherSearch("");
-                              setSubjectTeacherError(null);
-                            }}
-                            className="p-1 rounded hover:bg-paper text-slate/40 hover:text-teal transition-colors"
-                          >
+                          <button type="button" title="Change teacher"
+                            onClick={() => { setAssigningSubjectId(isOpen ? null : s.id); setSubjectTeacherSearch(""); setSubjectTeacherError(null); }}
+                            className="p-1 rounded hover:bg-paper text-slate/40 hover:text-teal transition-colors">
                             <Pencil className="h-3 w-3" />
                           </button>
                         </>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAssigningSubjectId(isOpen ? null : s.id);
-                            setSubjectTeacherSearch("");
-                            setSubjectTeacherError(null);
-                          }}
-                          className="flex items-center gap-1 text-xs font-medium text-teal hover:underline"
-                        >
-                          <UserCheck className="h-3 w-3" />
-                          Assign
+                        <button type="button"
+                          onClick={() => { setAssigningSubjectId(isOpen ? null : s.id); setSubjectTeacherSearch(""); setSubjectTeacherError(null); }}
+                          className="flex items-center gap-1 text-xs font-medium text-teal hover:underline">
+                          <UserCheck className="h-3 w-3" />Assign
                         </button>
                       )}
                     </div>
                   </div>
-
-                  {/* Inline subject-teacher picker */}
                   {isOpen && (
                     <div className="mt-2" ref={subjectPickerRef}>
                       <div className="rounded-xl border border-line bg-white shadow-sm overflow-hidden">
                         <div className="p-2 border-b border-line">
-                          <input
-                            autoFocus
-                            type="text"
+                          <input autoFocus type="text"
                             placeholder={`Search teachers for ${s.name}…`}
                             value={subjectTeacherSearch}
                             onChange={(e) => setSubjectTeacherSearch(e.target.value)}
-                            className="w-full text-sm px-2 py-1.5 rounded-lg border border-line bg-paper outline-none focus:border-teal"
-                          />
+                            className="w-full text-sm px-2 py-1.5 rounded-lg border border-line bg-paper outline-none focus:border-teal" />
                         </div>
                         <ul className="max-h-44 overflow-y-auto">
                           {qualifiedTeachers.length === 0 ? (
                             <li className="px-3 py-3 text-xs text-slate italic text-center">
                               {(cls.teachersBySubject?.[s.id] ?? []).length === 0
-                                ? `No teachers teach ${s.name} yet. Assign subject profiles to teachers first.`
+                                ? `No teachers teach ${s.name} yet.`
                                 : "No matching teachers."}
                             </li>
                           ) : (
                             qualifiedTeachers.map((t) => (
                               <li key={t.id}>
-                                <button
-                                  type="button"
+                                <button type="button"
                                   onClick={() => saveSubjectTeacher(s.id, t.id)}
                                   disabled={subjectTeacherSaving}
-                                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-paper transition-colors disabled:opacity-50"
-                                >
+                                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-paper transition-colors disabled:opacity-50">
                                   <Avatar name={t.fullName} size="sm" />
                                   <span className="flex-1 font-medium text-ink truncate">{t.fullName}</span>
                                   {s.assignedTeacher?.id === t.id && (
@@ -546,13 +533,9 @@ export default function ClassWorkspaceDrawer({
                           </div>
                         )}
                         <div className="border-t border-line px-3 py-1.5">
-                          <button
-                            type="button"
+                          <button type="button"
                             onClick={() => { setAssigningSubjectId(null); setSubjectTeacherSearch(""); setSubjectTeacherError(null); }}
-                            className="text-xs text-slate hover:text-ink"
-                          >
-                            Cancel
-                          </button>
+                            className="text-xs text-slate hover:text-ink">Cancel</button>
                         </div>
                       </div>
                     </div>
@@ -563,22 +546,84 @@ export default function ClassWorkspaceDrawer({
 
             return (
               <>
+                {/* Core subjects — individual teacher per subject */}
                 {coreSubjects.length > 0 && (
                   <div className="bg-white border border-line rounded-xl p-5">
-                    <SectionTitle>
-                      <BookOpen className="h-3.5 w-3.5" />
-                      Core subjects
-                    </SectionTitle>
+                    <SectionTitle><BookOpen className="h-3.5 w-3.5" />Core subjects</SectionTitle>
                     <div>{coreSubjects.map(renderSubjectRow)}</div>
                   </div>
                 )}
-                {electiveSubjects.length > 0 && (
+
+                {/* Ungrouped elective subjects */}
+                {ungroupedElectives.length > 0 && (
                   <div className="bg-white border border-line rounded-xl p-5">
-                    <SectionTitle>
-                      <BookOpen className="h-3.5 w-3.5" />
-                      Elective subjects
-                    </SectionTitle>
-                    <div>{electiveSubjects.map(renderSubjectRow)}</div>
+                    <SectionTitle><BookOpen className="h-3.5 w-3.5" />Elective subjects</SectionTitle>
+                    <div>{ungroupedElectives.map(renderSubjectRow)}</div>
+                  </div>
+                )}
+
+                {/* Elective groups — read-through from timetable requirements */}
+                {(cls.electiveGroups ?? []).length > 0 && (
+                  <div className="bg-white border border-line rounded-xl p-5">
+                    <SectionTitle><Layers className="h-3.5 w-3.5 text-violet-500" />Elective groups</SectionTitle>
+                    <div className="space-y-4">
+                      {(cls.electiveGroups ?? []).map((group) => (
+                        <div key={group.id} className="rounded-xl border border-violet-200 bg-violet-50/30 overflow-hidden">
+                          {/* Group header */}
+                          <div className="flex items-center gap-2 px-3 py-2 bg-violet-50/60 border-b border-violet-100">
+                            <Layers className="h-3 w-3 text-violet-500 shrink-0" />
+                            <span className="text-xs font-semibold text-ink flex-1">{group.name}</span>
+                            <span className="text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded-full font-medium">
+                              {group.lessonsPerWeek}/wk
+                            </span>
+                          </div>
+                          {/* Subjects + teacher pairings */}
+                          <div className="divide-y divide-violet-100">
+                            {group.members.map((member) => {
+                              const pairings = group.teachers.filter(
+                                (t) => t.subjectId === member.subjectId
+                              );
+                              return (
+                                <div key={member.subjectId} className="px-3 py-2.5">
+                                  <div className="flex items-center gap-2 mb-1.5">
+                                    <span className="font-mono text-[10px] bg-paper border border-line rounded px-1 py-0.5 text-slate shrink-0">
+                                      {member.subject.code}
+                                    </span>
+                                    <span className="text-sm font-medium text-ink">{member.subject.name}</span>
+                                  </div>
+                                  {pairings.length === 0 ? (
+                                    <p className="text-xs text-slate/50 italic pl-1">No teacher assigned — set in Timetable Requirements.</p>
+                                  ) : (
+                                    <div className="space-y-1 pl-1">
+                                      {pairings.map((p) => (
+                                        <div key={p.id} className="flex items-center gap-1.5">
+                                          <UserCheck className="h-3 w-3 text-teal shrink-0" />
+                                          {onOpenStaff ? (
+                                            <button type="button"
+                                              onClick={() => onOpenStaff(p.teacher.id, p.teacher.fullName)}
+                                              className="text-xs text-teal hover:underline flex items-center gap-0.5">
+                                              {p.teacher.fullName}<ExternalLink className="h-2.5 w-2.5" />
+                                            </button>
+                                          ) : (
+                                            <span className="text-xs text-slate">{p.teacher.fullName}</span>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-3 text-[10px] text-slate/50 flex items-center gap-1">
+                      Teacher assignments for elective groups are managed in
+                      <a href={`${basePath}/timetable/requirements`} className="text-violet-600 hover:underline flex items-center gap-0.5">
+                        Timetable → Requirements <ExternalLink className="h-2.5 w-2.5" />
+                      </a>.
+                    </p>
                   </div>
                 )}
               </>
