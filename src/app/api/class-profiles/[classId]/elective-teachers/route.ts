@@ -151,15 +151,21 @@ export async function POST(
     );
   }
 
-  // Teacher must be assigned to teach this subject
+  // Teacher must be assigned to teach this subject (soft check — warn but allow)
   const teacherSubject = await prisma.teacherSubject.findFirst({
     where: { teacherId, subjectId, teacher: { schoolId: user.schoolId } },
     include: { teacher: { select: { fullName: true } } },
   });
-  if (!teacherSubject) {
+
+  // Verify the teacher at minimum belongs to this school
+  const teacher = teacherSubject?.teacher ?? await prisma.teacher.findFirst({
+    where: { id: teacherId, schoolId: user.schoolId },
+    select: { fullName: true },
+  });
+  if (!teacher) {
     return NextResponse.json(
-      { error: "That teacher is not assigned to teach this subject." },
-      { status: 422 },
+      { error: "Teacher not found in this school." },
+      { status: 404 },
     );
   }
 
@@ -170,7 +176,7 @@ export async function POST(
   if (existing) {
     return NextResponse.json(
       {
-        error: `${teacherSubject.teacher.fullName} is already assigned to "${membership.subject.name}" in this group for this class.`,
+        error: `${teacher.fullName} is already assigned to "${membership.subject.name}" in this group for this class.`,
       },
       { status: 409 },
     );

@@ -255,11 +255,21 @@ function ElectiveGroupsClassView({
                 const isMutating = mutating[mutKey] ?? false;
 
                 const alreadyAssigned = new Set(subjectPairings.map((t) => t.teacherId));
-                const eligible = allTeachers.filter(
-                  (t) =>
-                    t.teacherSubjects.some((ts) => ts.subject.id === member.subjectId) &&
-                    !alreadyAssigned.has(t.id),
+                // All non-assigned teachers are eligible; those formally linked
+                // to this subject are sorted to the top as "suggested".
+                const linkedIds = new Set(
+                  allTeachers
+                    .filter((t) => t.teacherSubjects.some((ts) => ts.subject.id === member.subjectId))
+                    .map((t) => t.id),
                 );
+                const eligible = allTeachers
+                  .filter((t) => !alreadyAssigned.has(t.id))
+                  .sort((a, b) => {
+                    const aLinked = linkedIds.has(a.id) ? 0 : 1;
+                    const bLinked = linkedIds.has(b.id) ? 0 : 1;
+                    if (aLinked !== bLinked) return aLinked - bLinked;
+                    return a.fullName.localeCompare(b.fullName);
+                  });
                 const filtered = eligible.filter(
                   (t) =>
                     pickerQuery === "" ||
@@ -308,7 +318,7 @@ function ElectiveGroupsClassView({
                     <div className="relative ml-5" ref={isPicking ? pickerRef : undefined}>
                       <button
                         type="button"
-                        disabled={isMutating || eligible.length === 0}
+                        disabled={isMutating || allTeachers.length === 0}
                         onClick={() => {
                           setPickerQuery("");
                           setPickerState(
@@ -319,7 +329,7 @@ function ElectiveGroupsClassView({
                           ${
                             isPicking
                               ? "bg-violet-100 border-violet-400 text-violet-800"
-                              : eligible.length === 0
+                              : allTeachers.length === 0
                               ? "bg-white border-line text-slate/40 cursor-not-allowed"
                               : "bg-white border-violet-300 text-violet-700 hover:bg-violet-50 hover:border-violet-400"
                           }
@@ -328,13 +338,13 @@ function ElectiveGroupsClassView({
                         <Plus className="h-3 w-3" />
                         {isMutating
                           ? "Saving…"
-                          : eligible.length === 0
-                          ? "No eligible teachers"
+                          : allTeachers.length === 0
+                          ? "No teachers registered"
                           : "Add teacher"}
                       </button>
 
                       {isPicking && (
-                        <div className="absolute left-0 top-full mt-1 z-20 bg-white border border-line rounded-xl shadow-lg w-60 overflow-hidden">
+                        <div className="absolute left-0 top-full mt-1 z-20 bg-white border border-line rounded-xl shadow-lg w-64 overflow-hidden">
                           <div className="p-2 border-b border-line">
                             <input
                               autoFocus
@@ -348,7 +358,7 @@ function ElectiveGroupsClassView({
                           <div className="max-h-48 overflow-y-auto divide-y divide-line">
                             {filtered.length === 0 ? (
                               <p className="px-3 py-3 text-xs text-slate/60 text-center">
-                                {pickerQuery ? "No matches" : "No eligible teachers"}
+                                {pickerQuery ? "No matches" : "All teachers already assigned"}
                               </p>
                             ) : (
                               filtered.map((t) => (
@@ -362,7 +372,12 @@ function ElectiveGroupsClassView({
                                   className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-violet-50 transition-colors"
                                 >
                                   <User className="h-3 w-3 text-slate/40 shrink-0" />
-                                  <span className="text-xs text-ink">{t.fullName}</span>
+                                  <span className="text-xs text-ink flex-1">{t.fullName}</span>
+                                  {linkedIds.has(t.id) && (
+                                    <span className="text-[10px] text-teal font-medium shrink-0">
+                                      linked
+                                    </span>
+                                  )}
                                 </button>
                               ))
                             )}
