@@ -10,14 +10,12 @@ import {
   ClipboardList,
   Calendar,
   BarChart3,
-  LayoutGrid,
 } from "lucide-react";
 
 const ACADEMICS_CONTEXT: ContextNavItem[] = [
   { href: "/principal/departments",    label: "Departments" },
   { href: "/principal/classes",        label: "Classes" },
   { href: "/principal/subjects",       label: "Subjects" },
-  { href: "/principal/class-profiles", label: "Class Profiles" },
   { href: "/principal/timetable",      label: "Timetable" },
   { href: "/principal/attendance",     label: "Attendance" },
   { href: "/principal/calendar",       label: "Calendar" },
@@ -28,7 +26,6 @@ const TILE_META: Record<string, { icon: React.ElementType; description: string }
   "/principal/departments":    { icon: Building2,     description: "Group subjects and assign department heads." },
   "/principal/classes":        { icon: Users,         description: "Create and manage class groups and their class teachers." },
   "/principal/subjects":       { icon: BookOpen,      description: "Master subject list — core and elective subjects offered." },
-  "/principal/class-profiles": { icon: LayoutGrid,    description: "Assign which subjects each class takes as core or elective." },
   "/principal/timetable":      { icon: CalendarDays,  description: "Build and publish the school timetable." },
   "/principal/attendance":     { icon: ClipboardList, description: "Track and review daily class attendance." },
   "/principal/calendar":       { icon: Calendar,      description: "School events, term dates, and holidays." },

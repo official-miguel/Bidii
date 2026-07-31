@@ -18,7 +18,8 @@ import { requirePermission } from "@/lib/permissions";
 import { randomUUID } from "crypto";
 import { generateWithValidation } from "@/lib/timetable/regenerationController";
 import { runPreGenerationChecks } from "@/lib/timetable/preGenerationChecks";
-import { getLessonColumns } from "@/lib/timetable/engineHelpers";
+import { getLessonColumns, buildLinkedClassGroups, buildGroupAwarePayload, fanOutGroupSlots } from "@/lib/timetable/engineHelpers";
+import type { GroupPayloadDescriptor } from "@/lib/timetable/engineHelpers";
 import { analyseStaffShortages, type StaffShortageConfig } from "@/lib/timetable/liveConflictDetector";
 import type { TemplateColumn, EngineSubject, EngineClass } from "@/lib/timetable/deterministicEngine";
 import { TimetableSession } from "@prisma/client";
@@ -71,6 +72,8 @@ async function _handlePost(req: NextRequest) {
     studentSelections,
     timetableConfig,
     sessionPreferences,
+    electiveGroupsRaw,
+    classElectiveTeachersRaw,
   ] = await Promise.all([
     prisma.schoolClass.findMany({
       where: {
@@ -116,6 +119,22 @@ async function _handlePost(req: NextRequest) {
     }),
     prisma.timetablePreference.findMany({
       where: { config: { schoolId } },
+    }),
+    // Elective groups — used to build the hard co-scheduling constraint
+    prisma.electiveGroup.findMany({
+      where: { schoolId },
+      select: {
+        id: true,
+        scopeForm: true,
+        scopeStreams: true,
+        lessonsPerWeek: true,
+        members: { select: { subjectId: true } },
+      },
+    }),
+    // Per-class elective group teacher assignments (replaces ClassSubjectTeacher for group subjects)
+    prisma.classElectiveGroupTeacher.findMany({
+      where: { schoolId },
+      select: { groupId: true, classId: true, subjectId: true, teacherId: true },
     }),
   ]);
 
@@ -164,14 +183,6 @@ async function _handlePost(req: NextRequest) {
     return { id: cls.id, name: cls.name, form: cls.form, stream: cls.stream, streamIndex: count };
   });
 
-  const engineSubjects = Array.from(subjectMap.values());
-
-  const teacherIds = [...new Set(teacherAssignments.map((a) => a.teacherId))];
-  const teachersRaw = await prisma.teacher.findMany({
-    where: { id: { in: teacherIds } },
-    select: { id: true, fullName: true },
-  });
-
   const engineRequirements = requirements
     .filter((r) => !opts.classIds?.length || opts.classIds.includes(r.classId))
     .map((r) => ({
@@ -180,7 +191,70 @@ async function _handlePost(req: NextRequest) {
       lessonsPerWeek: r.lessonsPerWeek,
     }));
 
-  const sessionPrefs = sessionPreferences
+  // ── Group-aware payload: collapse group subjects to one anchor each ────────
+  // Build GroupPayloadDescriptor for every elective group that has members
+  const linkedClassGroupsList = buildLinkedClassGroups(electiveGroupsRaw, classesRaw);
+  const groupDescriptors: GroupPayloadDescriptor[] = electiveGroupsRaw
+    .filter((g) => g.members.length > 0)
+    .map((g) => {
+      // classIds in scope for this group — reuse the same scope logic as
+      // buildLinkedClassGroups so anchors are consistent.
+      const inScope = classesRaw.filter((cls) => {
+        if (g.scopeForm !== 0 && cls.form !== g.scopeForm) return false;
+        if (g.scopeForm !== 0 && g.scopeStreams.length > 0 && !g.scopeStreams.includes(cls.stream ?? "")) return false;
+        return true;
+      });
+      return {
+        groupId:        g.id,
+        subjectIds:     g.members.map((m) => m.subjectId),
+        lessonsPerWeek: g.lessonsPerWeek,
+        classIds:       inScope.map((c) => c.id),
+      };
+    })
+    .filter((d) => d.classIds.length >= 1);
+
+  const groupPayload = buildGroupAwarePayload(
+    engineRequirements,
+    teacherAssignments,
+    groupDescriptors,
+    classElectiveTeachersRaw,
+  );
+
+  // Build the anchor key set for fan-out (used after solver returns)
+  const anchorKeys = new Set<string>();
+  for (const desc of groupDescriptors) {
+    if (desc.subjectIds.length === 0) continue;
+    const anchorSid = desc.subjectIds[0];
+    for (const cid of desc.classIds) {
+      anchorKeys.add(`${cid}:${anchorSid}`);
+    }
+  }
+
+  // Augment subject map with any group subjects not already present
+  for (const gt of classElectiveTeachersRaw) {
+    if (!subjectMap.has(gt.subjectId)) {
+      // Subject may have no SubjectLessonRequirement row (pure group subject) —
+      // fetch it lazily so engineSubjects is complete for the validator.
+      const sub = await prisma.subject.findUnique({
+        where: { id: gt.subjectId },
+        select: { id: true, code: true, name: true, internalCode: true, doubleLesson: true, requiresSpecialRoom: true },
+      });
+      if (sub) subjectMap.set(sub.id, sub);
+    }
+  }
+  const engineSubjectsWithGroups = Array.from(subjectMap.values());
+
+  // Also collect any new teacher IDs from ClassElectiveGroupTeacher
+  const allTeacherIds = [
+    ...new Set([
+      ...teacherAssignments.map((a) => a.teacherId),
+      ...classElectiveTeachersRaw.map((g) => g.teacherId),
+    ]),
+  ];
+  const teachersRaw = await prisma.teacher.findMany({
+    where: { id: { in: allTeacherIds } },
+    select: { id: true, fullName: true },
+  });
     .filter((p) => p.subjectCode && p.preferredSession)
     .map((p) => ({
       subjectCode: p.subjectCode!,
@@ -194,18 +268,18 @@ async function _handlePost(req: NextRequest) {
     subjectId: sel.subjectId,
   }));
 
-  // Pre-generation checks
+  // Pre-generation checks (run against collapsed requirements so counts are accurate)
   if (!opts.bypassPreChecks) {
     const preCheck = runPreGenerationChecks({
-      subjects: engineSubjects.map((s) => ({
+      subjects: engineSubjectsWithGroups.map((s) => ({
         id: s.id,
         code: s.code,
         name: s.name,
         type: "CORE" as const,
       })),
       classes: engineClasses,
-      requirements: engineRequirements,
-      teacherAssignments,
+      requirements: groupPayload.requirements,
+      teacherAssignments: groupPayload.teacherAssignments,
       studentSelections: studentSelectionsInput,
       templateColumns: lessonColumns.length,
       operatingDays: timetableConfig.operatingDays,
@@ -230,10 +304,10 @@ async function _handlePost(req: NextRequest) {
 
   const validatorBase = {
     classes: engineClasses,
-    subjects: engineSubjects,
+    subjects: engineSubjectsWithGroups,
     teachers: teachersRaw.map((t) => ({ id: t.id, name: t.fullName })),
-    requirements: engineRequirements,
-    teacherAssignments,
+    requirements: groupPayload.requirements,
+    teacherAssignments: groupPayload.teacherAssignments,
     teacherUnavailability,
     studentSelections: studentSelectionsInput,
     sessionPreferences: sessionPrefs,
@@ -245,6 +319,7 @@ async function _handlePost(req: NextRequest) {
     {
       ...validatorBase,
       config: engineConfig,
+      linkedClassGroups: linkedClassGroupsList,
     },
     validatorBase,
     { maxAttempts: opts.maxAttempts }
@@ -294,6 +369,22 @@ async function _handlePost(req: NextRequest) {
     );
   }
 
+  // ── Fan-out group slots: expand anchor slots → one per group subject ────────
+  const expandedSlots = fanOutGroupSlots(
+    result.finalResult!.slots,
+    groupPayload.fanOutMap,
+    anchorKeys,
+  );
+  // Replace result slots with the expanded set for persistence and response
+  result.finalResult!.slots = expandedSlots;
+
+  // If fan-out produced zero slots (all group teachers missing) treat as partial
+  if (expandedSlots.length === 0 && result.finalResult!.warnings.length === 0) {
+    result.finalResult!.warnings.push(
+      "No group lessons were scheduled — ensure ClassElectiveGroupTeacher rows are set up for all elective groups."
+    );
+  }
+
   // Persist to a versioned draft
   const versionId = opts.replaceVersionId ?? randomUUID();
   const now = new Date();
@@ -311,18 +402,18 @@ async function _handlePost(req: NextRequest) {
 
   // Build staff shortage analysis maps
   const subjectTeacherMap = new Map<string, string[]>();
-  for (const a of teacherAssignments) {
+  for (const a of groupPayload.teacherAssignments) {
     const list = subjectTeacherMap.get(a.subjectId) ?? [];
     if (!list.includes(a.teacherId)) list.push(a.teacherId);
     subjectTeacherMap.set(a.subjectId, list);
   }
 
   const subjectMetaMap = new Map(
-    engineSubjects.map((s) => [s.id, { code: s.code, name: s.name }])
+    engineSubjectsWithGroups.map((s) => [s.id, { code: s.code, name: s.name }])
   );
   const classMetaMap = new Map(classesRaw.map((c) => [c.id, c.name]));
   const reqMap = new Map<string, number>();
-  for (const r of engineRequirements) {
+  for (const r of groupPayload.requirements) {
     reqMap.set(`${r.classId}-${r.subjectId}`, r.lessonsPerWeek);
   }
 
@@ -406,7 +497,7 @@ async function _handlePost(req: NextRequest) {
   }
 
   const classNameMap = new Map(classesRaw.map((c) => [c.id, c.name]));
-  const subjectCodeMap = new Map(engineSubjects.map((s) => [s.id, s.code]));
+  const subjectCodeMap = new Map(engineSubjectsWithGroups.map((s) => [s.id, s.code]));
   const teacherNameMap = new Map(teachersRaw.map((t) => [t.id, t.fullName]));
 
   return NextResponse.json({

@@ -70,6 +70,25 @@ Railway (FastAPI + OR-Tools)
 
 The Next.js app health-checks the solver before every generation request. If the solver is unreachable the API returns a clear 422 with a hint rather than crashing.
 
+### Hard group co-scheduling constraint
+
+When a school defines **Elective Groups** (e.g. "GPC" containing Geography, History, CRE for Form 4), every class in that form must have those subjects scheduled at the **same day and period** so students can move between streams.
+
+The Next.js API converts `ElectiveGroup` records into `linkedClassGroups` entries before calling `/solve`:
+
+```
+ElectiveGroup { scopeForm: 4, scopeStreams: [], members: [geo, hist, cre] }
+  → linkedClassGroups: [{ subjectIds: [geo, hist, cre], classIds: [4A, 4B, 4C] }]
+```
+
+The solver enforces this via pairwise mutual implication for every `(subject, day, period)`:
+
+```
+x[4A, geo, d, p] == x[4B, geo, d, p] == x[4C, geo, d, p]   for all d, p
+```
+
+This is a **hard constraint** — the solver will never place a group subject at a different time for any stream. If teacher unavailability makes it impossible to find a common slot, the solver emits a warning and the shortfall is surfaced to the admin.
+
 ---
 
 ## Local development
@@ -153,7 +172,16 @@ The Next.js app reads `TIMETABLE_SOLVER_URL` (set in Vercel env vars for product
   ],
   "operatingDays": [0, 1, 2, 3, 4],
   "maxLessonsPerTeacherPerDay": 6,
-  "timeLimitSeconds": 60
+  "timeLimitSeconds": 60,
+  // Hard co-scheduling groups: every class in classIds must have every
+  // subject in subjectIds at the same (dayOfWeek, period).
+  // Built from ElectiveGroup records by the Next.js API before calling /solve.
+  "linkedClassGroups": [
+    {
+      "subjectIds": ["sid-geo", "sid-hist", "sid-cre"],
+      "classIds":   ["cls-1A",  "cls-1B",  "cls-1C"]
+    }
+  ]
 }
 ```
 
