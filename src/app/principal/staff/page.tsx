@@ -21,12 +21,11 @@ import { useFormDraft } from "@/lib/hooks/useFormDraft";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Department = { id: string; name: string };
-type Subject    = { id: string; name: string; code: string };
+type Subject    = { id: string; name: string; code: string; department: { id: string; name: string } | null };
 type StaffRole  = { id: string; name: string };
 type Teacher = {
   id: string; fullName: string; staffId: string;
   email: string | null; phone: string | null; todEligible: boolean;
-  designation: string | null;
   primaryDepartment: Department | null;
   classTeacherOf: { id: string; name: string } | null;
   teacherSubjects: { subject: Subject }[];
@@ -107,18 +106,16 @@ function DirectoryTab() {
   const [staffDraft, setStaffDraft, clearStaffDraft] = useFormDraft(staffDraftKey, {
     roleChoice:       TEACHING_STAFF,
     selectedSubjects: [] as string[],
-    createLogin:      false,
   });
 
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>(staffDraft.selectedSubjects);
-  const [createLogin, setCreateLogin] = useState(staffDraft.createLogin);
   const [roleChoice, setRoleChoice]   = useState<string>(staffDraft.roleChoice);
 
   // Persist controlled fields whenever they change (only while modal is open)
   useEffect(() => {
     if (!modalOpen) return;
-    setStaffDraft({ roleChoice, selectedSubjects, createLogin });
-  }, [roleChoice, selectedSubjects, createLogin, modalOpen, setStaffDraft]);
+    setStaffDraft({ roleChoice, selectedSubjects });
+  }, [roleChoice, selectedSubjects, modalOpen, setStaffDraft]);
   const [tempPassword, setTempPassword] = useState<{ email: string; password: string } | null>(null);
   const [nextStaffId, setNextStaffId] = useState<string | null>(null);
   const nextStaffIdFetched = useRef(false);
@@ -165,7 +162,6 @@ function DirectoryTab() {
     setEditing(null);
     // Restore draft values for the new-staff form
     setSelectedSubjects(staffDraft.selectedSubjects);
-    setCreateLogin(staffDraft.createLogin);
     setRoleChoice(staffDraft.roleChoice || TEACHING_STAFF);
     setError(null);
     if (!nextStaffIdFetched.current) {
@@ -180,7 +176,6 @@ function DirectoryTab() {
     setEditing(t);
     // Always use the server data for edits — don't restore a draft
     setSelectedSubjects(t.teacherSubjects.map(ts => ts.subject.id));
-    setCreateLogin(false);
     setRoleChoice(t.user?.staffRole?.id || TEACHING_STAFF);
     setError(null);
     setModalOpen(true);
@@ -201,7 +196,6 @@ function DirectoryTab() {
       const payload = {
         fullName: form.get("fullName") as string, email: (form.get("email") as string) || "",
         phone: (form.get("phone") as string) || "",
-        designation: (form.get("designation") as string) || null,
         primaryDepartmentId: isTeaching ? (form.get("primaryDepartmentId") as string) || null : null,
         todEligible: isTeaching ? form.get("todEligible") === "on" : false,
         subjectIds: isTeaching ? selectedSubjects : [], staffRoleId: isTeaching ? null : roleChoice,
@@ -215,10 +209,10 @@ function DirectoryTab() {
         fullName: form.get("fullName") as string, staffId: (form.get("staffId") as string) || undefined,
         startingStaffId: form.get("startingStaffId") ? Number(form.get("startingStaffId")) : undefined,
         email: (form.get("email") as string) || "", phone: (form.get("phone") as string) || "",
-        designation: (form.get("designation") as string) || null,
-        primaryDepartmentId: isTeaching ? (form.get("primaryDepartmentId") as string) || null : null,
+        primaryDepartmentId: isTeaching ? null : ((form.get("primaryDepartmentId") as string) || null),
         todEligible: isTeaching ? form.get("todEligible") === "on" : false,
-        subjectIds: isTeaching ? selectedSubjects : [], createLogin: isTeaching ? createLogin : true,
+        subjectIds: isTeaching ? selectedSubjects : [],
+        createLogin: isTeaching ? true : true,
         staffRoleId: isTeaching ? null : roleChoice,
       };
       const res = await fetch("/api/staff", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -448,18 +442,7 @@ function DirectoryTab() {
                   )}
                 </div>
 
-                <div>
-                  <label className={labelClass}>Designation</label>
-                  <input
-                    name="designation"
-                    defaultValue={editing?.designation || ""}
-                    className={inputClass}
-                    placeholder="e.g. Head of Department, Deputy Principal, Patron…"
-                  />
-                  <p className="text-xs text-slate mt-1.5">
-                    A title or role that distinguishes this staff member — shown on their profile.
-                  </p>
-                </div>
+
               </div>
             </div>
 
@@ -469,19 +452,17 @@ function DirectoryTab() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className={labelClass}>
-                    Email {!isTeaching && <span className="text-danger">*</span>}
+                    Email <span className="text-danger">*</span>
                   </label>
                   <input
                     name="email"
                     type="email"
-                    required={!isTeaching}
+                    required
                     defaultValue={editing?.email || ""}
                     className={inputClass}
                     placeholder="e.g. jane@school.ac.ke"
                   />
-                  {!isTeaching && (
-                    <p className="text-xs text-slate mt-1.5">Required to create a login account.</p>
-                  )}
+                  <p className="text-xs text-slate mt-1.5">Required to create a login account.</p>
                 </div>
                 <div>
                   <label className={labelClass}>Phone</label>
@@ -496,14 +477,6 @@ function DirectoryTab() {
                 <div className="form-section">
                   <div className="form-section-title">Teaching Details</div>
                   <div className="space-y-4">
-                    <div>
-                      <label className={labelClass}>Primary department</label>
-                      <select name="primaryDepartmentId" defaultValue={editing?.primaryDepartment?.id || ""} className={inputClass}>
-                        <option value="">— None —</option>
-                        {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                      </select>
-                    </div>
-
                     <div>
                       <label className={labelClass}>Subjects taught</label>
                       <p className="text-xs text-slate mb-2">Select all subjects this teacher can deliver.</p>
@@ -540,6 +513,28 @@ function DirectoryTab() {
                         </p>
                       )}
                     </div>
+
+                    {/* Department is derived automatically from the selected subjects */}
+                    {(() => {
+                      const deptNames = [
+                        ...new Set(
+                          selectedSubjects
+                            .map((sid) => subjects.find((s) => s.id === sid)?.department?.name ?? null)
+                            .filter(Boolean)
+                        ),
+                      ] as string[];
+                      return deptNames.length > 0 ? (
+                        <div>
+                          <label className={labelClass}>Department</label>
+                          <p className={`${inputClass} bg-paper text-slate cursor-default`}>
+                            {deptNames.join(", ")}
+                          </p>
+                          <p className="text-xs text-slate mt-1.5">
+                            Auto-assigned from the subjects above.
+                          </p>
+                        </div>
+                      ) : null;
+                    })()}
                   </div>
                 </div>
 
@@ -564,35 +559,16 @@ function DirectoryTab() {
                     </label>
 
                     {!editing && (
-                      <label className="flex items-center gap-3 cursor-pointer group">
-                        <div className="relative">
-                          <input
-                            type="checkbox"
-                            checked={createLogin}
-                            onChange={(e) => setCreateLogin(e.target.checked)}
-                            className="sr-only peer"
-                          />
-                          <div className="h-5 w-9 rounded-full bg-line peer-checked:bg-teal transition-colors" />
-                          <div className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-4" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-ink">Create login credentials</p>
-                          <p className="text-xs text-slate mt-0.5">Requires a valid email address above.</p>
-                        </div>
-                      </label>
+                      <div className="flex items-center gap-2.5 rounded-lg bg-info-bg border border-info/20 text-info text-xs px-3.5 py-3">
+                        <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
+                        </svg>
+                        <span>Login credentials are created automatically for all teachers using the email above.</span>
+                      </div>
                     )}
                   </div>
                 </div>
               </>
-            )}
-
-            {!isTeaching && !editing && (
-              <div className="flex items-center gap-2.5 rounded-lg bg-info-bg border border-info/20 text-info text-xs px-3.5 py-3">
-                <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
-                </svg>
-                <span>A login account is created automatically for non-teaching staff using the email above.</span>
-              </div>
             )}
 
             {/* Form actions — inside the form so they work on mobile */}

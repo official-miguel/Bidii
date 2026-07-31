@@ -120,8 +120,14 @@ export default function DepartmentsPage() {
     <div>
       <ContextNavigation
         items={[
-          { href: "/principal/departments", label: "Departments" },
-          { href: "/principal/library", label: "Library" },
+          { href: "/principal/departments",    label: "Departments" },
+          { href: "/principal/classes",        label: "Classes" },
+          { href: "/principal/subjects",       label: "Subjects" },
+          { href: "/principal/class-profiles", label: "Class Profiles" },
+          { href: "/principal/timetable",      label: "Timetable" },
+          { href: "/principal/attendance",     label: "Attendance" },
+          { href: "/principal/calendar",       label: "Calendar" },
+          { href: "/principal/assessments",    label: "Exams & Analysis" },
         ]}
       />
       
@@ -183,7 +189,7 @@ export default function DepartmentsPage() {
                       <span className="text-sm text-slate tabular-nums">{d._count.teachers}</span>
                     </td>
                     <td className="px-5 py-3.5" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center justify-end gap-0.5">
                         <ActionIconButton icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536M9 13l6.5-6.5a2 2 0 012.828 2.828L11.828 15.828a2 2 0 01-1.414.586H8v-2.414a2 2 0 01.586-1.414z" /></svg>} label="Edit" onClick={() => openEdit(d)} />
                         <ActionIconButton icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" /></svg>} label="Delete" variant="danger" onClick={() => handleDelete(d)} />
                       </div>

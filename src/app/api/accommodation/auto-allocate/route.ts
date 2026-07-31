@@ -248,6 +248,15 @@ export async function POST(req: NextRequest) {
     dorms.map((d) => [d.id, freePosQueues.get(d.id)!.length])
   );
 
+  // Round-robin cursor: one pointer per (gender, form-group) key so that
+  // students with different constraints each get their own rotation state.
+  // Key = "<genderPolicy>|<formKey>" where formKey is the dorm's permitted
+  // forms joined (or "any" for MIXED_FORMS dorms).
+  // In practice, for DISTRIBUTE_EVENLY we maintain a global rotation index
+  // over the eligible dorm list for each student so that successive students
+  // are sent to different dorms before any dorm receives a second student.
+  const rrIndexMap = new Map<string, number>();
+
   for (const student of studentsToAllocate) {
     const studentForm = student.schoolClass.form;
 
@@ -290,16 +299,30 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
-    // Sort by strategy
-    const sorted = [...eligibleDorms].sort((a, b) => {
-      const ca = availableCount.get(a.id)!;
-      const cb = availableCount.get(b.id)!;
-      return strategy === "FILL_FIRST"
-        ? ca - cb   // least free first
-        : cb - ca;  // most free first
-    });
+    let chosenDorm: (typeof dorms)[0];
 
-    const chosenDorm = sorted[0];
+    if (strategy === "FILL_FIRST") {
+      // Fill each dorm to capacity before moving to the next.
+      const sorted = [...eligibleDorms].sort((a, b) => {
+        const ca = availableCount.get(a.id)!;
+        const cb = availableCount.get(b.id)!;
+        return ca - cb; // least free first
+      });
+      chosenDorm = sorted[0];
+    } else {
+      // DISTRIBUTE_EVENLY — true round-robin: each consecutive student goes to
+      // the next eligible dorm in rotation, cycling back to the first once all
+      // have received one student.  This guarantees that dorm 1, dorm 2, dorm 3,
+      // dorm 1, dorm 2, … rather than bulk-filling one dorm at a time.
+      //
+      // The rotation key is stable across students with the same eligible-dorm
+      // set so the cursor advances correctly regardless of form/gender filtering.
+      const rrKey = eligibleDorms.map((d) => d.id).join("|");
+      const cursor = rrIndexMap.get(rrKey) ?? 0;
+      chosenDorm = eligibleDorms[cursor % eligibleDorms.length];
+      rrIndexMap.set(rrKey, cursor + 1);
+    }
+
     availableCount.set(chosenDorm.id, availableCount.get(chosenDorm.id)! - 1);
     dormAssignments.push({ student, dorm: chosenDorm });
   }

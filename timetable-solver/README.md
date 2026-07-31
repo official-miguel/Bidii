@@ -1,32 +1,78 @@
 # Timetable CP-SAT Solver
 
-A FastAPI microservice that uses [Google OR-Tools CP-SAT](https://developers.google.com/optimization/reference/python/sat/python/cp_model) to generate school timetables that strictly satisfy all scheduling constraints.
-
-## Why CP-SAT?
-
-The previous greedy engine placed lessons one at a time and hoped for no conflicts, requiring up to 10 retry attempts. CP-SAT is a *complete* solver: it searches the entire solution space with backtracking and either returns a provably optimal (or feasible) schedule, or proves the problem is infeasible — in a single call.
-
-## Hard constraints enforced
-
-| Constraint | Description |
-|---|---|
-| No teacher double-booking | A teacher can only teach one class at a time |
-| No class double-booking | A class can only have one subject per slot |
-| Exact lesson count | Each `(class, subject)` pair receives exactly `lessonsPerWeek` lessons |
-| Teacher unavailability | Blocked slots are never assigned |
-| Daily load cap | `maxLessonsPerTeacherPerDay` is never exceeded |
-| Double lessons consecutive | Back-to-back periods, same day |
-| Assignment integrity | Only the configured teacher can teach a given `(class, subject)` pair |
-
-## Soft objectives (maximised)
-
-- **Session preferences** — MORNING / AFTERNOON / EVENING placement. Hard preferences get a large bonus (effectively forced unless infeasible); soft preferences get a smaller bonus.
-- **Subject spread** — reward placing the same subject on different days of the week.
-- **Teacher load balance** — reward keeping each teacher's daily load at or below half the maximum.
+A FastAPI microservice that uses [Google OR-Tools CP-SAT](https://developers.google.com/optimization/reference/python/sat/python/cp_model) to generate school timetables.
 
 ---
 
-## Running locally
+## Production deployment (Railway → Vercel)
+
+This is the recommended setup. The solver runs as a persistent Railway service; the Next.js app runs on Vercel and calls it via `TIMETABLE_SOLVER_URL`.
+
+### Step 1 — Deploy the solver to Railway
+
+1. Go to [railway.app](https://railway.app) and open (or create) your project.
+2. Click **New Service → GitHub Repo**.
+3. Select this repository.
+4. In the **Root Directory** setting, enter `timetable-solver` so Railway only builds that folder.
+5. Railway will detect the `Dockerfile` and `railway.toml` automatically and start the build.
+6. Wait for the deploy to go green (the `/health` endpoint will return `{"status":"ok","solver":"cp-sat"}`).
+7. Open **Settings → Networking → Generate Domain** to get a public HTTPS URL, e.g.:
+   ```
+   https://timetable-solver-production.up.railway.app
+   ```
+   Keep this URL — you'll need it in Step 2.
+
+> **Note:** Railway injects a `$PORT` environment variable at runtime. The solver reads it automatically — do not set it manually.
+
+---
+
+### Step 2 — Wire the Railway URL into Vercel
+
+1. Open your Vercel project dashboard → **Settings → Environment Variables**.
+2. Add a new variable:
+   - **Name:** `TIMETABLE_SOLVER_URL`
+   - **Value:** the Railway URL from Step 1 (no trailing slash), e.g. `https://timetable-solver-production.up.railway.app`
+   - **Environments:** Production ✓, Preview ✓ (leave Development unchecked — localhost is fine locally)
+3. Click **Save**.
+4. **Redeploy** your Vercel app (the env var only takes effect on a new deployment):
+   - Vercel dashboard → **Deployments → Redeploy**, or
+   - Push a commit to trigger a deploy.
+5. Verify it works by generating a timetable in the app — the 422 "solver not running" error should be gone.
+
+---
+
+### Step 3 — Verify end-to-end
+
+Call the solver health endpoint directly from your browser or curl:
+
+```bash https://timetable-solver-production.up.railway.app/health
+curl
+# → {"status":"ok","solver":"cp-sat"}
+```
+
+Then trigger a timetable generation in the app. The first solve after a cold start may take a few extra seconds while OR-Tools JIT-compiles.
+
+---
+
+## Architecture overview
+
+```
+Vercel (Next.js)
+  └── POST /api/timetable/generate
+  └── POST /api/timetable/v2/generate
+        │
+        │  TIMETABLE_SOLVER_URL (env var)
+        ▼
+Railway (FastAPI + OR-Tools)
+  └── GET  /health
+  └── POST /solve
+```
+
+The Next.js app health-checks the solver before every generation request. If the solver is unreachable the API returns a clear 422 with a hint rather than crashing.
+
+---
+
+## Local development
 
 **Prerequisites:** Python 3.11 or 3.12
 
@@ -41,13 +87,19 @@ source .venv/bin/activate
 
 pip install -r requirements.txt
 python solver.py
+# → Uvicorn running on http://0.0.0.0:8080
 ```
 
-The service starts on `http://localhost:8080`. Verify it's up:
+The service starts on `http://localhost:8080`. Verify:
 
 ```bash
 curl http://localhost:8080/health
 # → {"status":"ok","solver":"cp-sat"}
+```
+
+Your local `.env` should have:
+```
+TIMETABLE_SOLVER_URL="http://localhost:8080"
 ```
 
 ---
@@ -58,8 +110,8 @@ curl http://localhost:8080/health
 # Build
 docker build -t timetable-solver .
 
-# Run
-docker run -p 8080:8080 timetable-solver
+# Run (mirrors Railway's behaviour)
+docker run -e PORT=8080 -p 8080:8080 timetable-solver
 ```
 
 ---
@@ -68,21 +120,24 @@ docker run -p 8080:8080 timetable-solver
 
 | Variable | Default | Description |
 |---|---|---|
-| `SOLVER_PORT` | `8080` | Port the service listens on |
+| `PORT` | — | Injected by Railway at runtime. Takes precedence over `SOLVER_PORT`. |
+| `SOLVER_PORT` | `8080` | Fallback port for local dev and Docker. |
 
-The Next.js app reads `TIMETABLE_SOLVER_URL` (default `http://localhost:8080`) — set this in your `.env` file to point at wherever the solver is running.
+The Next.js app reads `TIMETABLE_SOLVER_URL` (set in Vercel env vars for production, `.env` for local dev).
 
 ---
 
-## API
+## API reference
 
 ### `GET /health`
 
-Returns `{"status":"ok","solver":"cp-sat"}` when the service is up.
+```json
+{ "status": "ok", "solver": "cp-sat" }
+```
 
 ### `POST /solve`
 
-**Request body** (JSON):
+**Request** (abbreviated):
 
 ```jsonc
 {
@@ -91,8 +146,8 @@ Returns `{"status":"ok","solver":"cp-sat"}` when the service is up.
   "teachers": [{ "id": "...", "name": "Mr Oduya" }],
   "requirements": [{ "classId": "...", "subjectId": "...", "lessonsPerWeek": 5 }],
   "teacherAssignments": [{ "classId": "...", "subjectId": "...", "teacherId": "..." }],
-  "teacherUnavailability": [{ "teacherId": "...", "dayOfWeek": 0, "period": 1 }],
-  "sessionPreferences": [{ "subjectCode": "MATH", "preferredSession": "MORNING", "isHard": true }],
+  "teacherUnavailability": [],
+  "sessionPreferences": [],
   "templateColumns": [
     { "position": 1, "startTime": "08:00", "endTime": "08:40", "slotType": "LESSON", "session": "MORNING", "label": null }
   ],
@@ -102,11 +157,11 @@ Returns `{"status":"ok","solver":"cp-sat"}` when the service is up.
 }
 ```
 
-**Response body**:
+**Response:**
 
 ```jsonc
 {
-  "status": "OPTIMAL",          // OPTIMAL | FEASIBLE | INFEASIBLE | UNKNOWN
+  "status": "FEASIBLE",
   "slots": [
     { "classId": "...", "dayOfWeek": 0, "period": 1, "subjectId": "...", "teacherId": "...", "room": null }
   ],
@@ -117,18 +172,12 @@ Returns `{"status":"ok","solver":"cp-sat"}` when the service is up.
     "completionRate": 100.0,
     "wallTime": 0.43,
     "branches": 512,
-    "conflicts": 14,
-    "objectiveValue": 4820.0
+    "conflicts": 14
   }
 }
 ```
 
-`period` is 1-based among LESSON columns only (non-lesson columns like breaks are excluded).
-
-**Status codes:**
-
-- `200` — solver ran successfully (check `status` field for OPTIMAL/FEASIBLE/INFEASIBLE)
-- `500` — unexpected server error
+`period` is 1-based among LESSON columns only.
 
 ---
 
@@ -136,7 +185,8 @@ Returns `{"status":"ok","solver":"cp-sat"}` when the service is up.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `status: "INFEASIBLE"` | Requirements exceed capacity, hard session preferences can't be met, or teacher unavailability is too restrictive | Reduce `lessonsPerWeek`, change hard prefs to soft, or review unavailability |
-| `status: "UNKNOWN"` | Time limit reached before a solution was found | Increase `timeLimitSeconds` (default 60 s) |
-| Next.js returns 422 "solver service not running" | Service isn't started or wrong URL | Run `python solver.py` and check `TIMETABLE_SOLVER_URL` in `.env` |
-| Solver is slow on first run | OR-Tools JIT compilation | Normal — subsequent calls are faster |
+| Vercel returns 422 "solver service not running" | `TIMETABLE_SOLVER_URL` not set or Railway service is sleeping | Check the env var in Vercel dashboard; ensure Railway service is deployed and healthy |
+| Railway build fails | Missing `Dockerfile` or wrong root directory | Set Root Directory to `timetable-solver` in Railway service settings |
+| `status: "UNKNOWN"` | Solver hit 60 s time limit | Reduce lesson requirements or increase `timeLimitSeconds` |
+| First solve is slow | OR-Tools JIT compilation | Normal — subsequent calls are faster |
+| 422 "no lessons could be scheduled" | All teachers marked unavailable or too few teachers | Assign more teachers or reduce unavailability blocks |

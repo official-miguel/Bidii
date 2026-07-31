@@ -29,8 +29,9 @@ const createSchema = z.object({
     .transform((s) => s.toUpperCase()),
   type: z.enum(["CORE", "ELECTIVE"]),
   departmentId: z.string().min(1, "Choose a department."),
-  applicableForms: z.array(z.number().int().min(1).max(6)).min(1, "Select at least one form."),
-  doubleLesson: z.boolean().default(false),
+  applicableForms: z.array(z.number().int().min(1)).min(1, "Select at least one form."),
+  // Timetable fields are optional — managed in the Timetable module.
+  doubleLesson: z.boolean().optional().default(false),
   requiresSpecialRoom: z.string().trim().optional().or(z.literal("")),
 });
 

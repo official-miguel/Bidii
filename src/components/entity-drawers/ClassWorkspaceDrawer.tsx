@@ -37,6 +37,16 @@ interface ClassDetail {
     subject: { id: string; name: string; code: string; type: "CORE" | "ELECTIVE" };
     teacher: { id: string; fullName: string };
   }[];
+  /** All subjects applicable to this class's form, with optional assigned teacher */
+  allSubjects: {
+    id: string;
+    name: string;
+    code: string;
+    type: "CORE" | "ELECTIVE";
+    assignedTeacher: { id: string; fullName: string } | null;
+  }[];
+  /** Qualified teachers per subject (only those who have that subject in their profile) */
+  teachersBySubject: Record<string, { id: string; fullName: string }[]>;
   _count: { students: number };
 }
 
@@ -98,6 +108,13 @@ export default function ClassWorkspaceDrawer({
   const [teacherError, setTeacherError]             = useState<string | null>(null);
   const teacherPickerRef                            = useRef<HTMLDivElement>(null);
 
+  // Subject-teacher assignment state: which subject is currently open for picker
+  const [assigningSubjectId, setAssigningSubjectId] = useState<string | null>(null);
+  const [subjectTeacherSearch, setSubjectTeacherSearch] = useState("");
+  const [subjectTeacherSaving, setSubjectTeacherSaving] = useState(false);
+  const [subjectTeacherError, setSubjectTeacherError]   = useState<string | null>(null);
+  const subjectPickerRef                            = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (!open || !classId) return;
     setCls(null); setError(null); setLoading(true);
@@ -118,6 +135,9 @@ export default function ClassWorkspaceDrawer({
       setTeacherPickerOpen(false);
       setTeacherSearch("");
       setTeacherError(null);
+      setAssigningSubjectId(null);
+      setSubjectTeacherSearch("");
+      setSubjectTeacherError(null);
     }
   }, [open]);
 
@@ -141,6 +161,19 @@ export default function ClassWorkspaceDrawer({
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [teacherPickerOpen]);
+
+  // Close subject-teacher picker on outside click
+  useEffect(() => {
+    if (!assigningSubjectId) return;
+    function handleClick(e: MouseEvent) {
+      if (subjectPickerRef.current && !subjectPickerRef.current.contains(e.target as Node)) {
+        setAssigningSubjectId(null);
+        setSubjectTeacherSearch("");
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [assigningSubjectId]);
 
   async function saveClassTeacher(teacherId: string | null) {
     if (!classId || !cls) return;
@@ -170,6 +203,31 @@ export default function ClassWorkspaceDrawer({
     s.fullName.toLowerCase().includes(teacherSearch.toLowerCase()) ||
     s.staffId.toLowerCase().includes(teacherSearch.toLowerCase())
   );
+
+  /** Assign or reassign the teacher for a subject in this class */
+  async function saveSubjectTeacher(subjectId: string, teacherId: string) {
+    if (!classId) return;
+    setSubjectTeacherSaving(true);
+    setSubjectTeacherError(null);
+    try {
+      const res = await fetch("/api/timetable/class-subject-teachers", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ classId, subjectId, teacherId, reassignExistingSlots: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Couldn't save teacher assignment.");
+      // Refresh drawer
+      const refreshed = await fetch(`/api/classes/${classId}/detail`).then((r) => r.json());
+      if (!refreshed.error) setCls(refreshed);
+      setAssigningSubjectId(null);
+      setSubjectTeacherSearch("");
+    } catch (e) {
+      setSubjectTeacherError((e as Error).message);
+    } finally {
+      setSubjectTeacherSaving(false);
+    }
+  }
 
   return (
     <SlideOver
@@ -216,7 +274,7 @@ export default function ClassWorkspaceDrawer({
               </div>
               <div className="flex items-center gap-1.5 bg-paper border border-line rounded-lg px-3 py-1.5">
                 <BookOpen className="h-3.5 w-3.5 text-slate" />
-                <span className="text-sm font-medium text-ink">{cls.subjectTeachers.length}</span>
+                <span className="text-sm font-medium text-ink">{cls.allSubjects?.length ?? cls.subjectTeachers.length}</span>
                 <span className="text-xs text-slate">subjects</span>
               </div>
             </div>
@@ -354,124 +412,176 @@ export default function ClassWorkspaceDrawer({
             )}
           </div>
 
-          {/* ── Core subject teachers ── */}
+          {/* ── Subject teachers ── */}
           {(() => {
-            const coreTeachers = cls.subjectTeachers.filter(
-              ({ subject }) => subject.type === "CORE",
-            );
-            if (coreTeachers.length === 0) return null;
-            return (
-              <div className="bg-white border border-line rounded-xl p-5">
-                <SectionTitle>
-                  <BookOpen className="h-3.5 w-3.5" />
-                  Core subject teachers
-                </SectionTitle>
-                <div className="space-y-2">
-                  {coreTeachers.map(({ subject, teacher }) => (
-                    <div
-                      key={subject.id}
-                      className="flex items-center justify-between gap-3 py-2 border-b border-line last:border-0"
-                    >
-                      {/* Subject name + code */}
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="font-mono text-xs bg-paper border border-line rounded px-1.5 py-0.5 shrink-0 text-slate">
-                          {subject.code}
-                        </span>
-                        {onOpenSubject ? (
-                          <button
-                            type="button"
-                            onClick={() => onOpenSubject(subject.id, subject.name)}
-                            className="text-sm font-medium text-ink hover:text-teal truncate flex items-center gap-1"
-                          >
-                            {subject.name}
-                            <ExternalLink className="h-3 w-3 shrink-0 text-slate/50" />
-                          </button>
-                        ) : (
-                          <span className="text-sm font-medium text-ink truncate">
-                            {subject.name}
-                          </span>
-                        )}
-                      </div>
+            const subjects = cls.allSubjects ?? [];
+            if (subjects.length === 0) return null;
 
-                      {/* Teacher */}
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Avatar name={teacher.fullName} size="sm" />
-                        {onOpenStaff ? (
-                          <button
-                            type="button"
-                            onClick={() => onOpenStaff(teacher.id, teacher.fullName)}
-                            className="text-xs text-teal hover:underline flex items-center gap-0.5"
-                          >
-                            {teacher.fullName}
-                            <ExternalLink className="h-2.5 w-2.5" />
-                          </button>
-                        ) : (
-                          <span className="text-xs text-slate">{teacher.fullName}</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
+            const coreSubjects     = subjects.filter((s) => s.type === "CORE");
+            const electiveSubjects = subjects.filter((s) => s.type === "ELECTIVE");
 
-          {/* ── Elective subjects ── */}
-          {(() => {
-            const electiveTeachers = cls.subjectTeachers.filter(
-              ({ subject }) => subject.type === "ELECTIVE",
-            );
-            if (electiveTeachers.length === 0) return null;
-            return (
-              <div className="bg-white border border-line rounded-xl p-5">
-                <SectionTitle>
-                  <BookOpen className="h-3.5 w-3.5" />
-                  Elective subjects
-                </SectionTitle>
-                <div className="space-y-2">
-                  {electiveTeachers.map(({ subject, teacher }) => (
-                    <div
-                      key={subject.id}
-                      className="flex items-center justify-between gap-3 py-1.5 border-b border-line last:border-0"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        {onOpenSubject ? (
-                          <button
-                            type="button"
-                            onClick={() => onOpenSubject(subject.id, subject.name)}
-                            className="text-sm font-medium text-teal hover:underline flex items-center gap-1"
-                          >
-                            <span className="font-mono text-xs bg-paper border border-line rounded px-1.5 py-0.5">
-                              {subject.code}
-                            </span>
-                            {subject.name}
-                            <ExternalLink className="h-3 w-3 shrink-0" />
-                          </button>
-                        ) : (
-                          <span className="text-sm text-ink">
-                            <span className="font-mono text-xs bg-paper border border-line rounded px-1.5 py-0.5 mr-1.5">
-                              {subject.code}
-                            </span>
-                            {subject.name}
-                          </span>
-                        )}
-                      </div>
-                      {onOpenStaff ? (
+            const renderSubjectRow = (s: ClassDetail["allSubjects"][0]) => {
+              const qualifiedTeachers = (cls.teachersBySubject?.[s.id] ?? []).filter(
+                (t) =>
+                  assigningSubjectId !== s.id ||
+                  subjectTeacherSearch === "" ||
+                  t.fullName.toLowerCase().includes(subjectTeacherSearch.toLowerCase())
+              );
+              const isOpen = assigningSubjectId === s.id;
+
+              return (
+                <div key={s.id} className="py-2.5 border-b border-line last:border-0">
+                  <div className="flex items-center justify-between gap-3">
+                    {/* Subject name + code */}
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-mono text-xs bg-paper border border-line rounded px-1.5 py-0.5 shrink-0 text-slate">
+                        {s.code}
+                      </span>
+                      {onOpenSubject ? (
                         <button
                           type="button"
-                          onClick={() => onOpenStaff(teacher.id, teacher.fullName)}
-                          className="text-xs text-teal hover:underline shrink-0 flex items-center gap-0.5"
+                          onClick={() => onOpenSubject(s.id, s.name)}
+                          className="text-sm font-medium text-ink hover:text-teal truncate flex items-center gap-1"
                         >
-                          {teacher.fullName}
-                          <ExternalLink className="h-2.5 w-2.5" />
+                          {s.name}
+                          <ExternalLink className="h-3 w-3 shrink-0 text-slate/40" />
                         </button>
                       ) : (
-                        <span className="text-xs text-slate shrink-0">{teacher.fullName}</span>
+                        <span className="text-sm font-medium text-ink truncate">{s.name}</span>
                       )}
                     </div>
-                  ))}
+
+                    {/* Assigned teacher or assign button */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {s.assignedTeacher ? (
+                        <>
+                          {onOpenStaff ? (
+                            <button
+                              type="button"
+                              onClick={() => onOpenStaff(s.assignedTeacher!.id, s.assignedTeacher!.fullName)}
+                              className="text-xs text-teal hover:underline flex items-center gap-0.5"
+                            >
+                              {s.assignedTeacher.fullName}
+                              <ExternalLink className="h-2.5 w-2.5" />
+                            </button>
+                          ) : (
+                            <span className="text-xs text-slate">{s.assignedTeacher.fullName}</span>
+                          )}
+                          <button
+                            type="button"
+                            title="Change teacher"
+                            onClick={() => {
+                              setAssigningSubjectId(isOpen ? null : s.id);
+                              setSubjectTeacherSearch("");
+                              setSubjectTeacherError(null);
+                            }}
+                            className="p-1 rounded hover:bg-paper text-slate/40 hover:text-teal transition-colors"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAssigningSubjectId(isOpen ? null : s.id);
+                            setSubjectTeacherSearch("");
+                            setSubjectTeacherError(null);
+                          }}
+                          className="flex items-center gap-1 text-xs font-medium text-teal hover:underline"
+                        >
+                          <UserCheck className="h-3 w-3" />
+                          Assign
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Inline subject-teacher picker */}
+                  {isOpen && (
+                    <div className="mt-2" ref={subjectPickerRef}>
+                      <div className="rounded-xl border border-line bg-white shadow-sm overflow-hidden">
+                        <div className="p-2 border-b border-line">
+                          <input
+                            autoFocus
+                            type="text"
+                            placeholder={`Search teachers for ${s.name}…`}
+                            value={subjectTeacherSearch}
+                            onChange={(e) => setSubjectTeacherSearch(e.target.value)}
+                            className="w-full text-sm px-2 py-1.5 rounded-lg border border-line bg-paper outline-none focus:border-teal"
+                          />
+                        </div>
+                        <ul className="max-h-44 overflow-y-auto">
+                          {qualifiedTeachers.length === 0 ? (
+                            <li className="px-3 py-3 text-xs text-slate italic text-center">
+                              {(cls.teachersBySubject?.[s.id] ?? []).length === 0
+                                ? `No teachers teach ${s.name} yet. Assign subject profiles to teachers first.`
+                                : "No matching teachers."}
+                            </li>
+                          ) : (
+                            qualifiedTeachers.map((t) => (
+                              <li key={t.id}>
+                                <button
+                                  type="button"
+                                  onClick={() => saveSubjectTeacher(s.id, t.id)}
+                                  disabled={subjectTeacherSaving}
+                                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-paper transition-colors disabled:opacity-50"
+                                >
+                                  <Avatar name={t.fullName} size="sm" />
+                                  <span className="flex-1 font-medium text-ink truncate">{t.fullName}</span>
+                                  {s.assignedTeacher?.id === t.id && (
+                                    <span className="text-[10px] bg-teal/10 text-teal px-1.5 py-0.5 rounded-full font-medium">current</span>
+                                  )}
+                                </button>
+                              </li>
+                            ))
+                          )}
+                        </ul>
+                        {subjectTeacherError && (
+                          <p className="px-3 py-2 text-xs text-danger border-t border-line">{subjectTeacherError}</p>
+                        )}
+                        {subjectTeacherSaving && (
+                          <div className="flex items-center gap-2 px-3 py-2 text-xs text-slate border-t border-line">
+                            <Spinner size="sm" /> Saving…
+                          </div>
+                        )}
+                        <div className="border-t border-line px-3 py-1.5">
+                          <button
+                            type="button"
+                            onClick={() => { setAssigningSubjectId(null); setSubjectTeacherSearch(""); setSubjectTeacherError(null); }}
+                            className="text-xs text-slate hover:text-ink"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
+              );
+            };
+
+            return (
+              <>
+                {coreSubjects.length > 0 && (
+                  <div className="bg-white border border-line rounded-xl p-5">
+                    <SectionTitle>
+                      <BookOpen className="h-3.5 w-3.5" />
+                      Core subjects
+                    </SectionTitle>
+                    <div>{coreSubjects.map(renderSubjectRow)}</div>
+                  </div>
+                )}
+                {electiveSubjects.length > 0 && (
+                  <div className="bg-white border border-line rounded-xl p-5">
+                    <SectionTitle>
+                      <BookOpen className="h-3.5 w-3.5" />
+                      Elective subjects
+                    </SectionTitle>
+                    <div>{electiveSubjects.map(renderSubjectRow)}</div>
+                  </div>
+                )}
+              </>
             );
           })()}
 

@@ -40,13 +40,12 @@ const createSchema = z
     fullName: z.string().trim().min(2, "Enter the staff member's full name."),
     staffId: z.string().trim().optional().or(z.literal("")),
     startingStaffId: z.coerce.number().int().positive().optional(),
-    email: z.string().trim().email("Enter a valid email.").optional().or(z.literal("")),
+    email: z.string().trim().email("Enter a valid email."),
     phone: z.string().trim().optional().or(z.literal("")),
-    designation: z.string().trim().max(100).nullable().optional().or(z.literal("")),
     primaryDepartmentId: z.string().nullable().optional(),
     todEligible: z.boolean().default(true),
     subjectIds: z.array(z.string()).default([]),
-    createLogin: z.boolean().default(false),
+    createLogin: z.boolean().default(true),
     staffRoleId: z.string().nullable().optional(),
   })
   .refine((d) => !(d.staffRoleId && d.subjectIds.length > 0), {
@@ -81,6 +80,19 @@ export async function POST(req: NextRequest) {
       { error: "An email is required to create login credentials." },
       { status: 400 }
     );
+  }
+
+  // For teaching staff, derive primaryDepartmentId from their first subject's department.
+  // The explicit value from the payload is used as a fallback only for non-teaching staff.
+  if (!data.staffRoleId && data.subjectIds.length > 0) {
+    const firstSubject = await prisma.subject.findFirst({
+      where: { id: { in: data.subjectIds }, schoolId: user.schoolId },
+      select: { departmentId: true },
+      orderBy: { name: "asc" },
+    });
+    if (firstSubject?.departmentId) {
+      data.primaryDepartmentId = firstSubject.departmentId;
+    }
   }
 
   if (data.primaryDepartmentId) {
@@ -182,7 +194,6 @@ export async function POST(req: NextRequest) {
             staffId: explicitId,
             email: data.email || null,
             phone: data.phone || null,
-            designation: data.designation || null,
             primaryDepartmentId: data.primaryDepartmentId || null,
             todEligible: data.todEligible,
             userId,
@@ -289,7 +300,6 @@ export async function POST(req: NextRequest) {
             staffId: nextIdStr,
             email: data.email || null,
             phone: data.phone || null,
-            designation: data.designation || null,
             primaryDepartmentId: data.primaryDepartmentId || null,
             todEligible: data.todEligible,
             userId,

@@ -586,8 +586,8 @@ function TemplateSection({
         </div>
       ) : (
         <>
-          {/* Header row */}
-          <div className="hidden sm:grid grid-cols-[28px_44px_1fr_1fr_1fr_1fr_1fr_36px] gap-2 px-4 py-2 border-b border-line bg-paper">
+          {/* Header row — desktop only */}
+          <div className="hidden lg:grid grid-cols-[28px_44px_1fr_1fr_1fr_1fr_1fr_36px] gap-2 px-4 py-2 border-b border-line bg-paper">
             <span /><span className="text-[10px] font-semibold uppercase tracking-wide text-slate">#</span>
             <span className="text-[10px] font-semibold uppercase tracking-wide text-slate">Start</span>
             <span className="text-[10px] font-semibold uppercase tracking-wide text-slate">End</span>
@@ -602,34 +602,102 @@ function TemplateSection({
                 onDragStart={() => onDragStart(idx)}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={() => onDrop(idx)}
-                className={`grid grid-cols-[28px_44px_1fr_1fr_1fr_1fr_1fr_36px] gap-2 px-4 py-2.5 items-center transition-colors
-                  ${col.slotType !== "LESSON" ? "bg-paper/60" : ""}
-                  ${dragIdx === idx ? "opacity-40" : ""}`}>
-                <span className="cursor-grab text-slate/40 hover:text-slate"><GripVertical className="h-4 w-4" /></span>
-                <span className="text-xs font-semibold text-slate">{col.position}</span>
-                <input type="time" value={col.startTime}
-                  onChange={(e) => onUpdate(idx, { startTime: e.target.value })}
-                  className={`${inputClass} text-xs py-1.5`} />
-                <input type="time" value={col.endTime}
-                  onChange={(e) => onUpdate(idx, { endTime: e.target.value })}
-                  className={`${inputClass} text-xs py-1.5`} />
-                <select value={col.slotType} onChange={(e) => onUpdate(idx, { slotType: e.target.value })}
-                  className={`${inputClass} text-xs py-1.5`}>
-                  {SLOT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-                </select>
-                <select value={col.session} disabled={col.slotType !== "LESSON"}
-                  onChange={(e) => onUpdate(idx, { session: e.target.value })}
-                  className={`${inputClass} text-xs py-1.5 disabled:opacity-40 disabled:bg-paper`}>
-                  {SESSIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
-                <input placeholder={col.slotType === "LESSON" ? "Optional" : "Required"}
-                  value={col.label ?? ""}
-                  onChange={(e) => onUpdate(idx, { label: e.target.value || null })}
-                  className={`${inputClass} text-xs py-1.5`} />
-                <button type="button" onClick={() => onRemove(idx)}
-                  className="p-1 rounded text-slate hover:text-danger transition-colors">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                className={`transition-colors px-4 py-3 ${col.slotType !== "LESSON" ? "bg-paper/60" : ""} ${dragIdx === idx ? "opacity-40" : ""}`}>
+
+                {/* ── Desktop row (lg+) ── */}
+                <div className="hidden lg:grid grid-cols-[28px_44px_1fr_1fr_1fr_1fr_1fr_36px] gap-2 items-center">
+                  <span className="cursor-grab text-slate/40 hover:text-slate"><GripVertical className="h-4 w-4" /></span>
+                  <span className="text-xs font-semibold text-slate">{col.position}</span>
+                  <input type="time" value={col.startTime}
+                    onChange={(e) => onUpdate(idx, { startTime: e.target.value })}
+                    className={`${inputClass} text-xs py-1.5`} />
+                  <input type="time" value={col.endTime}
+                    onChange={(e) => onUpdate(idx, { endTime: e.target.value })}
+                    className={`${inputClass} text-xs py-1.5`} />
+                  <select value={col.slotType} onChange={(e) => onUpdate(idx, { slotType: e.target.value })}
+                    className={`${inputClass} text-xs py-1.5`}>
+                    {SLOT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  </select>
+                  <select value={col.session} disabled={col.slotType !== "LESSON"}
+                    onChange={(e) => onUpdate(idx, { session: e.target.value })}
+                    className={`${inputClass} text-xs py-1.5 disabled:opacity-40 disabled:bg-paper`}>
+                    {SESSIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                  </select>
+                  <input placeholder={col.slotType === "LESSON" ? "Optional" : "Required"}
+                    value={col.label ?? ""}
+                    onChange={(e) => onUpdate(idx, { label: e.target.value || null })}
+                    className={`${inputClass} text-xs py-1.5`} />
+                  <button type="button" onClick={() => onRemove(idx)}
+                    className="p-1 rounded text-slate hover:text-danger transition-colors">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
+                {/* ── Mobile card (< lg) ── */}
+                <div className="lg:hidden space-y-2">
+                  {/* Top bar: drag handle + position badge + type pill + delete */}
+                  <div className="flex items-center gap-2">
+                    <span className="cursor-grab text-slate/40 touch-manipulation">
+                      <GripVertical className="h-4 w-4" />
+                    </span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0
+                      ${SLOT_TYPE_COLORS[col.slotType] ?? "bg-slate-100 text-slate border-slate-200"}`}>
+                      #{col.position} · {col.slotType}
+                    </span>
+                    <div className="flex-1" />
+                    <button type="button" onClick={() => onRemove(idx)}
+                      className="p-1.5 rounded-lg border border-line text-slate hover:text-danger hover:border-danger/30 transition-colors">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Time range */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] font-medium text-slate uppercase tracking-wide block mb-1">Start</label>
+                      <input type="time" value={col.startTime}
+                        onChange={(e) => onUpdate(idx, { startTime: e.target.value })}
+                        className={`${inputClass} text-sm py-2 w-full`} />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-medium text-slate uppercase tracking-wide block mb-1">End</label>
+                      <input type="time" value={col.endTime}
+                        onChange={(e) => onUpdate(idx, { endTime: e.target.value })}
+                        className={`${inputClass} text-sm py-2 w-full`} />
+                    </div>
+                  </div>
+
+                  {/* Type + Session */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] font-medium text-slate uppercase tracking-wide block mb-1">Type</label>
+                      <select value={col.slotType} onChange={(e) => onUpdate(idx, { slotType: e.target.value })}
+                        className={`${inputClass} text-sm py-2 w-full`}>
+                        {SLOT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-medium text-slate uppercase tracking-wide block mb-1">Session</label>
+                      <select value={col.session} disabled={col.slotType !== "LESSON"}
+                        onChange={(e) => onUpdate(idx, { session: e.target.value })}
+                        className={`${inputClass} text-sm py-2 w-full disabled:opacity-40 disabled:bg-paper`}>
+                        {SESSIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Label */}
+                  <div>
+                    <label className="text-[10px] font-medium text-slate uppercase tracking-wide block mb-1">
+                      Label {col.slotType === "LESSON" ? "(optional)" : "(required)"}
+                    </label>
+                    <input placeholder={col.slotType === "LESSON" ? "e.g. English, Maths…" : "e.g. Morning Break"}
+                      value={col.label ?? ""}
+                      onChange={(e) => onUpdate(idx, { label: e.target.value || null })}
+                      className={`${inputClass} text-sm py-2 w-full`} />
+                  </div>
+                </div>
+
               </div>
             ))}
           </div>
