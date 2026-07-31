@@ -5,7 +5,7 @@
  *          Each group now includes its scopeStreams and the full list of
  *          teacher-subject pairings (ElectiveGroupTeacher rows).
  * POST   — create a new elective group (accepts scopeStreams)
- * PATCH  — update name / lessonsPerWeek / scopeStreams  (body must include id)
+ * PATCH  — update name / lessonsPerWeek / doublesPerWeek / scopeStreams  (body must include id)
  * DELETE — remove a group  (body must include id)
  *
  * scopeForm = 0  → school-wide
@@ -100,6 +100,8 @@ const createSchema = z.object({
   name:           z.string().min(1).max(50),
   scopeForm:      z.number().int().min(0),
   lessonsPerWeek: z.number().int().min(1).max(20),
+  /// How many of those lessons should be double blocks (0 = all singles).
+  doublesPerWeek: z.number().int().min(0).max(10).optional().default(0),
   /// Optional: restrict the group to specific stream names within the form.
   /// Omitting the field (or passing []) means the group applies to all streams.
   scopeStreams:   z.array(z.string().min(1)).optional().default([]),
@@ -117,7 +119,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { name, scopeForm, lessonsPerWeek, scopeStreams } = parsed.data;
+  const { name, scopeForm, lessonsPerWeek, doublesPerWeek, scopeStreams } = parsed.data;
 
   // Check uniqueness (name + scopeForm pair)
   const existing = await prisma.electiveGroup.findFirst({
@@ -132,7 +134,7 @@ export async function POST(req: NextRequest) {
   }
 
   const group = await prisma.electiveGroup.create({
-    data: { schoolId: user.schoolId, name, scopeForm, lessonsPerWeek, scopeStreams },
+    data: { schoolId: user.schoolId, name, scopeForm, lessonsPerWeek, doublesPerWeek, scopeStreams },
     include: groupInclude(),
   });
 
@@ -145,6 +147,8 @@ const patchSchema = z.object({
   id:             z.string().min(1),
   name:           z.string().min(1).max(50).optional(),
   lessonsPerWeek: z.number().int().min(1).max(20).optional(),
+  /// How many of those lessons should be double blocks (0 = all singles).
+  doublesPerWeek: z.number().int().min(0).max(10).optional(),
   /// Pass an explicit array (even []) to update; omit the key to leave unchanged.
   scopeStreams:   z.array(z.string().min(1)).optional(),
 });
@@ -161,7 +165,7 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
-  const { id, name, lessonsPerWeek, scopeStreams } = parsed.data;
+  const { id, name, lessonsPerWeek, doublesPerWeek, scopeStreams } = parsed.data;
 
   const group = await prisma.electiveGroup.findFirst({
     where: { id, schoolId: user.schoolId },
@@ -187,6 +191,7 @@ export async function PATCH(req: NextRequest) {
     data: {
       ...(name            !== undefined ? { name }            : {}),
       ...(lessonsPerWeek  !== undefined ? { lessonsPerWeek }  : {}),
+      ...(doublesPerWeek  !== undefined ? { doublesPerWeek }  : {}),
       ...(scopeStreams     !== undefined ? { scopeStreams }    : {}),
     },
     include: groupInclude(),
