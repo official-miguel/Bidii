@@ -219,6 +219,7 @@ export async function POST(req: NextRequest) {
         groupId:        g.id,
         subjectIds:     g.members.map((m) => m.subjectId),
         lessonsPerWeek: g.lessonsPerWeek,
+        doublesPerWeek: g.doublesPerWeek ?? 0,
         classIds:       inScope.map((c) => c.id),
       };
     })
