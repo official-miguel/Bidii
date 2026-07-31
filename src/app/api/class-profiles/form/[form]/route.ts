@@ -4,6 +4,36 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { requirePermission } from "@/lib/permissions";
 
+// ── Shared helper: fetch elective groups for a form (including school-wide) ──
+
+async function fetchElectiveGroups(schoolId: string, formNum: number) {
+  return prisma.electiveGroup.findMany({
+    where: {
+      schoolId,
+      OR: [{ scopeForm: 0 }, { scopeForm: formNum }],
+    },
+    include: {
+      members: {
+        include: {
+          subject: { select: { id: true, code: true, name: true } },
+        },
+        orderBy: { subject: { name: "asc" } },
+      },
+      teachers: {
+        include: {
+          subject: { select: { id: true, code: true, name: true } },
+          teacher: { select: { id: true, fullName: true } },
+        },
+        orderBy: [
+          { subject: { name: "asc" } },
+          { teacher: { fullName: "asc" } },
+        ],
+      },
+    },
+    orderBy: [{ scopeForm: "asc" }, { name: "asc" }],
+  });
+}
+
 /**
  * GET /api/class-profiles/form/[form]
  *
@@ -11,6 +41,11 @@ import { requirePermission } from "@/lib/permissions";
  * the effective type (CORE / ELECTIVE) that applies to ALL classes in this
  * form.  Where different classes in the same form have diverging overrides the
  * response flags that with `mixed: true` so the UI can show a visual hint.
+ *
+ * Also returns all elective groups that apply to this form (scopeForm === form
+ * OR scopeForm === 0), with their members and teacher pairings. The class
+ * profile page uses this to render elective groups as a read-through view of
+ * what the timetable requirements already define.
  *
  * Response shape:
  * {
@@ -24,6 +59,13 @@ import { requirePermission } from "@/lib/permissions";
  *       effectiveType: "CORE" | "ELECTIVE",   // consensus or majority
  *       mixed: boolean,                         // true when classes disagree
  *       classOverrides: { [classId]: "CORE" | "ELECTIVE" }
+ *     }
+ *   ],
+ *   electiveGroups: [
+ *     {
+ *       id, name, scopeForm, scopeStreams, lessonsPerWeek,
+ *       members: [{ subjectId, subject: { id, code, name } }],
+ *       teachers: [{ id, subjectId, teacherId, subject: {...}, teacher: {...} }]
  *     }
  *   ]
  * }
@@ -124,6 +166,7 @@ export async function GET(
     form: formNum,
     classes,
     subjects: subjectsWithEffective,
+    electiveGroups: await fetchElectiveGroups(user.schoolId, formNum),
   });
 }
 

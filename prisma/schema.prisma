@@ -112,6 +112,7 @@ model School {
   timetableChangeLogs      TimetableChangeLog[]
   /// Elective groups
   electiveGroups           ElectiveGroup[]
+  electiveGroupTeachers    ElectiveGroupTeacher[]
 }
 
 /// One row per login. Role determines which dashboard the user lands on.
@@ -225,6 +226,7 @@ model Subject {
   classTeachers       ClassSubjectTeacher[]
   studentElectives    StudentElective[]
   electiveGroupMembers ElectiveGroupMember[]
+  electiveGroupTeachers ElectiveGroupTeacher[]
   /// Assessment framework back-relations
   papers              Paper[]
   assessmentItems     AssessmentItem[]
@@ -288,6 +290,7 @@ model Teacher {
   unavailability         TeacherUnavailability[]
   timetableSlots         TimetableSlot[]
   groupMemberships       GroupMember[]
+  electiveGroupTeachers  ElectiveGroupTeacher[]
   /// Accommodation: dorms this teacher is the boarding master for
   dormsBoardingMaster    Dormitory[]             @relation("DormBoardingMaster")
 
@@ -837,19 +840,26 @@ model TeacherUnavailability {
 
 /// An elective group (e.g. "GPC") that bundles several elective subjects into
 /// one atomic timetable slot. Scoped to a form (scopeForm > 0) or
-/// school-wide (scopeForm = 0). Every class in scope lands in the same
-/// period(s); per-class teacher assignments live in ElectiveGroupMember.
+/// school-wide (scopeForm = 0). When scopeForm > 0, scopeStreams optionally
+/// narrows the group to specific stream names (e.g. ["North", "East"]); an
+/// empty array means the group applies to ALL streams of that form. Every
+/// class in scope lands in the same period(s). Teacher assignments per subject
+/// are stored in ElectiveGroupTeacher rather than in ClassSubjectTeacher.
 model ElectiveGroup {
-  id             String                @id @default(cuid())
+  id             String                 @id @default(cuid())
   schoolId       String
   name           String
   /// 0 = school-wide; any positive integer = the form number (e.g. 4).
-  scopeForm      Int                   @default(0)
-  lessonsPerWeek Int                   @default(1)
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
-  school         School                @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  scopeForm      Int                    @default(0)
+  /// Specific stream names this group applies to within scopeForm.
+  /// Empty array = all streams in the form.
+  scopeStreams   String[]               @default([])
+  lessonsPerWeek Int                    @default(1)
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  school         School                 @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   members        ElectiveGroupMember[]
+  teachers       ElectiveGroupTeacher[]
 
   /// Two groups with the same name can exist on different forms.
   @@unique([schoolId, name, scopeForm])
@@ -870,6 +880,32 @@ model ElectiveGroupMember {
   @@unique([groupId, subjectId])
   @@index([groupId])
   @@index([subjectId])
+}
+
+/// One teacher–subject pairing within an elective group. A single subject in
+/// a group can have multiple rows if different teachers take sub-groups of
+/// students (e.g. different elective combinations). Each row represents a
+/// distinct sub-group that the class profile reads through and displays as a
+/// separate row. This replaces per-class ClassSubjectTeacher rows for elective
+/// subjects that belong to a group.
+model ElectiveGroupTeacher {
+  id        String        @id @default(cuid())
+  groupId   String
+  subjectId String
+  teacherId String
+  schoolId  String
+  createdAt DateTime      @default(now())
+  group     ElectiveGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  subject   Subject       @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  teacher   Teacher       @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  school    School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  /// A teacher can only be assigned once per (group, subject) pair.
+  @@unique([groupId, subjectId, teacherId])
+  @@index([groupId])
+  @@index([subjectId])
+  @@index([teacherId])
+  @@index([schoolId])
 }
 
 /// Section: School Calendar. One row per school-specific calendar entry —

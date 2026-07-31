@@ -10,16 +10,10 @@ const MAX_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB
 const VALID_FIELDS = ["logo", "stamp"] as const;
 type UploadField = (typeof VALID_FIELDS)[number];
 
-// ── Storage helpers ────────────────────────────────────────────────────────────
+// ── Storage ────────────────────────────────────────────────────────────────────
+// Files are always written to public/uploads/school/ on the local filesystem.
+// The returned URL is a relative path served directly by Next.js from /public.
 
-/**
- * On Vercel (or any environment with BLOB_READ_WRITE_TOKEN set) files are
- * stored in Vercel Blob — a durable, CDN-backed object store that survives
- * redeploys. The URL returned by `put()` is permanent and served globally.
- *
- * On localhost (no token) files are written to public/uploads/school/ exactly
- * as before so local development remains zero-config.
- */
 async function storeFile(
   field: UploadField,
   schoolId: string,
@@ -27,20 +21,6 @@ async function storeFile(
   ext: string,
 ): Promise<string> {
   const filename = `${field}-${schoolId}.${ext}`;
-
-  if (process.env.BLOB_READ_WRITE_TOKEN) {
-    // ── Vercel Blob (production) ─────────────────────────────────────────────
-    // Lazy-import so the package is tree-shaken on builds that don't use it.
-    const { put } = await import("@vercel/blob");
-    const blob = await put(`school/${filename}`, file, {
-      access: "public",
-      // Overwrite any previous upload for this field + school combination.
-      addRandomSuffix: false,
-    });
-    return blob.url;
-  }
-
-  // ── Local filesystem (development) ──────────────────────────────────────────
   const uploadsDir = path.join(process.cwd(), "public", "uploads", "school");
   await mkdir(uploadsDir, { recursive: true });
   const filePath = path.join(uploadsDir, filename);
