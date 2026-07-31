@@ -18,7 +18,7 @@ import SlideOver from "@/components/workspace/SlideOver";
 import { Avatar, Chip, Spinner } from "@/components/ui";
 import {
   Users, BookOpen, CalendarDays, ClipboardList,
-  ExternalLink, XCircle, UserCheck, Pencil, ChevronDown, Layers,
+  ExternalLink, XCircle, UserCheck, Pencil, ChevronDown, Layers, Plus, X,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -84,6 +84,12 @@ interface StaffOption {
   staffId: string;
 }
 
+interface StaffTeacher {
+  id: string;
+  fullName: string;
+  teacherSubjects: { subject: { id: string; name: string; code: string } }[];
+}
+
 interface Props {
   classId: string | null;
   open: boolean;
@@ -143,6 +149,15 @@ export default function ClassWorkspaceDrawer({
   const [subjectTeacherError, setSubjectTeacherError]   = useState<string | null>(null);
   const subjectPickerRef                            = useRef<HTMLDivElement>(null);
 
+  // Elective group teacher assignment state
+  // pickerKey format: "{groupId}:{subjectId}"
+  const [groupTeacherPickerKey, setGroupTeacherPickerKey] = useState<string | null>(null);
+  const [groupTeacherSearch, setGroupTeacherSearch]       = useState("");
+  const [groupTeacherSaving, setGroupTeacherSaving]       = useState<Record<string, boolean>>({});
+  const [groupTeacherError, setGroupTeacherError]         = useState<string | null>(null);
+  const [allStaffTeachers, setAllStaffTeachers]           = useState<StaffTeacher[]>([]);
+  const groupPickerRef                                    = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (!open || !classId) return;
     setCls(null); setError(null); setLoading(true);
@@ -169,6 +184,9 @@ export default function ClassWorkspaceDrawer({
       setAssigningSubjectId(null);
       setSubjectTeacherSearch("");
       setSubjectTeacherError(null);
+      setGroupTeacherPickerKey(null);
+      setGroupTeacherSearch("");
+      setGroupTeacherError(null);
     }
   }, [open]);
 
@@ -180,6 +198,17 @@ export default function ClassWorkspaceDrawer({
       .then((data: StaffOption[]) => setStaffOptions(data))
       .catch(() => setTeacherError("Couldn't load staff list."));
   }, [assigningTeacher, staffOptions.length]);
+
+  // Load all staff teachers once elective groups are available (for group teacher picker)
+  useEffect(() => {
+    if (!cls || (cls.electiveGroups ?? []).length === 0 || allStaffTeachers.length > 0) return;
+    fetch("/api/staff")
+      .then((r) => r.json())
+      .then((data: StaffTeacher[]) =>
+        setAllStaffTeachers(data.filter((t) => t.teacherSubjects?.length > 0))
+      )
+      .catch(() => {/* non-critical */});
+  }, [cls, allStaffTeachers.length]);
 
   // Close picker on outside click
   useEffect(() => {
@@ -205,6 +234,19 @@ export default function ClassWorkspaceDrawer({
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [assigningSubjectId]);
+
+  // Close elective group teacher picker on outside click
+  useEffect(() => {
+    if (!groupTeacherPickerKey) return;
+    function handleClick(e: MouseEvent) {
+      if (groupPickerRef.current && !groupPickerRef.current.contains(e.target as Node)) {
+        setGroupTeacherPickerKey(null);
+        setGroupTeacherSearch("");
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [groupTeacherPickerKey]);
 
   async function saveClassTeacher(teacherId: string | null) {
     if (!classId || !cls) return;
@@ -257,6 +299,82 @@ export default function ClassWorkspaceDrawer({
       setSubjectTeacherError((e as Error).message);
     } finally {
       setSubjectTeacherSaving(false);
+    }
+  }
+
+  /** Add a teacher to a (group, subject) pair for this class */
+  async function addElectiveTeacher(groupId: string, subjectId: string, teacherId: string) {
+    if (!classId) return;
+    const key = `${groupId}:${subjectId}`;
+    setGroupTeacherSaving((p) => ({ ...p, [key]: true }));
+    setGroupTeacherError(null);
+    try {
+      const res = await fetch(`/api/class-profiles/${classId}/elective-teachers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groupId, subjectId, teacherId }),
+      });
+      const body = await res.json();
+      if (!res.ok) { setGroupTeacherError(body.error ?? "Failed to add teacher."); return; }
+      // Patch local state — inject the new pairing without full reload
+      const pairing = body.pairing as {
+        id: string; subjectId: string; teacherId: string;
+        subject: { id: string; code: string; name: string };
+        teacher: { id: string; fullName: string };
+      };
+      setCls((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          electiveGroups: prev.electiveGroups.map((g) =>
+            g.id !== groupId
+              ? g
+              : { ...g, classTeachers: [...g.classTeachers, pairing] }
+          ),
+        };
+      });
+      setGroupTeacherPickerKey(null);
+      setGroupTeacherSearch("");
+    } finally {
+      setGroupTeacherSaving((p) => ({ ...p, [key]: false }));
+    }
+  }
+
+  /** Remove a teacher from a (group, subject) pair for this class */
+  async function removeElectiveTeacher(groupId: string, subjectId: string, teacherId: string) {
+    if (!classId) return;
+    const key = `${groupId}:${subjectId}`;
+    setGroupTeacherSaving((p) => ({ ...p, [key]: true }));
+    setGroupTeacherError(null);
+    try {
+      const res = await fetch(`/api/class-profiles/${classId}/elective-teachers`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groupId, subjectId, teacherId }),
+      });
+      if (!res.ok) {
+        const body = await res.json();
+        setGroupTeacherError(body.error ?? "Failed to remove teacher.");
+        return;
+      }
+      setCls((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          electiveGroups: prev.electiveGroups.map((g) =>
+            g.id !== groupId
+              ? g
+              : {
+                  ...g,
+                  classTeachers: g.classTeachers.filter(
+                    (t) => !(t.subjectId === subjectId && t.teacherId === teacherId)
+                  ),
+                }
+          ),
+        };
+      });
+    } finally {
+      setGroupTeacherSaving((p) => ({ ...p, [key]: false }));
     }
   }
 
@@ -573,10 +691,18 @@ export default function ClassWorkspaceDrawer({
                   </div>
                 )}
 
-                {/* Elective groups — read-through from timetable requirements */}
+                {/* Elective groups — interactive teacher assignment */}
                 {(cls.electiveGroups ?? []).length > 0 && (
                   <div className="bg-white border border-line rounded-xl p-5">
                     <SectionTitle><Layers className="h-3.5 w-3.5 text-violet-500" />Elective groups</SectionTitle>
+                    {groupTeacherError && (
+                      <div className="mb-3 rounded-lg bg-danger-bg border border-danger/20 px-3 py-2 flex items-center justify-between gap-2">
+                        <p className="text-xs text-danger">{groupTeacherError}</p>
+                        <button type="button" onClick={() => setGroupTeacherError(null)}>
+                          <X className="h-3.5 w-3.5 text-danger/60 hover:text-danger" />
+                        </button>
+                      </div>
+                    )}
                     <div className="space-y-4">
                       {(cls.electiveGroups ?? []).map((group) => (
                         <div key={group.id} className="rounded-xl border border-violet-200 bg-violet-50/30 overflow-hidden">
@@ -591,35 +717,129 @@ export default function ClassWorkspaceDrawer({
                           {/* Subjects + teacher pairings */}
                           <div className="divide-y divide-violet-100">
                             {group.members.map((member) => {
-                              const pairings = (group.classTeachers ?? group.teachers).filter(
+                              const pickerKey = `${group.id}:${member.subjectId}`;
+                              const isPickerOpen = groupTeacherPickerKey === pickerKey;
+                              const isSaving = !!groupTeacherSaving[pickerKey];
+                              const pairings = group.classTeachers.filter(
                                 (t) => t.subjectId === member.subjectId
                               );
+                              // Qualified teachers: teach this subject, not already assigned
+                              const assignedIds = new Set(pairings.map((p) => p.teacherId));
+                              const qualifiedTeachers = allStaffTeachers
+                                .filter((t) =>
+                                  t.teacherSubjects.some((ts) => ts.subject.id === member.subjectId) &&
+                                  !assignedIds.has(t.id) &&
+                                  (groupTeacherSearch === "" ||
+                                    t.fullName.toLowerCase().includes(groupTeacherSearch.toLowerCase()))
+                                );
+
                               return (
                                 <div key={member.subjectId} className="px-3 py-2.5">
-                                  <div className="flex items-center gap-2 mb-1.5">
+                                  {/* Subject name row */}
+                                  <div className="flex items-center gap-2 mb-2">
                                     <span className="font-mono text-[10px] bg-paper border border-line rounded px-1 py-0.5 text-slate shrink-0">
                                       {member.subject.code}
                                     </span>
-                                    <span className="text-sm font-medium text-ink">{member.subject.name}</span>
+                                    <span className="text-sm font-medium text-ink flex-1">{member.subject.name}</span>
+                                    {/* Add teacher button */}
+                                    <button
+                                      type="button"
+                                      disabled={isSaving}
+                                      onClick={() => {
+                                        setGroupTeacherPickerKey(isPickerOpen ? null : pickerKey);
+                                        setGroupTeacherSearch("");
+                                        setGroupTeacherError(null);
+                                      }}
+                                      className="flex items-center gap-1 text-[11px] font-medium text-violet-600 hover:text-violet-800 hover:underline disabled:opacity-40 shrink-0"
+                                    >
+                                      <Plus className="h-3 w-3" />
+                                      Add teacher
+                                    </button>
                                   </div>
+
+                                  {/* Assigned teachers list */}
                                   {pairings.length === 0 ? (
-                                    <p className="text-xs text-slate/50 italic pl-1">No teacher assigned yet.</p>
+                                    <p className="text-xs text-slate/50 italic pl-1 mb-1">No teacher assigned yet.</p>
                                   ) : (
-                                    <div className="space-y-1 pl-1">
+                                    <div className="space-y-1 pl-1 mb-1">
                                       {pairings.map((p) => (
                                         <div key={p.id} className="flex items-center gap-1.5">
                                           <UserCheck className="h-3 w-3 text-teal shrink-0" />
                                           {onOpenStaff ? (
                                             <button type="button"
                                               onClick={() => onOpenStaff(p.teacher.id, p.teacher.fullName)}
-                                              className="text-xs text-teal hover:underline flex items-center gap-0.5">
+                                              className="text-xs text-teal hover:underline flex items-center gap-0.5 flex-1">
                                               {p.teacher.fullName}<ExternalLink className="h-2.5 w-2.5" />
                                             </button>
                                           ) : (
-                                            <span className="text-xs text-slate">{p.teacher.fullName}</span>
+                                            <span className="text-xs text-slate flex-1">{p.teacher.fullName}</span>
                                           )}
+                                          <button
+                                            type="button"
+                                            disabled={isSaving}
+                                            onClick={() => removeElectiveTeacher(group.id, member.subjectId, p.teacherId)}
+                                            title="Remove teacher"
+                                            className="p-0.5 rounded text-slate/30 hover:text-danger hover:bg-danger-bg transition-colors disabled:opacity-40"
+                                          >
+                                            <X className="h-3 w-3" />
+                                          </button>
                                         </div>
                                       ))}
+                                    </div>
+                                  )}
+
+                                  {/* Teacher picker dropdown */}
+                                  {isPickerOpen && (
+                                    <div className="relative mt-1" ref={groupPickerRef}>
+                                      <div className="rounded-xl border border-violet-200 bg-white shadow-md overflow-hidden">
+                                        <div className="p-2 border-b border-violet-100">
+                                          <input
+                                            autoFocus
+                                            type="text"
+                                            placeholder={`Search teachers for ${member.subject.name}…`}
+                                            value={groupTeacherSearch}
+                                            onChange={(e) => setGroupTeacherSearch(e.target.value)}
+                                            className="w-full text-sm px-2 py-1.5 rounded-lg border border-line bg-paper outline-none focus:border-violet-400"
+                                          />
+                                        </div>
+                                        <ul className="max-h-44 overflow-y-auto">
+                                          {qualifiedTeachers.length === 0 ? (
+                                            <li className="px-3 py-3 text-xs text-slate italic text-center">
+                                              {allStaffTeachers.filter((t) =>
+                                                t.teacherSubjects.some((ts) => ts.subject.id === member.subjectId)
+                                              ).length === 0
+                                                ? `No teachers teach ${member.subject.name} yet.`
+                                                : groupTeacherSearch
+                                                  ? "No matching teachers."
+                                                  : "All qualified teachers are already assigned."}
+                                            </li>
+                                          ) : (
+                                            qualifiedTeachers.map((t) => (
+                                              <li key={t.id}>
+                                                <button
+                                                  type="button"
+                                                  disabled={isSaving}
+                                                  onClick={() => addElectiveTeacher(group.id, member.subjectId, t.id)}
+                                                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-violet-50 transition-colors disabled:opacity-50"
+                                                >
+                                                  <Avatar name={t.fullName} size="sm" />
+                                                  <span className="flex-1 font-medium text-ink truncate">{t.fullName}</span>
+                                                </button>
+                                              </li>
+                                            ))
+                                          )}
+                                        </ul>
+                                        {isSaving && (
+                                          <div className="flex items-center gap-2 px-3 py-2 text-xs text-slate border-t border-violet-100">
+                                            <Spinner size="sm" /> Saving…
+                                          </div>
+                                        )}
+                                        <div className="border-t border-violet-100 px-3 py-1.5">
+                                          <button type="button"
+                                            onClick={() => { setGroupTeacherPickerKey(null); setGroupTeacherSearch(""); }}
+                                            className="text-xs text-slate hover:text-ink">Cancel</button>
+                                        </div>
+                                      </div>
                                     </div>
                                   )}
                                 </div>
@@ -629,12 +849,6 @@ export default function ClassWorkspaceDrawer({
                         </div>
                       ))}
                     </div>
-                    <p className="mt-3 text-[10px] text-slate/50 flex items-center gap-1">
-                      Assign teachers for each subject in
-                      <a href={`${basePath}/class-profiles/${cls.id}`} className="text-violet-600 hover:underline flex items-center gap-0.5">
-                        Class Profiles <ExternalLink className="h-2.5 w-2.5" />
-                      </a>.
-                    </p>
                   </div>
                 )}
               </>
