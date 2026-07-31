@@ -208,6 +208,7 @@ function checkTeacherAssignments(
     if (!assignmentMap.has(key)) {
       const cls = input.classes.find((c) => c.id === req.classId);
       const subject = input.subjects.find((s) => s.id === req.subjectId);
+      const isElective = subject?.type === "ELECTIVE";
 
       issues.push({
         type: "MISSING_TEACHER_ASSIGNMENT",
@@ -215,7 +216,9 @@ function checkTeacherAssignments(
         message: `${cls?.name || req.classId} needs ${subject?.code || req.subjectId} but no teacher is assigned`,
         affectedSubject: req.subjectId,
         affectedClasses: [req.classId],
-        suggestedAction: "Assign a teacher to this subject for this class",
+        suggestedAction: isElective
+          ? "Open the class profile for this class and assign a teacher to this elective subject in the elective group section"
+          : "Go to Timetable → Subject Teachers and assign a teacher to this subject for this class",
       });
     }
   }

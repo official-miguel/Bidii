@@ -78,6 +78,7 @@ export async function POST(req: NextRequest) {
             id: true,
             code: true,
             name: true,
+            type: true,
             internalCode: true,
             doubleLesson: true,
             requiresSpecialRoom: true,
@@ -160,7 +161,7 @@ export async function POST(req: NextRequest) {
   // Build subject map from requirements
   const subjectMap = new Map<
     string,
-    { id: string; code: string; name: string; internalCode: number; doubleLesson: boolean; requiresSpecialRoom: string | null }
+    { id: string; code: string; name: string; type: string; internalCode: number; doubleLesson: boolean; requiresSpecialRoom: string | null }
   >();
   for (const req of requirements) {
     if (!subjectMap.has(req.subject.id)) {
@@ -188,13 +189,32 @@ export async function POST(req: NextRequest) {
 
   // ── Group-aware payload: collapse group subjects to one anchor each ────────
   const linkedClassGroupsList = buildLinkedClassGroups(electiveGroupsRaw, classesRaw);
+
+  // Build a lookup: groupId → Set of classIds that have at least one
+  // ClassElectiveGroupTeacher row for that group. Only these classes have
+  // teachers assigned and should be included in the group descriptor —
+  // scope-eligible classes without any teacher assignment are excluded so
+  // the pre-check surfaces them as missing-teacher errors rather than
+  // silently producing empty timetable slots during fan-out.
+  const groupClassesWithTeachers = new Map<string, Set<string>>();
+  for (const gt of classElectiveTeachersRaw) {
+    if (!groupClassesWithTeachers.has(gt.groupId)) {
+      groupClassesWithTeachers.set(gt.groupId, new Set());
+    }
+    groupClassesWithTeachers.get(gt.groupId)!.add(gt.classId);
+  }
+
   const groupDescriptors: GroupPayloadDescriptor[] = electiveGroupsRaw
     .filter((g) => g.members.length > 0)
     .map((g) => {
+      // A class must both be in scope AND have at least one teacher assigned
+      // in ClassElectiveGroupTeacher to participate in this group.
+      const classesWithTeachersForGroup = groupClassesWithTeachers.get(g.id) ?? new Set<string>();
       const inScope = classesRaw.filter((cls) => {
         if (g.scopeForm !== 0 && cls.form !== g.scopeForm) return false;
         if (g.scopeForm !== 0 && g.scopeStreams.length > 0 && !g.scopeStreams.includes(cls.stream ?? "")) return false;
-        return true;
+        // Only include if teachers are actually assigned for this class in this group
+        return classesWithTeachersForGroup.has(cls.id);
       });
       return {
         groupId:        g.id,
@@ -233,7 +253,7 @@ export async function POST(req: NextRequest) {
     if (!subjectMap.has(gt.subjectId)) {
       const sub = await prisma.subject.findUnique({
         where: { id: gt.subjectId },
-        select: { id: true, code: true, name: true, internalCode: true, doubleLesson: true, requiresSpecialRoom: true },
+        select: { id: true, code: true, name: true, type: true, internalCode: true, doubleLesson: true, requiresSpecialRoom: true },
       });
       if (sub) subjectMap.set(sub.id, sub);
     }
@@ -278,7 +298,7 @@ export async function POST(req: NextRequest) {
         id: s.id,
         code: s.code,
         name: s.name,
-        type: "CORE" as const,
+        type: (subjectMap.get(s.id)?.type ?? "CORE") as "CORE" | "ELECTIVE",
       })),
       classes: engineClasses,
       requirements: groupPayload.requirements,

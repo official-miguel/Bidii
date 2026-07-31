@@ -13,7 +13,8 @@ import { requireRole } from "@/lib/auth";
 import { requirePermission } from "@/lib/permissions";
 import { runPreGenerationChecks } from "@/lib/timetable/preGenerationChecks";
 import { checkFeasibility } from "@/lib/timetable/regenerationController";
-import { getLessonColumns } from "@/lib/timetable/engineHelpers";
+import { getLessonColumns, buildGroupAwarePayload } from "@/lib/timetable/engineHelpers";
+import type { GroupPayloadDescriptor } from "@/lib/timetable/engineHelpers";
 import type { TemplateColumn } from "@/lib/timetable/deterministicEngine";
 import { TimetableSession } from "@prisma/client";
 
@@ -45,6 +46,8 @@ export async function POST(req: NextRequest) {
     studentSelections,
     timetableConfig,
     sessionPreferences,
+    electiveGroupsRaw,
+    classElectiveTeachersRaw,
   ] = await Promise.all([
     prisma.schoolClass.findMany({
       where: {
@@ -62,10 +65,10 @@ export async function POST(req: NextRequest) {
             id: true,
             code: true,
             name: true,
+            type: true,
             internalCode: true,
             doubleLesson: true,
             requiresSpecialRoom: true,
-            type: true,
           },
         },
       },
@@ -95,6 +98,22 @@ export async function POST(req: NextRequest) {
     }),
     prisma.timetablePreference.findMany({
       where: { config: { schoolId } },
+    }),
+    // Elective groups — needed to collapse group subjects before pre-checking
+    prisma.electiveGroup.findMany({
+      where: { schoolId },
+      select: {
+        id: true,
+        scopeForm: true,
+        scopeStreams: true,
+        lessonsPerWeek: true,
+        members: { select: { subjectId: true } },
+      },
+    }),
+    // Per-class elective group teacher assignments
+    prisma.classElectiveGroupTeacher.findMany({
+      where: { schoolId },
+      select: { groupId: true, classId: true, subjectId: true, teacherId: true },
     }),
   ]);
 
@@ -135,10 +154,10 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Build engine inputs for feasibility check
+  // Build engine inputs
   const subjectMap = new Map<
     string,
-    { id: string; code: string; name: string; internalCode: number; doubleLesson: boolean; requiresSpecialRoom: string | null }
+    { id: string; code: string; name: string; type: string; internalCode: number; doubleLesson: boolean; requiresSpecialRoom: string | null }
   >();
   for (const req of requirements) {
     if (!subjectMap.has(req.subject.id)) {
@@ -162,13 +181,59 @@ export async function POST(req: NextRequest) {
     requiresSpecialRoom: s.requiresSpecialRoom,
   }));
 
-  const engineRequirements = requirements
+  const rawRequirements = requirements
     .filter((r) => !classIds?.length || classIds.includes(r.classId))
     .map((r) => ({
       subjectId: r.subjectId,
       classId: r.classId,
       lessonsPerWeek: r.lessonsPerWeek,
     }));
+
+  // ── Build group-aware payload (same logic as the generate route) ──────────
+  // Without this step, every elective group subject would appear as a
+  // separate requirement with no teacher → false BLOCKING errors for every
+  // class that has group teachers assigned via ClassElectiveGroupTeacher.
+  //
+  // Only include a class in a group descriptor if it actually has
+  // ClassElectiveGroupTeacher rows for that group. Scope-eligible classes
+  // without assignments are left in the raw requirements so the preCheck
+  // surfaces them as genuine missing-teacher errors.
+  const groupClassesWithTeachers = new Map<string, Set<string>>();
+  for (const gt of classElectiveTeachersRaw) {
+    if (!groupClassesWithTeachers.has(gt.groupId)) {
+      groupClassesWithTeachers.set(gt.groupId, new Set());
+    }
+    groupClassesWithTeachers.get(gt.groupId)!.add(gt.classId);
+  }
+
+  const groupDescriptors: GroupPayloadDescriptor[] = electiveGroupsRaw
+    .filter((g) => g.members.length > 0)
+    .map((g) => {
+      const classesWithTeachersForGroup = groupClassesWithTeachers.get(g.id) ?? new Set<string>();
+      const inScope = classesRaw.filter((cls) => {
+        if (g.scopeForm !== 0 && cls.form !== g.scopeForm) return false;
+        if (g.scopeForm !== 0 && g.scopeStreams.length > 0 && !g.scopeStreams.includes(cls.stream ?? "")) return false;
+        return classesWithTeachersForGroup.has(cls.id);
+      });
+      return {
+        groupId:        g.id,
+        subjectIds:     g.members.map((m) => m.subjectId),
+        lessonsPerWeek: g.lessonsPerWeek,
+        classIds:       inScope.map((c) => c.id),
+      };
+    })
+    .filter((d) => d.classIds.length >= 1);
+
+  const groupPayload = buildGroupAwarePayload(
+    rawRequirements,
+    teacherAssignments,
+    groupDescriptors,
+    classElectiveTeachersRaw,
+  );
+
+  // Use the group-collapsed requirements and merged assignments for all checks
+  const engineRequirements = groupPayload.requirements;
+  const mergedTeacherAssignments = groupPayload.teacherAssignments;
 
   const studentSelectionsInput = studentSelections.map((sel) => ({
     studentId: sel.studentId,
@@ -184,36 +249,45 @@ export async function POST(req: NextRequest) {
       isHard: p.isHard,
     }));
 
-  // Load teacher info for feasibility
-  const teacherIds = [...new Set(teacherAssignments.map((a) => a.teacherId))];
+  // Load teacher info — include group teachers
+  const allTeacherIds = [
+    ...new Set([
+      ...teacherAssignments.map((a) => a.teacherId),
+      ...classElectiveTeachersRaw.map((g) => g.teacherId),
+    ]),
+  ];
   const teachersRaw = await prisma.teacher.findMany({
-    where: { id: { in: teacherIds } },
+    where: { id: { in: allTeacherIds } },
     select: { id: true, fullName: true },
   });
 
-  // Run pre-generation checks (stream balance, teacher assignments, capacity)
+  // Deduplicate subjects for the preCheck — use the subjectMap which has type
+  const subjectsForCheck = Array.from(subjectMap.values()).map((s) => ({
+    id: s.id,
+    code: s.code,
+    name: s.name,
+    type: (s.type ?? "CORE") as "CORE" | "ELECTIVE",
+  }));
+
+  // Run pre-generation checks against the collapsed requirements and merged
+  // teacher assignments so elective group subjects are correctly accounted for
   const preCheck = runPreGenerationChecks({
-    subjects: requirements.map((r) => ({
-      id: r.subject.id,
-      code: r.subject.code,
-      name: r.subject.name,
-      type: r.subject.type as "CORE" | "ELECTIVE",
-    })),
+    subjects: subjectsForCheck,
     classes: engineClasses,
     requirements: engineRequirements,
-    teacherAssignments,
+    teacherAssignments: mergedTeacherAssignments,
     studentSelections: studentSelectionsInput,
     templateColumns: lessonColumns.length,
     operatingDays: timetableConfig.operatingDays,
   });
 
-  // Run feasibility check (capacity math)
+  // Run feasibility check (capacity math) against the same collapsed data
   const feasibility = checkFeasibility({
     classes: engineClasses,
     subjects: engineSubjects,
     teachers: teachersRaw.map((t) => ({ id: t.id, name: t.fullName })),
     requirements: engineRequirements,
-    teacherAssignments,
+    teacherAssignments: mergedTeacherAssignments,
     teacherUnavailability,
     studentSelections: studentSelectionsInput,
     sessionPreferences: sessionPrefs,
