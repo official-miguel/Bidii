@@ -47,6 +47,7 @@ model School {
   disciplineRecords        DisciplineRecord[]
   achievements             Achievement[]
   studentFiles             StudentFile[]
+  classSubjectProfiles     ClassSubjectProfile[]
   /// Assessment framework models
   assessmentFrameworks     AssessmentFramework[]
   assessmentPeriods        AssessmentPeriod[]
@@ -235,6 +236,8 @@ model Subject {
   timetableSlots      TimetableSlot[]
   /// Per-class lesson requirements
   lessonRequirements  SubjectLessonRequirement[]
+  /// Per-class subject type overrides (class profile)
+  classSubjectProfiles ClassSubjectProfile[]
 
   @@unique([schoolId, code])
   @@unique([schoolId, internalCode])
@@ -462,6 +465,8 @@ model SchoolClass {
   students           Student[]
   timetableSlots     TimetableSlot[]
   lessonRequirements SubjectLessonRequirement[]
+  /// Per-class subject type overrides (class profile)
+  classSubjectProfiles ClassSubjectProfile[]
 
   @@unique([schoolId, name])
   @@index([schoolId, form])
@@ -630,6 +635,29 @@ model SubjectLessonRequirement {
   @@index([schoolId])
   @@index([subjectId])
   @@index([classId])
+}
+
+/// Per-class subject type override. When a subject is ELECTIVE globally but
+/// should be treated as CORE for a specific class (or vice-versa), a row is
+/// created here. Absence of a row means the subject's global type applies.
+/// One row per (class, subject) pair, scoped to a school.
+model ClassSubjectProfile {
+  id        String      @id @default(cuid())
+  schoolId  String
+  classId   String
+  subjectId String
+  /// The type this subject takes within this specific class
+  type      SubjectType
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  school    School      @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  class     SchoolClass @relation(fields: [classId], references: [id], onDelete: Cascade)
+  subject   Subject     @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([classId, subjectId], name: "classId_subjectId")
+  @@index([schoolId])
+  @@index([classId])
+  @@index([subjectId])
 }
 
 /// AI-translated natural language preferences stored as structured constraints

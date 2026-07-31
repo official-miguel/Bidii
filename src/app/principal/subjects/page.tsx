@@ -30,18 +30,16 @@ type Subject = {
   type: "CORE" | "ELECTIVE";
   applicableForms: number[];
   department: Department;
-  lessonsPerWeek: number;
-  doubleLesson: boolean;
-  requiresSpecialRoom: string | null;
   _count: { teacherSubjects: number };
 };
 
-const FORMS = [1, 2, 3, 4, 5, 6];
+type SchoolClass = { id: string; name: string; form: number };
 
 export default function SubjectsPage() {
   const [subjects, setSubjects] = useState<Subject[] | null>(null);
   const [loading,  setLoading]  = useState(true);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [classes, setClasses] = useState<SchoolClass[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Subject | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,13 +64,16 @@ export default function SubjectsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [subjRes, deptRes] = await Promise.all([
+      const [subjRes, deptRes, classRes] = await Promise.all([
         fetch("/api/subjects"),
         fetch("/api/departments"),
+        fetch("/api/classes"),
       ]);
       const freshSubjects = await subjRes.json();
       setSubjects(freshSubjects);
       setDepartments(await deptRes.json());
+      const freshClasses: SchoolClass[] = classRes.ok ? await classRes.json() : [];
+      setClasses(freshClasses);
     } finally {
       setLoading(false);
     }
@@ -111,9 +112,6 @@ export default function SubjectsPage() {
       type: form.get("type") as string,
       departmentId: form.get("departmentId") as string,
       applicableForms: selectedForms,
-      lessonsPerWeek: Number(form.get("lessonsPerWeek")) || 5,
-      doubleLesson: form.get("doubleLesson") === "on",
-      requiresSpecialRoom: (form.get("requiresSpecialRoom") as string) || "",
     };
 
     if (selectedForms.length === 0) {
@@ -216,17 +214,20 @@ export default function SubjectsPage() {
       ) : (
         <div className="bg-white border border-line rounded-xl overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[700px]">
+            <table className="w-full text-sm">
               <thead className="sticky top-0 z-10">
                 <tr className="border-b border-line bg-slate-50/80 text-left text-xs font-semibold text-slate uppercase tracking-wide">
-                  <th className="px-5 py-3.5">Subject</th>
-                  <th className="px-5 py-3.5 w-[90px]">Code</th>
-                  <th className="px-5 py-3.5 w-[100px]">Type</th>
-                  <th className="px-5 py-3.5 hidden md:table-cell">Department</th>
-                  <th className="px-5 py-3.5 w-[100px]">Forms</th>
-                  <th className="px-5 py-3.5 w-[110px] hidden lg:table-cell">Periods/wk</th>
-                  <th className="px-5 py-3.5 w-[90px] hidden lg:table-cell">Teachers</th>
-                  <th className="px-5 py-3.5 w-[80px]" />
+                  <th className="px-4 py-3.5">Subject</th>
+                  <th className="px-4 py-3.5 w-[80px] hidden sm:table-cell">Code</th>
+                  <th className="px-4 py-3.5 w-[100px]">Type</th>
+                  <th className="px-4 py-3.5 hidden md:table-cell">Department</th>
+                  <th className="px-4 py-3.5 w-[110px] hidden sm:table-cell">Forms</th>
+                  <th className="px-4 py-3.5 w-[80px] hidden lg:table-cell">Teachers</th>
+                  {/* Actions column — always visible, sticky on the right so it
+                      never scrolls off screen on narrow viewports */}
+                  <th className="px-4 py-3.5 w-[88px] sticky right-0 bg-slate-50/80 text-right">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -239,22 +240,33 @@ export default function SubjectsPage() {
                     return true;
                   })
                   .map((s) => (
-                  <tr key={s.id} className="group border-b border-line last:border-0 hover:bg-slate-50/50 transition-colors cursor-pointer" onClick={() => openSubjDrawer(s.id)}>
-                    <td className="px-5 py-3.5">
+                  <tr
+                    key={s.id}
+                    className="group border-b border-line last:border-0 hover:bg-slate-50/50 transition-colors cursor-pointer"
+                    onClick={() => openSubjDrawer(s.id)}
+                  >
+                    <td className="px-4 py-3.5">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-ink group-hover:text-teal transition-colors">{s.name}</span>
-                        <ExternalLink className="h-3.5 w-3.5 text-slate/30 group-hover:text-teal transition-colors shrink-0" />
+                        <ExternalLink className="h-3.5 w-3.5 text-slate/30 group-hover:text-teal transition-colors shrink-0 hidden sm:block" />
+                      </div>
+                      {/* On mobile, show code + forms inline under the name */}
+                      <div className="flex flex-wrap items-center gap-1.5 mt-0.5 sm:hidden">
+                        <span className="text-xs font-mono text-slate bg-slate-50 border border-line rounded px-1 py-0.5">{s.code}</span>
+                        {s.applicableForms.sort((a, b) => a - b).map(f => (
+                          <Chip key={f} variant="default" size="xs">F{f}</Chip>
+                        ))}
                       </div>
                     </td>
-                    <td className="px-5 py-3.5">
+                    <td className="px-4 py-3.5 hidden sm:table-cell">
                       <span className="text-xs font-mono text-slate bg-slate-50 border border-line rounded px-1.5 py-0.5">{s.code}</span>
                     </td>
-                    <td className="px-5 py-3.5">
+                    <td className="px-4 py-3.5">
                       <Chip variant={s.type === "CORE" ? "success" : "warn"} size="xs">
                         {s.type === "CORE" ? "Core" : "Elective"}
                       </Chip>
                     </td>
-                    <td className="px-5 py-3.5 hidden md:table-cell" onClick={(e) => e.stopPropagation()}>
+                    <td className="px-4 py-3.5 hidden md:table-cell" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
                         onClick={() => openDeptDrawer(s.department.id)}
@@ -264,26 +276,33 @@ export default function SubjectsPage() {
                         <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-60" />
                       </button>
                     </td>
-                    <td className="px-5 py-3.5">
+                    <td className="px-4 py-3.5 hidden sm:table-cell">
                       <div className="flex flex-wrap gap-0.5">
                         {s.applicableForms.sort((a, b) => a - b).map(f => (
                           <Chip key={f} variant="default" size="xs">F{f}</Chip>
                         ))}
                       </div>
                     </td>
-                    <td className="px-5 py-3.5 hidden lg:table-cell">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-sm text-slate tabular-nums">{s.lessonsPerWeek}</span>
-                        {s.doubleLesson && <Chip variant="info" size="xs">double</Chip>}
-                      </div>
-                    </td>
-                    <td className="px-5 py-3.5 hidden lg:table-cell">
+                    <td className="px-4 py-3.5 hidden lg:table-cell">
                       <span className="text-sm text-slate tabular-nums">{s._count.teacherSubjects}</span>
                     </td>
-                    <td className="px-5 py-3.5" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <ActionIconButton icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536M9 13l6.5-6.5a2 2 0 012.828 2.828L11.828 15.828a2 2 0 01-1.414.586H8v-2.414a2 2 0 01.586-1.414z" /></svg>} label="Edit" onClick={() => openEdit(s)} />
-                        <ActionIconButton icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" /></svg>} label="Delete" variant="danger" onClick={() => handleDelete(s)} />
+                    {/* Sticky actions cell — always visible */}
+                    <td
+                      className="px-4 py-3.5 sticky right-0 bg-white group-hover:bg-slate-50/50 transition-colors"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="flex items-center justify-end gap-0.5">
+                        <ActionIconButton
+                          icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536M9 13l6.5-6.5a2 2 0 012.828 2.828L11.828 15.828a2 2 0 01-1.414.586H8v-2.414a2 2 0 01.586-1.414z" /></svg>}
+                          label="Edit"
+                          onClick={() => openEdit(s)}
+                        />
+                        <ActionIconButton
+                          icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" /></svg>}
+                          label="Delete"
+                          variant="danger"
+                          onClick={() => handleDelete(s)}
+                        />
                       </div>
                     </td>
                   </tr>
@@ -295,7 +314,11 @@ export default function SubjectsPage() {
       )}
 
       {modalOpen && (
-        <Modal title={editing ? "Edit subject" : "Add subject"} onClose={() => setModalOpen(false)}>
+        <Modal
+          key={editing?.id ?? "new"}
+          title={editing ? "Edit subject" : "Add subject"}
+          onClose={() => setModalOpen(false)}
+        >
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && <ErrorBanner message={error} />}
             <div className="grid grid-cols-2 gap-3">
@@ -324,11 +347,17 @@ export default function SubjectsPage() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className={labelClass}>Type</label>
+                <label className={labelClass}>Default type</label>
                 <select name="type" defaultValue={editing?.type || "CORE"} className={inputClass}>
                   <option value="CORE">Core (compulsory)</option>
                   <option value="ELECTIVE">Elective</option>
                 </select>
+                <p className="text-xs text-slate mt-1.5">
+                  School-wide default. Override per form in{" "}
+                  <Link href="/principal/class-profiles" className="text-teal hover:underline">
+                    Class Profiles
+                  </Link>.
+                </p>
               </div>
               <div>
                 <label className={labelClass}>Department</label>
@@ -352,66 +381,32 @@ export default function SubjectsPage() {
 
             <div>
               <label className={labelClass}>Applies to forms</label>
-              <div className="flex flex-wrap gap-2">
-                {FORMS.map((f) => (
-                  <button
-                    type="button"
-                    key={f}
-                    onClick={() => toggleForm(f)}
-                    className={`text-sm rounded-md border px-3 py-1.5 min-h-[44px] sm:min-h-0 transition-colors ${
-                      selectedForms.includes(f)
-                        ? "bg-teal text-white border-teal"
-                        : "border-line text-ink hover:bg-paper"
-                    }`}
-                  >
-                    Form {f}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="border-t border-line pt-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate mb-3">
-                AI Timetable Generator inputs
-              </p>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelClass}>Periods per week</label>
-                  <input
-                    name="lessonsPerWeek"
-                    type="number"
-                    min={1}
-                    max={20}
-                    defaultValue={editing?.lessonsPerWeek ?? 5}
-                    className={inputClass}
-                  />
+              {classes.length === 0 ? (
+                <p className="text-xs text-slate mt-1">
+                  No classes found.{" "}
+                  <Link href="/principal/classes" className="text-teal underline">
+                    Add classes first
+                  </Link>{" "}
+                  to select which forms this subject applies to.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {[...new Set(classes.map((c) => c.form))].sort((a, b) => a - b).map((f) => (
+                    <button
+                      type="button"
+                      key={f}
+                      onClick={() => toggleForm(f)}
+                      className={`text-sm rounded-md border px-3 py-1.5 min-h-[44px] sm:min-h-0 transition-colors ${
+                        selectedForms.includes(f)
+                          ? "bg-teal text-white border-teal"
+                          : "border-line text-ink hover:bg-paper"
+                      }`}
+                    >
+                      Form {f}
+                    </button>
+                  ))}
                 </div>
-                <div>
-                  <label className={labelClass}>Special room (optional)</label>
-                  <input
-                    name="requiresSpecialRoom"
-                    defaultValue={editing?.requiresSpecialRoom || ""}
-                    placeholder="e.g. Lab, Computer Lab"
-                    className={inputClass}
-                  />
-                </div>
-              </div>
-              <label className="flex items-center gap-2 text-sm text-ink mt-3">
-                <input
-                  type="checkbox"
-                  name="doubleLesson"
-                  defaultChecked={editing?.doubleLesson ?? false}
-                  className="rounded border-line"
-                />
-                Schedule as consecutive double lessons
-              </label>
-              <p className="text-xs text-slate mt-2">
-                Used when generating a timetable with AI — see{" "}
-                <Link href="/principal/timetable" className="underline">
-                  Timetable
-                </Link>
-                .
-              </p>
+              )}
             </div>
 
             <div className="flex justify-end gap-2 pt-2">

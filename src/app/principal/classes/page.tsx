@@ -229,7 +229,7 @@ export default function ClassesPage() {
                     </td>
                     {/* Actions */}
                     <td className="px-5 py-3.5" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center justify-end gap-0.5">
                         <Link href={`/principal/timetable?classId=${c.id}`}>
                           <ActionIconButton
                             icon={<CalendarDays className="h-4 w-4" />}

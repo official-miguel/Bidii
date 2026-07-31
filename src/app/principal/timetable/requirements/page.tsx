@@ -343,7 +343,19 @@ export default function RequirementsPage() {
     return map;
   }, [classes]);
 
-  const totalRequired = Object.values(draft).reduce((s, v) => s + v.lessonsPerWeek, 0);
+  // Individual subjects: sum their lessonsPerWeek from draft, excluding absorbed ones
+  // Group subjects: each group counts once (its lessonsPerWeek), not once per member
+  const totalRequired = useMemo(() => {
+    const absorbedIds = new Set(groups.flatMap((g) => g.members.map((m) => m.subjectId)));
+    const individualTotal = Object.entries(draft)
+      .filter(([subjectId]) => !absorbedIds.has(subjectId))
+      .reduce((s, [, v]) => s + v.lessonsPerWeek, 0);
+    // Groups with at least one member each count as their lessonsPerWeek once
+    const groupTotal = groups
+      .filter((g) => g.members.length > 0)
+      .reduce((s, g) => s + g.lessonsPerWeek, 0);
+    return individualTotal + groupTotal;
+  }, [draft, groups]);
 
   const selectionForm  = selection?.startsWith("form-") ? Number(selection.replace("form-", "")) : null;
   const selectionClass = selection && !selection.startsWith("form-") ? classes.find((c) => c.id === selection) : null;
@@ -428,11 +440,21 @@ export default function RequirementsPage() {
             Requirements differ per class — 8-4-4, CBC, and CBE have different lesson counts.
           </p>
           <button type="button" onClick={handleAutoPopulate} disabled={autoPopulating}
-            className={secondaryButtonClass}>
+            className={secondaryButtonClass}
+            title="Distribute the available weekly lesson slots evenly across all subjects per class, so each class's total lessons exactly fill its timetable slots.">
             {autoPopulating
               ? <><RefreshCw className="h-4 w-4 animate-spin" />Auto-populating…</>
               : <><Wand2 className="h-4 w-4" />Auto-populate from subjects</>}
           </button>
+        </div>
+        {/* Auto-populate explanation */}
+        <div className="rounded-lg border border-line bg-paper px-4 py-2.5 flex gap-2 text-xs text-slate">
+          <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-slate/60" />
+          <span>
+            <strong className="text-ink">Auto-populate</strong> reads your timetable template (lesson slots × operating days)
+            and distributes those slots evenly across each class&apos;s subjects — so every lesson slot is accounted for.
+            Double-lesson subjects receive twice the allocation. Existing requirements are not overwritten.
+          </span>
         </div>
 
         {classes.length === 0 ? (
@@ -510,7 +532,14 @@ export default function RequirementsPage() {
                         <p className="text-xs text-slate mt-0.5">
                           {selectionForm != null
                             ? `Sets requirements for all ${classesByForm.get(selectionForm)?.length ?? 0} streams in Form ${selectionForm}`
-                            : `${Object.keys(draft).length} subjects · ${totalRequired} lessons/week total`}
+                            : (() => {
+                                // Count: individual non-absorbed subjects + groups (as 1 each)
+                                const absorbedIds = new Set(groups.flatMap((g) => g.members.map((m) => m.subjectId)));
+                                const indivCount = Object.keys(draft).filter((id) => !absorbedIds.has(id)).length;
+                                const groupCount = groups.filter((g) => g.members.length > 0).length;
+                                const subjectCount = indivCount + groupCount;
+                                return `${subjectCount} subject${subjectCount !== 1 ? "s" : ""} · ${totalRequired} lessons/week total`;
+                              })()}
                         </p>
                       </div>
                     </div>

@@ -46,7 +46,6 @@ const updateSchema = z.object({
   fullName: z.string().trim().min(2).optional(),
   email: z.string().trim().email().optional().or(z.literal("")),
   phone: z.string().trim().optional().or(z.literal("")),
-  designation: z.string().trim().max(100).nullable().optional().or(z.literal("")),
   primaryDepartmentId: z.string().nullable().optional(),
   todEligible: z.boolean().optional(),
   subjectIds: z.array(z.string()).optional(),
@@ -96,6 +95,19 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
           data: subjectIds.map((subjectId) => ({ teacherId: params.id, subjectId })),
           skipDuplicates: true,
         });
+
+        // Auto-derive primaryDepartmentId from the updated subject list.
+        // Only applies to teaching staff (no staffRoleId on the teacher record).
+        if (subjectIds.length > 0 && !staffRoleId) {
+          const firstSubject = await tx.subject.findFirst({
+            where: { id: { in: subjectIds }, schoolId: existing.schoolId },
+            select: { departmentId: true },
+            orderBy: { name: "asc" },
+          });
+          if (firstSubject?.departmentId) {
+            rest.primaryDepartmentId = firstSubject.departmentId;
+          }
+        }
       }
       if (staffRoleId !== undefined && existing.userId) {
         await tx.user.update({
@@ -107,9 +119,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         where: { id: params.id },
         data: {
           ...rest,
-          email:       rest.email       === "" ? null : rest.email,
-          phone:       rest.phone       === "" ? null : rest.phone,
-          designation: rest.designation === "" ? null : rest.designation,
+          email: rest.email === "" ? null : rest.email,
+          phone: rest.phone === "" ? null : rest.phone,
         },
         include: {
           user: { select: { role: true, staffRole: { select: { id: true, name: true } } } },
