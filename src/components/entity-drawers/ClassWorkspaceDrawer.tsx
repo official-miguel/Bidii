@@ -13,12 +13,12 @@
  * Clicking a student navigates to their profile page.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import SlideOver from "@/components/workspace/SlideOver";
 import { Avatar, Chip, Spinner } from "@/components/ui";
 import {
   Users, BookOpen, CalendarDays, ClipboardList,
-  ExternalLink, XCircle, UserCheck,
+  ExternalLink, XCircle, UserCheck, Pencil, ChevronDown,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -38,6 +38,12 @@ interface ClassDetail {
     teacher: { id: string; fullName: string };
   }[];
   _count: { students: number };
+}
+
+interface StaffOption {
+  id: string;
+  fullName: string;
+  staffId: string;
 }
 
 interface Props {
@@ -79,9 +85,18 @@ export default function ClassWorkspaceDrawer({
   onOpenSubject,
   basePath = "/principal",
 }: Props) {
-  const [cls, setCls]     = useState<ClassDetail | null>(null);
+  const [cls, setCls]         = useState<ClassDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
+
+  // Class teacher assign / reassign state
+  const [staffOptions, setStaffOptions]             = useState<StaffOption[]>([]);
+  const [assigningTeacher, setAssigningTeacher]     = useState(false);
+  const [teacherPickerOpen, setTeacherPickerOpen]   = useState(false);
+  const [teacherSearch, setTeacherSearch]           = useState("");
+  const [teacherSaving, setTeacherSaving]           = useState(false);
+  const [teacherError, setTeacherError]             = useState<string | null>(null);
+  const teacherPickerRef                            = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open || !classId) return;
@@ -95,6 +110,66 @@ export default function ClassWorkspaceDrawer({
       .catch((e) => setError(e.message || "Couldn't load class details."))
       .finally(() => setLoading(false));
   }, [open, classId]);
+
+  // Reset picker when drawer closes
+  useEffect(() => {
+    if (!open) {
+      setAssigningTeacher(false);
+      setTeacherPickerOpen(false);
+      setTeacherSearch("");
+      setTeacherError(null);
+    }
+  }, [open]);
+
+  // Fetch staff list when entering assign mode
+  useEffect(() => {
+    if (!assigningTeacher || staffOptions.length > 0) return;
+    fetch("/api/staff")
+      .then((r) => r.json())
+      .then((data: StaffOption[]) => setStaffOptions(data))
+      .catch(() => setTeacherError("Couldn't load staff list."));
+  }, [assigningTeacher, staffOptions.length]);
+
+  // Close picker on outside click
+  useEffect(() => {
+    if (!teacherPickerOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (teacherPickerRef.current && !teacherPickerRef.current.contains(e.target as Node)) {
+        setTeacherPickerOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [teacherPickerOpen]);
+
+  async function saveClassTeacher(teacherId: string | null) {
+    if (!classId || !cls) return;
+    setTeacherSaving(true);
+    setTeacherError(null);
+    try {
+      const res = await fetch(`/api/classes/${classId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ classTeacherId: teacherId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Couldn't update class teacher.");
+      // Refresh the drawer
+      const refreshed = await fetch(`/api/classes/${classId}/detail`).then((r) => r.json());
+      if (!refreshed.error) setCls(refreshed);
+      setAssigningTeacher(false);
+      setTeacherSearch("");
+    } catch (e) {
+      setTeacherError((e as Error).message);
+    } finally {
+      setTeacherSaving(false);
+    }
+  }
+
+  const filteredStaff = staffOptions.filter((s) =>
+    s.fullName.toLowerCase().includes(teacherSearch.toLowerCase()) ||
+    s.staffId.toLowerCase().includes(teacherSearch.toLowerCase())
+  );
 
   return (
     <SlideOver
@@ -149,33 +224,133 @@ export default function ClassWorkspaceDrawer({
 
           {/* ── Class teacher ── */}
           <div className="bg-white border border-line rounded-xl p-5">
-            <SectionTitle>
-              <UserCheck className="h-3.5 w-3.5" />
-              Class teacher
-            </SectionTitle>
-            {cls.classTeacher ? (
-              <div className="flex items-center gap-3">
-                <Avatar name={cls.classTeacher.fullName} size="md" />
-                <div className="flex-1 min-w-0">
-                  {onOpenStaff ? (
-                    <button
-                      type="button"
-                      onClick={() => onOpenStaff(cls.classTeacher!.id, cls.classTeacher!.fullName)}
-                      className="text-sm font-medium text-teal hover:underline flex items-center gap-1"
-                    >
-                      {cls.classTeacher.fullName}
-                      <ExternalLink className="h-3 w-3" />
-                    </button>
-                  ) : (
-                    <p className="text-sm font-medium text-ink">{cls.classTeacher.fullName}</p>
-                  )}
-                  {cls.classTeacher.email && (
-                    <p className="text-xs text-slate truncate">{cls.classTeacher.email}</p>
+            <div className="flex items-center justify-between mb-3">
+              <SectionTitle>
+                <UserCheck className="h-3.5 w-3.5" />
+                Class teacher
+              </SectionTitle>
+              {!assigningTeacher && (
+                <button
+                  type="button"
+                  onClick={() => setAssigningTeacher(true)}
+                  className="flex items-center gap-1 text-xs text-teal hover:underline"
+                >
+                  <Pencil className="h-3 w-3" />
+                  {cls.classTeacher ? "Reassign" : "Assign"}
+                </button>
+              )}
+            </div>
+
+            {/* Current class teacher display */}
+            {!assigningTeacher && (
+              cls.classTeacher ? (
+                <div className="flex items-center gap-3">
+                  <Avatar name={cls.classTeacher.fullName} size="md" />
+                  <div className="flex-1 min-w-0">
+                    {onOpenStaff ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenStaff(cls.classTeacher!.id, cls.classTeacher!.fullName)}
+                        className="text-sm font-medium text-teal hover:underline flex items-center gap-1"
+                      >
+                        {cls.classTeacher.fullName}
+                        <ExternalLink className="h-3 w-3" />
+                      </button>
+                    ) : (
+                      <p className="text-sm font-medium text-ink">{cls.classTeacher.fullName}</p>
+                    )}
+                    {cls.classTeacher.email && (
+                      <p className="text-xs text-slate truncate">{cls.classTeacher.email}</p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-slate italic">No class teacher assigned yet.</p>
+              )
+            )}
+
+            {/* Assign / reassign picker */}
+            {assigningTeacher && (
+              <div className="space-y-3">
+                <div className="relative" ref={teacherPickerRef}>
+                  <button
+                    type="button"
+                    onClick={() => setTeacherPickerOpen((v) => !v)}
+                    className="w-full flex items-center justify-between gap-2 rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink hover:border-teal transition-colors"
+                  >
+                    <span className="truncate">
+                      {teacherSearch || "Search staff…"}
+                    </span>
+                    <ChevronDown className="h-4 w-4 text-slate shrink-0" />
+                  </button>
+                  {teacherPickerOpen && (
+                    <div className="absolute z-50 mt-1 w-full rounded-xl border border-line bg-white shadow-lg overflow-hidden">
+                      <div className="p-2 border-b border-line">
+                        <input
+                          autoFocus
+                          value={teacherSearch}
+                          onChange={(e) => setTeacherSearch(e.target.value)}
+                          placeholder="Search by name or staff ID…"
+                          className="w-full text-sm px-2 py-1.5 rounded-lg border border-line bg-paper outline-none focus:border-teal"
+                        />
+                      </div>
+                      <ul className="max-h-48 overflow-y-auto">
+                        {filteredStaff.length === 0 ? (
+                          <li className="px-3 py-2 text-sm text-slate italic">No staff found.</li>
+                        ) : (
+                          filteredStaff.map((s) => (
+                            <li key={s.id}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setTeacherSearch(s.fullName);
+                                  setTeacherPickerOpen(false);
+                                  saveClassTeacher(s.id);
+                                }}
+                                className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-paper transition-colors"
+                              >
+                                <Avatar name={s.fullName} size="sm" />
+                                <span className="flex-1 font-medium text-ink truncate">{s.fullName}</span>
+                                <span className="text-xs text-slate font-mono shrink-0">{s.staffId}</span>
+                              </button>
+                            </li>
+                          ))
+                        )}
+                      </ul>
+                      {cls.classTeacher && (
+                        <div className="border-t border-line p-2">
+                          <button
+                            type="button"
+                            onClick={() => { setTeacherPickerOpen(false); saveClassTeacher(null); }}
+                            className="w-full text-xs text-danger hover:underline py-1"
+                          >
+                            Remove class teacher assignment
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
+
+                {teacherSaving && (
+                  <div className="flex items-center gap-2 text-sm text-slate">
+                    <Spinner size="sm" /> Saving…
+                  </div>
+                )}
+                {teacherError && (
+                  <p className="text-xs text-danger">{teacherError}</p>
+                )}
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setAssigningTeacher(false); setTeacherSearch(""); setTeacherError(null); }}
+                    className="text-xs text-slate hover:text-ink"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
-            ) : (
-              <p className="text-sm text-slate italic">No class teacher assigned yet.</p>
             )}
           </div>
 

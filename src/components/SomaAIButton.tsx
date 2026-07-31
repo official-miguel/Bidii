@@ -3,21 +3,13 @@
 /**
  * src/components/SomaAIButton.tsx
  *
- * Soma AI floating action button (FAB) — the persistent entry point to the
- * assistant, visible on every authenticated page.
- *
- * Positioning:
- *   - Desktop (md+):  fixed bottom-right, above any page scrollbar
- *                     right-6 bottom-6, no conflict with sidebar (sidebar is
- *                     left-side icon rail)
- *   - Mobile:         same bottom-right corner, slightly smaller tap target
- *                     stays above the browser chrome bottom bar via pb-safe
+ * Soma AI floating action button (FAB).
  *
  * States:
- *   - Default:  gradient teal button with Soma sparkle icon + "Soma AI" label
- *   - Open:     X icon, muted surface colour (panel is visible)
- *   - Streaming: pulse ring to indicate activity
- *   - Hover:    lift + shadow
+ *   - Idle:      small icon-only circle (Sparkles) — minimal footprint, won't
+ *                block content. "Soma" tooltip appears on hover.
+ *   - Open:      expands to show "Soma  ✕" label so the user can close it.
+ *   - Streaming: pulse ring on the idle circle to signal activity.
  */
 
 import { Sparkles, X } from "lucide-react";
@@ -39,24 +31,23 @@ export default function SomaAIButton({ isOpen, onClick }: Props) {
       aria-label={isOpen ? "Close Soma AI" : "Open Soma AI"}
       aria-expanded={isOpen}
       aria-haspopup="dialog"
+      title={isOpen ? undefined : "Soma AI"}
       className={`
         fixed z-40
-        bottom-6 right-6
-        sm:bottom-6 sm:right-6
-        flex items-center gap-2.5
-        h-12 pl-3.5 pr-4
+        bottom-5 right-5
+        flex items-center
         rounded-full
-        shadow-lg hover:shadow-xl
+        shadow-md hover:shadow-lg
         transition-all duration-200
         select-none
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2
         ${isOpen
-          ? "bg-white border border-line text-slate hover:text-ink dark:bg-dark-surface dark:border-dark-border dark:text-dark-muted dark:hover:text-dark-text"
-          : "bg-gradient-to-br from-teal to-teal-dark text-white hover:-translate-y-0.5"
+          ? "gap-2 h-9 pl-3 pr-3.5 bg-white border border-line text-slate hover:text-ink dark:bg-dark-surface dark:border-dark-border dark:text-dark-muted dark:hover:text-dark-text"
+          : "h-10 w-10 justify-center bg-gradient-to-br from-teal to-teal-dark text-white hover:-translate-y-0.5"
         }
       `}
     >
-      {/* Streaming pulse ring */}
+      {/* Streaming pulse ring — idle only */}
       {isStreaming && !isOpen && (
         <span
           className="absolute inset-0 rounded-full border-2 border-teal-light animate-soma-pulse"
@@ -65,12 +56,9 @@ export default function SomaAIButton({ isOpen, onClick }: Props) {
       )}
 
       {/* Icon */}
-      <span
-        className={`w-5 h-5 flex items-center justify-center shrink-0
-                    transition-transform duration-200 ${isOpen ? "rotate-0" : ""}`}
-      >
+      <span className="w-4 h-4 flex items-center justify-center shrink-0">
         {isOpen ? (
-          <X className="w-4 h-4" />
+          <X className="w-3.5 h-3.5" />
         ) : (
           <Sparkles
             className={`w-4 h-4 ${isStreaming ? "animate-soma-spin" : ""}`}
@@ -78,10 +66,12 @@ export default function SomaAIButton({ isOpen, onClick }: Props) {
         )}
       </span>
 
-      {/* Label */}
-      <span className="text-sm font-semibold leading-none tracking-tight">
-        {isOpen ? "Close" : "Soma AI"}
-      </span>
+      {/* Label — only visible when open */}
+      {isOpen && (
+        <span className="text-xs font-semibold leading-none tracking-tight">
+          Soma
+        </span>
+      )}
     </button>
   );
 }
