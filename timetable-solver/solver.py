@@ -104,6 +104,23 @@ class TemplateColumn(BaseModel):
     label: Optional[str] = None
 
 
+class LinkedClassGroup(BaseModel):
+    """
+    Hard co-scheduling constraint.
+
+    Every class in ``classIds`` must have every subject in ``subjectIds``
+    scheduled at the **same** (dayOfWeek, period).  This is used for elective
+    / group subjects where students move between streams and therefore all
+    streams must run the lesson simultaneously.
+
+    The constraint is implemented as a pair-wise equality:
+        x[c1, sid, d, p] == x[c2, sid, d, p]   for all c1≠c2, d, p
+    which means the solver is forced to choose the same slot for every class.
+    """
+    subjectIds: list[str]
+    classIds: list[str]
+
+
 class SolverRequest(BaseModel):
     subjects: list[Subject]
     classes: list[SchoolClass]
@@ -116,6 +133,7 @@ class SolverRequest(BaseModel):
     operatingDays: list[int]
     maxLessonsPerTeacherPerDay: int = 6
     timeLimitSeconds: float = 60.0
+    linkedClassGroups: list[LinkedClassGroup] = Field(default_factory=list)
 
 
 class GeneratedSlot(BaseModel):
@@ -374,6 +392,113 @@ def _solve(req: SolverRequest) -> SolverResponse:
         cap = effective_cap_for.get(tid, req.maxLessonsPerTeacherPerDay)
         model.add(sum(v * w for v, w in wvars) <= cap)
 
+    # ── 8b. Hard group synchronisation ───────────────────────────────────
+    #
+    # For every LinkedClassGroup, every subject in the group must land on
+    # the SAME (day_index, period) for ALL classes in the group.
+    #
+    # Implementation strategy (pairwise equality):
+    #   Pick the first class in the group as the "anchor".  For every other
+    #   class c2 and every (d_idx, p), enforce:
+    #       x[anchor, sid, d_idx, p] == x[c2, sid, d_idx, p]
+    #
+    #   CP-SAT does not have a direct == constraint between two BoolVars, but
+    #   it does support:
+    #       a.implies(b)  AND  b.implies(a)
+    #   which is logically equivalent to a == b for BoolVars.
+    #
+    #   If a variable does not exist for a particular (class, subject, d, p)
+    #   slot — because the teacher is unavailable or the subject is not
+    #   required for that class — we treat its value as 0 (False).  In that
+    #   case we add:
+    #       anchor_var == 0  (i.e. the anchor must also be 0 there)
+    #   to keep both sides equal.  This can make a group infeasible if one
+    #   class has no viable slots and another does; we detect and warn rather
+    #   than crashing.
+
+    for grp in req.linkedClassGroups:
+        if len(grp.classIds) < 2:
+            continue  # nothing to synchronise
+
+        for sid in grp.subjectIds:
+            # Check that every class in the group actually has a requirement
+            # for this subject; skip silently for classes that don't (the
+            # subject may only apply to a subset).
+            involved_classes = [
+                cid for cid in grp.classIds
+                if any(
+                    r.classId == cid and r.subjectId == sid
+                    for r in req.requirements
+                )
+            ]
+            if len(involved_classes) < 2:
+                continue
+
+            anchor = involved_classes[0]
+            others = involved_classes[1:]
+
+            for d_idx in range(len(days)):
+                for p in range(num_periods):
+                    v_anchor = x.get((anchor, sid, d_idx, p))
+                    for c2 in others:
+                        v_other = x.get((c2, sid, d_idx, p))
+
+                        if v_anchor is None and v_other is None:
+                            # Both absent → both 0, already equal, nothing to add.
+                            continue
+
+                        if v_anchor is not None and v_other is not None:
+                            # Both vars exist: force equality via mutual implication.
+                            model.add_implication(v_anchor, v_other)
+                            model.add_implication(v_other, v_anchor)
+
+                        elif v_anchor is not None and v_other is None:
+                            # anchor has a var but c2 has no slot here → anchor must be 0.
+                            model.add(v_anchor == 0)
+
+                        else:
+                            # c2 has a var but anchor has no slot here → c2 must be 0.
+                            model.add(v_other == 0)
+
+    # Warn about groups whose subjects may be unsatisfiable due to
+    # incompatible teacher availability across classes.
+    for grp in req.linkedClassGroups:
+        if len(grp.classIds) < 2:
+            continue
+        for sid in grp.subjectIds:
+            sub_code = subject_by_id.get(sid, Subject(id=sid, code=sid)).code
+            involved = [
+                cid for cid in grp.classIds
+                if any(r.classId == cid and r.subjectId == sid for r in req.requirements)
+            ]
+            if len(involved) < 2:
+                continue
+            # Count candidate slots that exist for ALL involved classes
+            common_slots = 0
+            for d_idx in range(len(days)):
+                for p in range(num_periods):
+                    if all(x.get((cid, sid, d_idx, p)) is not None for cid in involved):
+                        common_slots += 1
+            needed = next(
+                (r.lessonsPerWeek for r in req.requirements
+                 if r.classId == involved[0] and r.subjectId == sid),
+                0,
+            )
+            subject = subject_by_id.get(sid)
+            is_double = subject.doubleLesson if subject else False
+            needed_blocks = needed // 2 if is_double else needed
+            if common_slots < needed_blocks:
+                class_names = [
+                    class_by_id.get(cid, SchoolClass(id=cid, name=cid)).name
+                    for cid in involved
+                ]
+                warnings.append(
+                    f"Group sync: {sub_code} for {', '.join(class_names)} needs "
+                    f"{needed_blocks} common slot(s) but only {common_slots} exist "
+                    f"where ALL classes' teachers are free. "
+                    f"Reduce teacher unavailability or assign more teachers."
+                )
+
     # ── 9. Objective ─────────────────────────────────────────────────────
     #
     # Priority 1 (10 000): maximise total lessons placed — this is the
@@ -445,9 +570,11 @@ def _solve(req: SolverRequest) -> SolverResponse:
 
     log.info(
         "Solving: %d classes, %d subjects, %d teachers, %d days × %d periods, "
-        "%d variables, %d valid double-lesson start positions",
+        "%d variables, %d valid double-lesson start positions, "
+        "%d linked-class groups",
         len(req.classes), len(req.subjects), len(req.teachers),
         len(days), num_periods, len(x), len(valid_double_starts),
+        len(req.linkedClassGroups),
     )
 
     status_code = solver.solve(model)

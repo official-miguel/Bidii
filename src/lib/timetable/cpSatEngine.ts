@@ -32,6 +32,19 @@ import type {
 
 // ─── Solver wire types (match solver.py Pydantic models) ────────────────────
 
+/**
+ * A group of classes that must all have the same subject(s) at the exact same
+ * day+period (hard constraint).  Comes from ElectiveGroup records where every
+ * class in scope must run the lesson simultaneously so students can move
+ * between streams.
+ */
+type SolverLinkedClassGroup = {
+  /** All subject IDs whose slots must be synchronised across classIds */
+  subjectIds: string[];
+  /** All class IDs that must share the same (day, period) for every subjectId */
+  classIds: string[];
+};
+
 type SolverSubject = {
   id: string;
   code: string;
@@ -97,6 +110,11 @@ type SolverRequest = {
   operatingDays: number[];
   maxLessonsPerTeacherPerDay: number;
   timeLimitSeconds: number;
+  /**
+   * Hard synchronisation groups: every class in classIds must have every
+   * subject in subjectIds scheduled at the same (dayOfWeek, period).
+   */
+  linkedClassGroups: SolverLinkedClassGroup[];
 };
 
 type SolverSlot = {
@@ -127,6 +145,18 @@ type SolverResponse = {
 
 // ─── Public input type (mirror of deterministicEngine generateTimetable input) ─
 
+/**
+ * A group of classes that must all have their shared elective subjects
+ * scheduled at the same (dayOfWeek, period).  Populated from ElectiveGroup
+ * records before calling the solver.
+ */
+export type LinkedClassGroup = {
+  /** Subject IDs from ElectiveGroupMember rows */
+  subjectIds: string[];
+  /** Class IDs in scope for the group (derived from scopeForm / scopeStreams) */
+  classIds: string[];
+};
+
 export type CpSatInput = {
   subjects: EngineSubject[];
   classes: EngineClass[];
@@ -155,6 +185,12 @@ export type CpSatInput = {
   }>;
   /** Override solver time limit (seconds). Default: 60 */
   timeLimitSeconds?: number;
+  /**
+   * Hard co-scheduling groups built from ElectiveGroup records.
+   * Every class in classIds must have every subject in subjectIds at the same
+   * (dayOfWeek, period).  Omit or pass [] if there are no elective groups.
+   */
+  linkedClassGroups?: LinkedClassGroup[];
 };
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -250,6 +286,10 @@ export async function generateTimetableViaCpSat(
     operatingDays: config.operatingDays,
     maxLessonsPerTeacherPerDay: config.maxLessonsPerTeacherPerDay,
     timeLimitSeconds: input.timeLimitSeconds ?? 60,
+    linkedClassGroups: (input.linkedClassGroups ?? []).map((g) => ({
+      subjectIds: g.subjectIds,
+      classIds: g.classIds,
+    })),
   };
 
   // Call the solver
