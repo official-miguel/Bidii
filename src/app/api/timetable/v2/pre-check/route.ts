@@ -107,6 +107,7 @@ export async function POST(req: NextRequest) {
         scopeForm: true,
         scopeStreams: true,
         lessonsPerWeek: true,
+        doublesPerWeek: true,
         members: { select: { subjectId: true } },
       },
     }),
