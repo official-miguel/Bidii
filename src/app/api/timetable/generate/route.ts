@@ -121,6 +121,7 @@ export async function POST(req: NextRequest) {
         scopeForm: true,
         scopeStreams: true,
         lessonsPerWeek: true,
+        doublesPerWeek: true,
         members: { select: { subjectId: true } },
       },
     }),
@@ -220,6 +221,7 @@ export async function POST(req: NextRequest) {
         groupId:        g.id,
         subjectIds:     g.members.map((m) => m.subjectId),
         lessonsPerWeek: g.lessonsPerWeek,
+        doublesPerWeek: g.doublesPerWeek ?? 0,
         classIds:       inScope.map((c) => c.id),
       };
     })
@@ -258,12 +260,18 @@ export async function POST(req: NextRequest) {
       if (sub) subjectMap.set(sub.id, sub);
     }
   }
+
+  // Anchor subjects whose group has doublesPerWeek > 0 must be treated as
+  // double-lesson subjects by the solver, regardless of the Subject.doubleLesson
+  // flag (which reflects the subject's default, not the group override).
+  const { doubleAnchorSubjectIds } = groupPayload;
+
   const engineSubjectsWithGroups: EngineSubject[] = Array.from(subjectMap.values()).map((s) => ({
     id: s.id,
     internalCode: s.internalCode,
     code: s.code,
     name: s.name,
-    doubleLesson: s.doubleLesson,
+    doubleLesson: s.doubleLesson || doubleAnchorSubjectIds.has(s.id),
     requiresSpecialRoom: s.requiresSpecialRoom,
   }));
 

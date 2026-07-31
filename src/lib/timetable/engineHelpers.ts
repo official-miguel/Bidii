@@ -281,6 +281,8 @@ export type RawElectiveGroup = {
   id: string;
   scopeForm: number;          // 0 = school-wide, N = form N
   scopeStreams: string[];      // [] = all streams in the form
+  /** How many of the weekly lessons should be scheduled as consecutive double blocks */
+  doublesPerWeek?: number;
   members: Array<{ subjectId: string }>;
 };
 
@@ -386,6 +388,13 @@ export type GroupPayloadDescriptor = {
   subjectIds:     string[];
   /** lessonsPerWeek from ElectiveGroup — shared by all subjects in the group */
   lessonsPerWeek: number;
+  /**
+   * How many of those weekly lessons should be scheduled as consecutive
+   * double-lesson blocks.  0 = all singles (default, backward-compatible).
+   * When > 0 the anchor subject sent to the solver will have doubleLesson=true
+   * so the CP-SAT engine places consecutive pairs.
+   */
+  doublesPerWeek: number;
   /** Classes that are in scope for this group */
   classIds:       string[];
 };
@@ -415,6 +424,13 @@ export type GroupAwarePayload = {
    * can have different teacher sets.
    */
   fanOutMap: Map<string, Array<{ subjectId: string; teacherId: string }>>;
+  /**
+   * Set of anchor subjectIds that belong to a group with doublesPerWeek > 0.
+   * The generate route uses this to override doubleLesson=true on those
+   * subjects when building the solver payload — without mutating the shared
+   * subject map.
+   */
+  doubleAnchorSubjectIds: Set<string>;
 };
 
 /**
@@ -468,9 +484,18 @@ export function buildGroupAwarePayload(
   // Synthetic teacher assignments for anchors
   const syntheticAssignments: RawTeacherAssignment[] = [];
 
+  // Anchor subject IDs whose group has doublesPerWeek > 0
+  const doubleAnchorSubjectIds = new Set<string>();
+
   for (const group of groups) {
     if (group.subjectIds.length === 0) continue;
     const anchorSubjectId = group.subjectIds[0];
+
+    // If the group has any double blocks, mark the anchor so the generate
+    // route can override doubleLesson=true on the solver subject payload.
+    if ((group.doublesPerWeek ?? 0) > 0) {
+      doubleAnchorSubjectIds.add(anchorSubjectId);
+    }
 
     for (const classId of group.classIds) {
       // Mark all subjects in the group for this class
@@ -563,9 +588,10 @@ export function buildGroupAwarePayload(
   }
 
   return {
-    requirements:       filteredRequirements,
-    teacherAssignments: filteredAssignments,
+    requirements:           filteredRequirements,
+    teacherAssignments:     filteredAssignments,
     fanOutMap,
+    doubleAnchorSubjectIds,
   };
 }
 

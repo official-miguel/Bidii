@@ -55,6 +55,7 @@ type ElectiveGroup = {
   scopeForm: number;
   scopeStreams: string[];
   lessonsPerWeek: number;
+  doublesPerWeek: number;
   members: GroupMember[];
 };
 
@@ -97,8 +98,8 @@ export default function RequirementsPage() {
   const [groupsLoading, setGroupsLoading] = useState(false);
   // which group is being edited (id), or "new" for creation card
   const [editingGroup,  setEditingGroup]  = useState<string | null>(null);
-  // draft name/lessonsPerWeek/scopeStreams for the group being created/renamed
-  const [groupDraft,    setGroupDraft]    = useState<{ name: string; lessonsPerWeek: number; scopeStreams: string[] }>({ name: "", lessonsPerWeek: 3, scopeStreams: [] });
+  // draft name/lessonsPerWeek/doublesPerWeek/scopeStreams for the group being created/renamed
+  const [groupDraft,    setGroupDraft]    = useState<{ name: string; lessonsPerWeek: number; doublesPerWeek: number; scopeStreams: string[] }>({ name: "", lessonsPerWeek: 3, doublesPerWeek: 0, scopeStreams: [] });
   // subject picker open for which groupId
   const [pickerGroupId, setPickerGroupId] = useState<string | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -279,6 +280,7 @@ export default function RequirementsPage() {
         name: groupDraft.name.trim(),
         scopeForm,
         lessonsPerWeek: groupDraft.lessonsPerWeek,
+        doublesPerWeek: groupDraft.doublesPerWeek,
         scopeStreams: groupDraft.scopeStreams,
       }),
     });
@@ -286,7 +288,7 @@ export default function RequirementsPage() {
     if (!res.ok) { setError(data.error ?? "Failed to create group"); return; }
     setGroups((prev) => [...prev, data.group]);
     setEditingGroup(null);
-    setGroupDraft({ name: "", lessonsPerWeek: 3, scopeStreams: [] });
+    setGroupDraft({ name: "", lessonsPerWeek: 3, doublesPerWeek: 0, scopeStreams: [] });
   }
 
   async function saveGroupEdits(group: ElectiveGroup) {
@@ -297,6 +299,7 @@ export default function RequirementsPage() {
         id: group.id,
         name: groupDraft.name.trim(),
         lessonsPerWeek: groupDraft.lessonsPerWeek,
+        doublesPerWeek: groupDraft.doublesPerWeek,
         scopeStreams: groupDraft.scopeStreams,
       }),
     });
@@ -598,12 +601,12 @@ export default function RequirementsPage() {
                         availableStreams={availableStreams}
                         onStartCreate={() => {
                           setEditingGroup("new");
-                          setGroupDraft({ name: "", lessonsPerWeek: 3, scopeStreams: [] });
+                          setGroupDraft({ name: "", lessonsPerWeek: 3, doublesPerWeek: 0, scopeStreams: [] });
                         }}
                         onCancelEdit={() => { setEditingGroup(null); setPickerGroupId(null); }}
                         onGroupDraftChange={setGroupDraft}
                         onCreateGroup={createGroup}
-                        onStartEdit={(g) => { setEditingGroup(g.id); setGroupDraft({ name: g.name, lessonsPerWeek: g.lessonsPerWeek, scopeStreams: g.scopeStreams ?? [] }); }}
+                        onStartEdit={(g) => { setEditingGroup(g.id); setGroupDraft({ name: g.name, lessonsPerWeek: g.lessonsPerWeek, doublesPerWeek: g.doublesPerWeek ?? 0, scopeStreams: g.scopeStreams ?? [] }); }}
                         onSaveEdits={saveGroupEdits}
                         onDeleteGroup={deleteGroup}
                         onAddSubject={addSubjectToGroup}
@@ -678,14 +681,14 @@ type ElectiveGroupsSectionProps = {
   groups: ElectiveGroup[];
   groupsLoading: boolean;
   editingGroup: string | null;
-  groupDraft: { name: string; lessonsPerWeek: number; scopeStreams: string[] };
+  groupDraft: { name: string; lessonsPerWeek: number; doublesPerWeek: number; scopeStreams: string[] };
   pickerGroupId: string | null;
   pickerRef: React.RefObject<HTMLDivElement>;
   availableForGroup: (groupId: string) => Array<{ id: string; name: string; code: string }>;
   availableStreams: string[];
   onStartCreate: () => void;
   onCancelEdit: () => void;
-  onGroupDraftChange: (d: { name: string; lessonsPerWeek: number; scopeStreams: string[] }) => void;
+  onGroupDraftChange: (d: { name: string; lessonsPerWeek: number; doublesPerWeek: number; scopeStreams: string[] }) => void;
   onCreateGroup: () => void;
   onStartEdit: (g: ElectiveGroup) => void;
   onSaveEdits: (g: ElectiveGroup) => void;
@@ -777,7 +780,7 @@ function ElectiveGroupsSection({
                     </span>
                   )}
                   <span className="text-[10px] bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium shrink-0">
-                    {group.lessonsPerWeek}/wk
+                    {group.lessonsPerWeek}/wk{(group.doublesPerWeek ?? 0) > 0 ? ` · ${group.doublesPerWeek}×2` : ""}
                   </span>
                   <button type="button" title="Edit group"
                     onClick={() => onStartEdit(group)}
@@ -874,10 +877,10 @@ function ElectiveGroupsSection({
 function GroupEditCard({
   draft, isNew, onChange, onSave, onCancel, availableStreams,
 }: {
-  draft: { name: string; lessonsPerWeek: number; scopeStreams: string[] };
+  draft: { name: string; lessonsPerWeek: number; doublesPerWeek: number; scopeStreams: string[] };
   isNew: boolean;
   availableStreams: string[];
-  onChange: (d: { name: string; lessonsPerWeek: number; scopeStreams: string[] }) => void;
+  onChange: (d: { name: string; lessonsPerWeek: number; doublesPerWeek: number; scopeStreams: string[] }) => void;
   onSave: () => void;
   onCancel: () => void;
 }) {
@@ -912,7 +915,7 @@ function GroupEditCard({
             className={`${inputClass} text-sm py-1.5 w-full`}
           />
         </div>
-        <div className="w-24">
+        <div className="w-20">
           <label className="text-[10px] font-medium text-slate uppercase tracking-wide block mb-1">
             Lessons / wk
           </label>
@@ -921,6 +924,18 @@ function GroupEditCard({
             value={draft.lessonsPerWeek}
             onChange={(e) => onChange({ ...draft, lessonsPerWeek: Number(e.target.value) })}
             className={`${inputClass} text-sm py-1.5 text-center w-full`}
+          />
+        </div>
+        <div className="w-20">
+          <label className="text-[10px] font-medium text-slate uppercase tracking-wide block mb-1">
+            Doubles / wk
+          </label>
+          <input
+            type="number" min={0} max={10}
+            value={draft.doublesPerWeek}
+            title="How many of those lessons should be consecutive double-lesson blocks (0 = all singles)"
+            onChange={(e) => onChange({ ...draft, doublesPerWeek: Number(e.target.value) })}
+            className={`${inputClass} text-sm py-1.5 text-center w-full${draft.doublesPerWeek > 0 ? " border-teal/40 bg-teal/5" : ""}`}
           />
         </div>
       </div>
