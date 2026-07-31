@@ -49,38 +49,50 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   if (!cls) return NextResponse.json({ error: "Class not found." }, { status: 404 });
 
   // ── Elective groups that apply to this class ──────────────────────────────
-  // Fetch groups scoped to this form or school-wide, then filter by stream.
-  const allGroups = await prisma.electiveGroup.findMany({
-    where: {
-      schoolId: user.schoolId,
-      OR: [{ scopeForm: 0 }, { scopeForm: cls.form }],
-    },
-    include: {
-      members: {
-        include: {
-          subject: { select: { id: true, code: true, name: true } },
-        },
-        orderBy: { subject: { name: "asc" } },
-      },
-      teachers: {
-        include: {
-          subject: { select: { id: true, code: true, name: true } },
-          teacher: { select: { id: true, fullName: true } },
-        },
-        orderBy: [
-          { subject: { name: "asc" } },
-          { teacher: { fullName: "asc" } },
-        ],
-      },
-    },
-    orderBy: [{ scopeForm: "asc" }, { name: "asc" }],
-  });
+  // Wrapped in try/catch so a pending migration doesn't crash the whole drawer.
+  type GroupWithRelations = {
+    id: string; name: string; scopeForm: number; scopeStreams: string[];
+    lessonsPerWeek: number;
+    members: { id: string; subjectId: string; subject: { id: string; code: string; name: string } }[];
+    teachers: { id: string; subjectId: string; teacherId: string; subject: { id: string; code: string; name: string }; teacher: { id: string; fullName: string } }[];
+  };
 
-  const electiveGroups = allGroups.filter((g) => {
-    if (g.scopeStreams.length === 0) return true;
-    if (!cls.stream) return false;
-    return g.scopeStreams.some((s) => s.toLowerCase() === cls.stream!.toLowerCase());
-  });
+  let electiveGroups: GroupWithRelations[] = [];
+  try {
+    const allGroups = await prisma.electiveGroup.findMany({
+      where: {
+        schoolId: user.schoolId,
+        OR: [{ scopeForm: 0 }, { scopeForm: cls.form }],
+      },
+      include: {
+        members: {
+          include: { subject: { select: { id: true, code: true, name: true } } },
+          orderBy: { subject: { name: "asc" } },
+        },
+        teachers: {
+          include: {
+            subject: { select: { id: true, code: true, name: true } },
+            teacher: { select: { id: true, fullName: true } },
+          },
+          orderBy: [
+            { subject: { name: "asc" } },
+            { teacher: { fullName: "asc" } },
+          ],
+        },
+      },
+      orderBy: [{ scopeForm: "asc" }, { name: "asc" }],
+    });
+
+    electiveGroups = allGroups.filter((g) => {
+      if ((g.scopeStreams as string[]).length === 0) return true;
+      if (!cls.stream) return false;
+      return (g.scopeStreams as string[]).some(
+        (s) => s.toLowerCase() === cls.stream!.toLowerCase()
+      );
+    }) as GroupWithRelations[];
+  } catch {
+    // Column/table not yet migrated — return empty groups rather than crashing
+  }
 
   // Set of subjectIds that belong to any applicable elective group
   const groupedSubjectIds = new Set(
