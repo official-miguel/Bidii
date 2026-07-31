@@ -40,6 +40,8 @@ export type PreGenerationInput = {
     code: string;
     name: string;
     type: "CORE" | "ELECTIVE";
+    /** Whether this subject uses back-to-back double periods. Default false. */
+    doubleLesson?: boolean;
   }>;
   classes: Array<{
     id: string;
@@ -265,7 +267,12 @@ function checkStudentSelections(
 }
 
 /**
- * Check if there's sufficient capacity for all lessons
+ * Check if there's sufficient capacity for all lessons.
+ *
+ * Double-lesson subjects occupy 2 physical slots per lessonsPerWeek unit
+ * (e.g. 4 lessonsPerWeek of a double subject = 8 physical slots).
+ * We use physical slot counts for the comparison so the check matches what
+ * the solver actually tries to place.
  */
 function checkCapacity(
   input: PreGenerationInput,
@@ -274,30 +281,35 @@ function checkCapacity(
   const totalCapacityPerClass =
     input.templateColumns * input.operatingDays.length;
 
+  const doubleSubjectIds = new Set(
+    input.subjects.filter((s) => s.doubleLesson).map((s) => s.id)
+  );
+
   for (const cls of input.classes) {
     const classRequirements = input.requirements.filter(
       (r) => r.classId === cls.id
     );
 
-    const totalRequired = classRequirements.reduce(
-      (sum, r) => sum + r.lessonsPerWeek,
-      0
-    );
+    // Count physical slots: doubles occupy 2 slots per lessonsPerWeek unit
+    const totalRequired = classRequirements.reduce((sum, r) => {
+      const multiplier = doubleSubjectIds.has(r.subjectId) ? 2 : 1;
+      return sum + r.lessonsPerWeek * multiplier;
+    }, 0);
 
     if (totalRequired > totalCapacityPerClass) {
       issues.push({
         type: "INSUFFICIENT_CAPACITY",
         severity: "BLOCKING",
-        message: `${cls.name} requires ${totalRequired} lessons/week but only ${totalCapacityPerClass} slots available`,
+        message: `${cls.name} requires ${totalRequired} physical slots/week but only ${totalCapacityPerClass} available (${Math.round((totalRequired / totalCapacityPerClass) * 100)}% utilisation — double-lesson subjects count as 2 slots each)`,
         affectedClasses: [cls.id],
         suggestedAction:
-          "Reduce lesson requirements or increase template capacity (add more periods/days)",
+          "Reduce lesson requirements, convert double-lesson subjects to singles, or increase template capacity",
       });
     } else if (totalRequired > totalCapacityPerClass * 0.95) {
       issues.push({
         type: "INSUFFICIENT_CAPACITY",
         severity: "WARNING",
-        message: `${cls.name} is at ${Math.round((totalRequired / totalCapacityPerClass) * 100)}% capacity - very tight fit`,
+        message: `${cls.name} is at ${Math.round((totalRequired / totalCapacityPerClass) * 100)}% capacity - very tight fit (${totalRequired}/${totalCapacityPerClass} physical slots)`,
         affectedClasses: [cls.id],
         suggestedAction: "Consider adding buffer capacity for flexibility",
       });
@@ -317,6 +329,10 @@ function checkEmptySlots(
   const totalCapacityPerClass =
     input.templateColumns * input.operatingDays.length;
 
+  const doubleSubjectIds = new Set(
+    input.subjects.filter((s) => s.doubleLesson).map((s) => s.id)
+  );
+
   for (const cls of input.classes) {
     const classRequirements = input.requirements.filter(
       (r) => r.classId === cls.id
@@ -325,10 +341,11 @@ function checkEmptySlots(
     // Skip classes that have no requirements at all — covered by teacher check
     if (classRequirements.length === 0) continue;
 
-    const totalRequired = classRequirements.reduce(
-      (sum, r) => sum + r.lessonsPerWeek,
-      0
-    );
+    // Use physical slot count so the number matches what the solver places
+    const totalRequired = classRequirements.reduce((sum, r) => {
+      const multiplier = doubleSubjectIds.has(r.subjectId) ? 2 : 1;
+      return sum + r.lessonsPerWeek * multiplier;
+    }, 0);
 
     const emptySlots = totalCapacityPerClass - totalRequired;
 
@@ -336,7 +353,7 @@ function checkEmptySlots(
       issues.push({
         type: "EMPTY_SLOTS",
         severity: "WARNING",
-        message: `${cls.name} has ${emptySlots} slot${emptySlots !== 1 ? "s" : ""} per week with no lesson assigned (${totalRequired} lessons required, ${totalCapacityPerClass} slots available)`,
+        message: `${cls.name} has ${emptySlots} slot${emptySlots !== 1 ? "s" : ""} per week with no lesson assigned (${totalRequired} physical slots required, ${totalCapacityPerClass} available)`,
         affectedClasses: [cls.id],
         suggestedAction:
           "Add more subjects or increase lessons-per-week for existing subjects to fill the gap",
