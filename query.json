@@ -1,0 +1,1 @@
+{"query":"mutation { serviceCreate(input: { projectId: \"1c7677bd-7c9f-4dee-8938-64552aee9e42\", name: \"timetable-solver\" }) { id name } }"}
