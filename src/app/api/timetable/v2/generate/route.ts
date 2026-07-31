@@ -255,6 +255,8 @@ async function _handlePost(req: NextRequest) {
     where: { id: { in: allTeacherIds } },
     select: { id: true, fullName: true },
   });
+
+  const sessionPrefs = sessionPreferences
     .filter((p) => p.subjectCode && p.preferredSession)
     .map((p) => ({
       subjectCode: p.subjectCode!,
