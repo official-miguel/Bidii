@@ -66,6 +66,14 @@ interface ClassDetail {
       subject: { id: string; code: string; name: string };
       teacher: { id: string; fullName: string };
     }[];
+    /** Per-class teacher pairings — the source of truth for this drawer */
+    classTeachers: {
+      id: string;
+      subjectId: string;
+      teacherId: string;
+      subject: { id: string; code: string; name: string };
+      teacher: { id: string; fullName: string };
+    }[];
   }[];
   _count: { students: number };
 }
@@ -583,7 +591,7 @@ export default function ClassWorkspaceDrawer({
                           {/* Subjects + teacher pairings */}
                           <div className="divide-y divide-violet-100">
                             {group.members.map((member) => {
-                              const pairings = group.teachers.filter(
+                              const pairings = (group.classTeachers ?? group.teachers).filter(
                                 (t) => t.subjectId === member.subjectId
                               );
                               return (
@@ -595,7 +603,7 @@ export default function ClassWorkspaceDrawer({
                                     <span className="text-sm font-medium text-ink">{member.subject.name}</span>
                                   </div>
                                   {pairings.length === 0 ? (
-                                    <p className="text-xs text-slate/50 italic pl-1">No teacher assigned — set in Timetable Requirements.</p>
+                                    <p className="text-xs text-slate/50 italic pl-1">No teacher assigned yet.</p>
                                   ) : (
                                     <div className="space-y-1 pl-1">
                                       {pairings.map((p) => (
@@ -622,9 +630,9 @@ export default function ClassWorkspaceDrawer({
                       ))}
                     </div>
                     <p className="mt-3 text-[10px] text-slate/50 flex items-center gap-1">
-                      Teacher assignments for elective groups are managed in
-                      <a href={`${basePath}/timetable/requirements`} className="text-violet-600 hover:underline flex items-center gap-0.5">
-                        Timetable → Requirements <ExternalLink className="h-2.5 w-2.5" />
+                      Assign teachers for each subject in
+                      <a href={`${basePath}/class-profiles/${cls.id}`} className="text-violet-600 hover:underline flex items-center gap-0.5">
+                        Class Profiles <ExternalLink className="h-2.5 w-2.5" />
                       </a>.
                     </p>
                   </div>

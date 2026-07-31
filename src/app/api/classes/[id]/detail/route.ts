@@ -8,8 +8,9 @@
  *    CORE subjects and ungrouped electives
  *  - teachersBySubject: qualified teachers per subject (for pickers)
  *  - electiveGroups: elective groups that apply to this class (scoped by
- *    form and stream), each with their subjects and teacher pairings
- *    (ElectiveGroupTeacher). The drawer renders these as a read-through view.
+ *    form and stream), each with their subjects, form-wide teacher pairings
+ *    (ElectiveGroupTeacher) and per-class teacher pairings
+ *    (ClassElectiveGroupTeacher). The drawer renders classTeachers.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -50,46 +51,85 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
   // ── Elective groups that apply to this class ──────────────────────────────
   // Wrapped in try/catch so a pending migration doesn't crash the whole drawer.
+  type ClassTeacherRow = {
+    id: string; subjectId: string; teacherId: string;
+    subject: { id: string; code: string; name: string };
+    teacher: { id: string; fullName: string };
+  };
   type GroupWithRelations = {
     id: string; name: string; scopeForm: number; scopeStreams: string[];
     lessonsPerWeek: number;
     members: { id: string; subjectId: string; subject: { id: string; code: string; name: string } }[];
     teachers: { id: string; subjectId: string; teacherId: string; subject: { id: string; code: string; name: string }; teacher: { id: string; fullName: string } }[];
+    classTeachers: ClassTeacherRow[];
   };
 
   let electiveGroups: GroupWithRelations[] = [];
   try {
-    const allGroups = await prisma.electiveGroup.findMany({
-      where: {
-        schoolId: user.schoolId,
-        OR: [{ scopeForm: 0 }, { scopeForm: cls.form }],
-      },
-      include: {
-        members: {
-          include: { subject: { select: { id: true, code: true, name: true } } },
-          orderBy: { subject: { name: "asc" } },
+    const [allGroups, classTeacherRows] = await Promise.all([
+      prisma.electiveGroup.findMany({
+        where: {
+          schoolId: user.schoolId,
+          OR: [{ scopeForm: 0 }, { scopeForm: cls.form }],
         },
-        teachers: {
-          include: {
-            subject: { select: { id: true, code: true, name: true } },
-            teacher: { select: { id: true, fullName: true } },
+        include: {
+          members: {
+            include: { subject: { select: { id: true, code: true, name: true } } },
+            orderBy: { subject: { name: "asc" } },
           },
-          orderBy: [
-            { subject: { name: "asc" } },
-            { teacher: { fullName: "asc" } },
-          ],
+          teachers: {
+            include: {
+              subject: { select: { id: true, code: true, name: true } },
+              teacher: { select: { id: true, fullName: true } },
+            },
+            orderBy: [
+              { subject: { name: "asc" } },
+              { teacher: { fullName: "asc" } },
+            ],
+          },
         },
-      },
-      orderBy: [{ scopeForm: "asc" }, { name: "asc" }],
-    });
+        orderBy: [{ scopeForm: "asc" }, { name: "asc" }],
+      }),
+      // Per-class teacher pairings — the source of truth shown in the drawer
+      prisma.classElectiveGroupTeacher.findMany({
+        where: { classId: params.id, schoolId: user.schoolId },
+        include: {
+          subject: { select: { id: true, code: true, name: true } },
+          teacher: { select: { id: true, fullName: true } },
+        },
+        orderBy: [
+          { subject: { name: "asc" } },
+          { teacher: { fullName: "asc" } },
+        ],
+      }),
+    ]);
 
-    electiveGroups = allGroups.filter((g) => {
-      if ((g.scopeStreams as string[]).length === 0) return true;
-      if (!cls.stream) return false;
-      return (g.scopeStreams as string[]).some(
-        (s) => s.toLowerCase() === cls.stream!.toLowerCase()
-      );
-    }) as GroupWithRelations[];
+    // Index classTeacher rows by groupId for O(1) lookup
+    const classTeachersByGroup = new Map<string, ClassTeacherRow[]>();
+    for (const row of classTeacherRows) {
+      const groupId = (row as typeof row & { groupId: string }).groupId;
+      if (!classTeachersByGroup.has(groupId)) classTeachersByGroup.set(groupId, []);
+      classTeachersByGroup.get(groupId)!.push({
+        id: row.id,
+        subjectId: row.subjectId,
+        teacherId: row.teacherId,
+        subject: row.subject,
+        teacher: row.teacher,
+      });
+    }
+
+    electiveGroups = allGroups
+      .filter((g) => {
+        if ((g.scopeStreams as string[]).length === 0) return true;
+        if (!cls.stream) return false;
+        return (g.scopeStreams as string[]).some(
+          (s) => s.toLowerCase() === cls.stream!.toLowerCase()
+        );
+      })
+      .map((g) => ({
+        ...g,
+        classTeachers: classTeachersByGroup.get(g.id) ?? [],
+      })) as GroupWithRelations[];
   } catch {
     // Column/table not yet migrated — return empty groups rather than crashing
   }
