@@ -300,7 +300,7 @@ function LessonCell({
       type="button"
       disabled={readOnly}
       onClick={() => onClick?.(day, period, slot)}
-      aria-label={`${displayCode}${isGroup ? ` (group, ${memberCount} subjects)` : ""} — ${isGroup && slot.allTeachers ? slot.allTeachers.join(", ") : slot.teacherName}, period ${period}`}
+      aria-label={`${displayCode}${isGroup ? ` (group, ${memberCount} subjects)` : ""} ${isGroup ? "" : `— ${slot.teacherName}`}, period ${period}`}
       className={`w-full min-h-[52px] rounded border px-1.5 py-1.5 text-left flex flex-col justify-between
         ${palette!.bg} ${palette!.border}
         ${interactive ? "hover:brightness-95 transition-all cursor-pointer active:scale-[0.98]" : "cursor-default"}
@@ -334,10 +334,18 @@ function LessonCell({
         </div>
       </div>
       <div className="min-w-0">
-        <p className={`text-[10px] truncate leading-tight ${palette!.sub}`}>
-          {isGroup && slot.allTeachers ? slot.allTeachers.join(", ") : slot.teacherName}
-        </p>
-        {slot.room && (
+        {/* For group slots, don't show teachers (they're assigned per subject in class profile) */}
+        {!isGroup && (
+          <>
+            <p className={`text-[10px] truncate leading-tight ${palette!.sub}`}>
+              {slot.teacherName}
+            </p>
+            {slot.room && (
+              <p className={`text-[9px] truncate leading-tight mt-0.5 ${palette!.sub} opacity-80`}>{slot.room}</p>
+            )}
+          </>
+        )}
+        {isGroup && slot.room && (
           <p className={`text-[9px] truncate leading-tight mt-0.5 ${palette!.sub} opacity-80`}>{slot.room}</p>
         )}
       </div>

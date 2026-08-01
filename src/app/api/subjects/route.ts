@@ -38,9 +38,11 @@ export async function GET() {
     id: `GROUP_${group.id}`, // Prefix to distinguish from regular subjects
     name: `📦 ${group.name}`, // Visual indicator this is a group
     code: group.members.map((m) => m.subject.code).join("+"), // e.g., "FREN+SPAN"
-    type: "ELECTIVE",
+    type: "ELECTIVE" as const,
     groupId: group.id,
     isGroup: true,
+    applicableForms: group.scopeForm !== null ? [group.scopeForm] : [], // Forms this group applies to
+    scopeStreams: group.scopeStreams, // Streams this group applies to (if any)
     memberSubjects: group.members.map((m) => ({
       id: m.subjectId,
       name: m.subject.name,
