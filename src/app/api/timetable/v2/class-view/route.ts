@@ -44,6 +44,7 @@ export async function GET(req: NextRequest) {
   }
 
   type SlotRow = {
+    classId: string;
     dayOfWeek: number;
     period: number;
     subjectId: string;
@@ -68,7 +69,7 @@ export async function GET(req: NextRequest) {
     }
 
     slots = await prisma.$queryRaw<SlotRow[]>`
-      SELECT s."dayOfWeek", s.period,
+      SELECT s."classId", s."dayOfWeek", s.period,
              s."subjectId", sub.code AS "subjectCode", sub.name AS "subjectName",
              s."teacherId", t."fullName" AS "teacherName", s.room,
              sub."internalCode"
@@ -79,7 +80,7 @@ export async function GET(req: NextRequest) {
       ORDER BY s."dayOfWeek", s.period`;
   } else {
     slots = await prisma.$queryRaw<SlotRow[]>`
-      SELECT ts."dayOfWeek", ts.period,
+      SELECT ts."classId", ts."dayOfWeek", ts.period,
              ts."subjectId", sub.code AS "subjectCode", sub.name AS "subjectName",
              ts."teacherId", t."fullName" AS "teacherName", ts.room,
              sub."internalCode"
