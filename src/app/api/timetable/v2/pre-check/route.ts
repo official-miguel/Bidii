@@ -104,6 +104,7 @@ export async function POST(req: NextRequest) {
       where: { schoolId },
       select: {
         id: true,
+        name: true,
         scopeForm: true,
         scopeStreams: true,
         lessonsPerWeek: true,
@@ -218,6 +219,7 @@ export async function POST(req: NextRequest) {
       });
       return {
         groupId:        g.id,
+        name:           g.name,
         subjectIds:     g.members.map((m) => m.subjectId),
         lessonsPerWeek: g.lessonsPerWeek,
         doublesPerWeek: g.doublesPerWeek ?? 0,
