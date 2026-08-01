@@ -645,3 +645,145 @@ export function fanOutGroupSlots(
 
   return result;
 }
+
+/**
+ * collapseGroupSlotsForDisplay
+ *
+ * Takes display slots (which have been fan-out from groups) and collapses them
+ * back for rendering. Groups are represented as a single slot with:
+ * - subjectCode = group anchor subject code
+ * - additionalSubjects = other subjects in the group
+ * - allTeachers = comma-separated list of all teachers involved
+ *
+ * This ensures the UI shows a group as one cell instead of multiple cells
+ * for the same period.
+ *
+ * Input: slot type with classId, dayOfWeek, period, subjectId, subjectCode, etc.
+ * Output: slots collapsed by group, where group slots are marked and include member info
+ */
+export function collapseGroupSlotsForDisplay<
+  T extends {
+    classId: string;
+    dayOfWeek: number;
+    period: number;
+    subjectId: string;
+    subjectCode: string;
+    subjectName: string;
+    teacherId: string;
+    teacherName: string;
+    internalCode: number;
+    room: string | null;
+  }
+>(
+  slots: T[],
+  groupDescriptors: GroupPayloadDescriptor[]
+): Array<
+  T & {
+    isGroupAnchor?: boolean;
+    groupMembers?: Array<{ subjectId: string; subjectCode: string; subjectName: string }>;
+    allTeachers?: string[];
+  }
+> {
+  // Build a map of which subjects belong to which groups and which is the anchor
+  // Map: "subjectId" → { groupId, isAnchor, allSubjectIds }
+  const subjectToGroup = new Map<
+    string,
+    { groupId: string; isAnchor: boolean; allSubjectIds: string[] }
+  >();
+
+  for (const group of groupDescriptors) {
+    for (let i = 0; i < group.subjectIds.length; i++) {
+      const sid = group.subjectIds[i];
+      subjectToGroup.set(sid, {
+        groupId: group.groupId,
+        isAnchor: i === 0,
+        allSubjectIds: group.subjectIds,
+      });
+    }
+  }
+
+  // Group display slots by (classId, dayOfWeek, period, groupId|subjectId)
+  // This creates one entry per period per class, combining all group members
+  const slotMap = new Map<
+    string,
+    {
+      anchor: T;
+      nonAnchorTeachers: Map<string, { subjectId: string; subjectCode: string; subjectName: string; teacherName: string }>;
+    }
+  >();
+
+  for (const slot of slots) {
+    const groupInfo = subjectToGroup.get(slot.subjectId);
+    const key = `${slot.classId}:${slot.dayOfWeek}:${slot.period}:${
+      groupInfo?.groupId ?? slot.subjectId
+    }`;
+
+    if (!slotMap.has(key)) {
+      slotMap.set(key, {
+        anchor: slot,
+        nonAnchorTeachers: new Map(),
+      });
+    }
+
+    const entry = slotMap.get(key)!;
+
+    // If this is not the anchor, record it as a group member
+    if (groupInfo && !groupInfo.isAnchor) {
+      const memberKey = `${slot.subjectId}:${slot.teacherId}`;
+      entry.nonAnchorTeachers.set(memberKey, {
+        subjectId: slot.subjectId,
+        subjectCode: slot.subjectCode,
+        subjectName: slot.subjectName,
+        teacherName: slot.teacherName,
+      });
+    }
+  }
+
+  // Build the output: keep anchor slots, add group metadata
+  const result: Array<
+    T & {
+      isGroupAnchor?: boolean;
+      groupMembers?: Array<{ subjectId: string; subjectCode: string; subjectName: string }>;
+      allTeachers?: string[];
+    }
+  > = [];
+
+  for (const { anchor, nonAnchorTeachers } of slotMap.values()) {
+    const groupInfo = subjectToGroup.get(anchor.subjectId);
+    const isGroupAnchor = groupInfo?.isAnchor ?? false;
+
+    if (isGroupAnchor && nonAnchorTeachers.size > 0) {
+      // This is a group anchor with member subjects
+      const allTeachers = new Set<string>();
+      allTeachers.add(anchor.teacherName);
+
+      const groupMembers: Array<{
+        subjectId: string;
+        subjectCode: string;
+        subjectName: string;
+      }> = [];
+
+      for (const member of nonAnchorTeachers.values()) {
+        groupMembers.push({
+          subjectId: member.subjectId,
+          subjectCode: member.subjectCode,
+          subjectName: member.subjectName,
+        });
+        allTeachers.add(member.teacherName);
+      }
+
+      result.push({
+        ...anchor,
+        isGroupAnchor: true,
+        groupMembers,
+        allTeachers: Array.from(allTeachers),
+      });
+    } else if (!isGroupAnchor && nonAnchorTeachers.size === 0) {
+      // Non-group subject, emit as-is
+      result.push(anchor);
+    }
+    // Non-anchor group subjects are skipped (they're represented in the anchor)
+  }
+
+  return result;
+}

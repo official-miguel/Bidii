@@ -12,7 +12,9 @@ import { requireRole } from "@/lib/auth";
 import { requirePermission } from "@/lib/permissions";
 import { Prisma } from "@prisma/client";
 import { TimetableSlotType, TimetableSession } from "@prisma/client";
-import type { TemplateColumn } from "@/lib/timetable/deterministicEngine";
+import { collapseGroupSlotsForDisplay } from "@/lib/timetable/engineHelpers";
+import type { TemplateColumn, EngineSubject } from "@/lib/timetable/deterministicEngine";
+import type { GroupPayloadDescriptor } from "@/lib/timetable/engineHelpers";
 
 export async function GET(req: NextRequest) {
   const user =
@@ -88,6 +90,33 @@ export async function GET(req: NextRequest) {
       ORDER BY ts."dayOfWeek", ts.period`;
   }
 
+  // ── Fetch group information for display collapse ─────────────────────────
+  const electiveGroups = await prisma.electiveGroup.findMany({
+    where: { schoolId },
+    select: {
+      id: true,
+      scopeForm: true,
+      scopeStreams: true,
+      lessonsPerWeek: true,
+      doublesPerWeek: true,
+      members: { select: { subjectId: true } },
+    },
+  });
+
+  // Build group descriptors for collapse function
+  const groupDescriptors: GroupPayloadDescriptor[] = electiveGroups
+    .filter((g) => g.members.length > 0)
+    .map((g) => ({
+      groupId: g.id,
+      subjectIds: g.members.map((m) => m.subjectId),
+      lessonsPerWeek: g.lessonsPerWeek,
+      doublesPerWeek: g.doublesPerWeek ?? 0,
+      classIds: [], // Not needed for display collapse
+    }));
+
+  // Collapse slots by group for display
+  const displaySlots = collapseGroupSlotsForDisplay(slots, groupDescriptors);
+
   // Load template to build full grid including breaks/non-lesson slots
   const config = await prisma.timetableConfig.findUnique({
     where: { schoolId },
@@ -100,8 +129,8 @@ export async function GET(req: NextRequest) {
   const operatingDays = config?.operatingDays ?? [0, 1, 2, 3, 4];
 
   // Build a slot map for quick lookup
-  const slotMap = new Map<string, SlotRow>();
-  for (const slot of slots) {
+  const slotMap = new Map<string, typeof displaySlots[0]>();
+  for (const slot of displaySlots) {
     slotMap.set(`${slot.dayOfWeek}-${slot.period}`, slot);
   }
 
@@ -132,6 +161,9 @@ export async function GET(req: NextRequest) {
         room: string | null;
         internalCode: number | null;
         isEmpty: boolean;
+        isGroupAnchor?: boolean;
+        groupMembers?: Array<{ subjectId: string; subjectCode: string; subjectName: string }>;
+        allTeachers?: string[];
       }
     > = {};
 
@@ -155,6 +187,9 @@ export async function GET(req: NextRequest) {
               room: slot.room,
               internalCode: slot.internalCode,
               isEmpty: false,
+              isGroupAnchor: slot.isGroupAnchor,
+              groupMembers: slot.groupMembers,
+              allTeachers: slot.allTeachers,
             }
           : {
               subjectCode: null,
@@ -180,15 +215,15 @@ export async function GET(req: NextRequest) {
   });
 
   // Summary stats
-  const totalLessons = slots.length;
+  const totalLessons = displaySlots.length;
   const totalSlots = templateColumns.filter((c) => c.slotType === TimetableSlotType.LESSON).length
     * operatingDays.length;
-  const filledSlots = slots.length;
+  const filledSlots = displaySlots.length;
   const emptySlots = totalSlots - filledSlots;
 
   // Subject distribution
   const subjectCount = new Map<string, { code: string; name: string; count: number; days: Set<number> }>();
-  for (const slot of slots) {
+  for (const slot of displaySlots) {
     if (!subjectCount.has(slot.subjectId)) {
       subjectCount.set(slot.subjectId, {
         code: slot.subjectCode,
