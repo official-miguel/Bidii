@@ -417,8 +417,8 @@ export default function RequirementsPage() {
     return electiveSubjects.filter((s) => {
       if (inGroup.has(s.id)) return false;
       // For form-scoped groups, only show subjects applicable to that form
-      if (group.scopeForm > 0 && s.applicableForms.length > 0) {
-        return s.applicableForms.includes(group.scopeForm);
+      if (group.scopeForm > 0 && (s.applicableForms?.length ?? 0) > 0) {
+        return s.applicableForms!.includes(group.scopeForm);
       }
       return true;
     });
