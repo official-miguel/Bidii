@@ -84,7 +84,23 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.errors[0]?.message ?? "Invalid input." }, { status: 400 });
 
-  const d = parsed.data;
+  let d = parsed.data;
+
+  // Handle group subjects: convert GROUP_<id> back to anchor subject ID
+  let groupId: string | null = null;
+  if (d.subjectId.startsWith("GROUP_")) {
+    groupId = d.subjectId.substring(6); // Remove GROUP_ prefix
+    // Get the anchor subject ID (first member of the group)
+    const group = await prisma.electiveGroup.findUnique({
+      where: { id: groupId },
+      select: {
+        members: { select: { subjectId: true }, orderBy: { createdAt: "asc" }, take: 1 },
+      },
+    });
+    if (!group?.members[0])
+      return NextResponse.json({ error: "Group not found or has no members." }, { status: 400 });
+    d = { ...d, subjectId: group.members[0].subjectId };
+  }
 
   // Verify the class and teacher belong to this school
   const classCheck = await prisma.schoolClass.findFirst({
@@ -93,14 +109,31 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   });
   if (!classCheck) return NextResponse.json({ error: "Class not found." }, { status: 400 });
 
-  const teacherCheck = await prisma.teacherSubject.findFirst({
-    where: {
-      teacherId: d.teacherId,
-      subjectId: d.subjectId,
-      teacher:   { schoolId: user.schoolId },
-    },
-    select: { teacherId: true },
-  });
+  // Check teacher assignment - both regular subjects and group subjects
+  let teacherCheck: { teacherId: string } | null = null;
+
+  if (groupId) {
+    // For groups, check classElectiveGroupTeacher
+    teacherCheck = await prisma.classElectiveGroupTeacher.findFirst({
+      where: {
+        groupId,
+        classId: d.classId,
+        teacherId: d.teacherId,
+      },
+      select: { teacherId: true },
+    });
+  } else {
+    // For regular subjects, check teacherSubject
+    teacherCheck = await prisma.teacherSubject.findFirst({
+      where: {
+        teacherId: d.teacherId,
+        subjectId: d.subjectId,
+        teacher: { schoolId: user.schoolId },
+      },
+      select: { teacherId: true },
+    });
+  }
+
   if (!teacherCheck)
     return NextResponse.json({ error: "That teacher is not assigned to this subject." }, { status: 400 });
 

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { computePeriodTimes } from "@/lib/scheduleTimes";
+import { collapseGroupSlotsForDisplay } from "@/lib/timetable/engineHelpers";
+import type { GroupPayloadDescriptor } from "@/lib/timetable/engineHelpers";
 
 // ── GET /api/timetable/v2/teacher-view ────────────────────────────────────
 // Returns the personal weekly timetable grid for a teacher.
@@ -45,7 +47,7 @@ export async function GET(req: NextRequest) {
     id: string; classId: string; className: string;
     dayOfWeek: number; period: number;
     subjectId: string; subjectCode: string; subjectName: string;
-    room: string | null;
+    room: string | null; internalCode: number; teacherId: string; teacherName: string;
   };
 
   let slots: SlotRow[];
@@ -62,10 +64,11 @@ export async function GET(req: NextRequest) {
       SELECT s.id, s."classId", c.name AS "className",
              s."dayOfWeek", s.period,
              s."subjectId", sub.code AS "subjectCode", sub.name AS "subjectName",
-             s.room
+             s.room, sub."internalCode", s."teacherId", t."fullName" AS "teacherName"
       FROM "TimetableVersionSlot" s
       JOIN "SchoolClass" c   ON c.id = s."classId"
       JOIN "Subject"     sub ON sub.id = s."subjectId"
+      JOIN "Teacher"     t   ON t.id = s."teacherId"
       WHERE s."versionId" = ${versionId} AND s."teacherId" = ${teacherId}
       ORDER BY s."dayOfWeek", s.period
     `;
@@ -75,14 +78,42 @@ export async function GET(req: NextRequest) {
       SELECT ts.id, ts."classId", c.name AS "className",
              ts."dayOfWeek", ts.period,
              ts."subjectId", sub.code AS "subjectCode", sub.name AS "subjectName",
-             ts.room
+             ts.room, sub."internalCode", ts."teacherId", t."fullName" AS "teacherName"
       FROM "TimetableSlot" ts
       JOIN "SchoolClass" c   ON c.id = ts."classId"
       JOIN "Subject"     sub ON sub.id = ts."subjectId"
+      JOIN "Teacher"     t   ON t.id = ts."teacherId"
       WHERE ts."teacherId" = ${teacherId} AND ts."schoolId" = ${user.schoolId}
       ORDER BY ts."dayOfWeek", ts.period
     `;
   }
+
+  // ── Fetch group information for display collapse ─────────────────────────
+  const electiveGroups = await prisma.electiveGroup.findMany({
+    where: { schoolId: user.schoolId },
+    select: {
+      id: true,
+      scopeForm: true,
+      scopeStreams: true,
+      lessonsPerWeek: true,
+      doublesPerWeek: true,
+      members: { select: { subjectId: true } },
+    },
+  });
+
+  // Build group descriptors for collapse function
+  const groupDescriptors: GroupPayloadDescriptor[] = electiveGroups
+    .filter((g) => g.members.length > 0)
+    .map((g) => ({
+      groupId: g.id,
+      subjectIds: g.members.map((m) => m.subjectId),
+      lessonsPerWeek: g.lessonsPerWeek,
+      doublesPerWeek: g.doublesPerWeek ?? 0,
+      classIds: [], // Not needed for display collapse
+    }));
+
+  // Collapse slots by group for display
+  const displaySlots = collapseGroupSlotsForDisplay(slots, groupDescriptors);
 
   // ── Fetch config for period-to-time mapping ──────────────────────────────
   const config = await prisma.timetableConfig.findUnique({
@@ -121,7 +152,7 @@ export async function GET(req: NextRequest) {
 
   // ── Compute weekly load stats ───────────────────────────────────────────
   const subjectCounts = new Map<string, number>();
-  for (const s of slots) {
+  for (const s of displaySlots) {
     subjectCounts.set(s.subjectCode, (subjectCounts.get(s.subjectCode) ?? 0) + 1);
   }
 
@@ -129,10 +160,10 @@ export async function GET(req: NextRequest) {
     teacher: { id: teacher.id, fullName: teacher.fullName, staffId: teacher.staffId },
     days,
     periods:         periodTimes,
-    slots,
+    slots: displaySlots,
     specialPeriods,
     unavailability,
-    weeklyLessons:   slots.length,
+    weeklyLessons:   displaySlots.length,
     subjectBreakdown: Array.from(subjectCounts.entries()).map(([code, count]) => ({ code, count })),
   });
 }

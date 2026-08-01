@@ -8,6 +8,7 @@ export async function GET() {
   const user = (await requireRole("PRINCIPAL")) ?? (await requirePermission("SUBJECTS", "view"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  // Fetch regular subjects
   const subjects = await prisma.subject.findMany({
     where: { schoolId: user.schoolId },
     orderBy: { name: "asc" },
@@ -16,7 +17,41 @@ export async function GET() {
       _count: { select: { teacherSubjects: true } },
     },
   });
-  return NextResponse.json(subjects);
+
+  // Fetch elective groups and represent them as pseudo-subjects for timetable
+  // A group acts like a subject with multiple component subjects
+  const electiveGroups = await prisma.electiveGroup.findMany({
+    where: { schoolId: user.schoolId },
+    include: {
+      members: {
+        select: {
+          subjectId: true,
+          subject: { select: { id: true, name: true, code: true } },
+        },
+      },
+    },
+    orderBy: { name: "asc" },
+  });
+
+  // Transform groups into pseudo-subject format (they're treated as subjects in timetable)
+  const groupAsSubjects = electiveGroups.map((group) => ({
+    id: `GROUP_${group.id}`, // Prefix to distinguish from regular subjects
+    name: `📦 ${group.name}`, // Visual indicator this is a group
+    code: group.members.map((m) => m.subject.code).join("+"), // e.g., "FREN+SPAN"
+    type: "ELECTIVE",
+    groupId: group.id,
+    isGroup: true,
+    memberSubjects: group.members.map((m) => ({
+      id: m.subjectId,
+      name: m.subject.name,
+      code: m.subject.code,
+    })),
+    lessonsPerWeek: group.lessonsPerWeek,
+    _count: { teacherSubjects: 0 }, // Groups don't have direct teacher assignments
+    department: null,
+  }));
+
+  return NextResponse.json([...subjects, ...groupAsSubjects]);
 }
 
 const createSchema = z.object({
