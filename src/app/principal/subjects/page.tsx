@@ -253,7 +253,7 @@ export default function SubjectsPage() {
                       {/* On mobile, show code + forms inline under the name */}
                       <div className="flex flex-wrap items-center gap-1.5 mt-0.5 sm:hidden">
                         <span className="text-xs font-mono text-slate bg-slate-50 border border-line rounded px-1 py-0.5">{s.code}</span>
-                        {s.applicableForms.sort((a, b) => a - b).map(f => (
+                        {(s.applicableForms ?? []).sort((a, b) => a - b).map(f => (
                           <Chip key={f} variant="default" size="xs">F{f}</Chip>
                         ))}
                       </div>
@@ -278,7 +278,7 @@ export default function SubjectsPage() {
                     </td>
                     <td className="px-4 py-3.5 hidden sm:table-cell">
                       <div className="flex flex-wrap gap-0.5">
-                        {s.applicableForms.sort((a, b) => a - b).map(f => (
+                        {(s.applicableForms ?? []).sort((a, b) => a - b).map(f => (
                           <Chip key={f} variant="default" size="xs">F{f}</Chip>
                         ))}
                       </div>
