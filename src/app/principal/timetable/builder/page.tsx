@@ -64,7 +64,14 @@ const WARN_CELL     = "bg-warn-bg border-warn text-warn";
 // ── Types ──────────────────────────────────────────────────────────────────
 type Version      = { id: string; name: string; status: string; slotCount: number };
 type SchoolClass  = { id: string; name: string; form: number };
-type Subject      = { id: string; name: string; code: string };
+type Subject      = { 
+  id: string; 
+  name: string; 
+  code: string; 
+  isGroup?: boolean; 
+  groupId?: string; 
+  applicableForms?: number[];
+};
 type Teacher      = { id: string; fullName: string; teacherSubjects: { subject: { id: string } }[] };
 type TimetableCfg = {
   periodsPerDay: number; dayStartTime: string; periodDurationMinutes: number;
@@ -1276,23 +1283,39 @@ export default function BuilderPage() {
       </div>
 
       {/* Edit modal */}
-      {editModal && mode === "class" && (
-        <SlotEditModal
-          slot={editModal.slot}
-          targetDay={editModal.day}
-          targetPeriod={editModal.period}
-          classId={classId}
-          className={classes.find((c) => c.id === classId)?.name ?? ""}
-          subjects={subjects}
-          teachers={teacherOptions}
-          allSlots={slots}
-          conflictCfg={conflictCfg}
-          saving={modalSaving}
-          error={modalError}
-          onSave={handleSaveSlot}
-          onClose={() => { setEditModal(null); setModalError(null); }}
-        />
-      )}
+      {editModal && mode === "class" && (() => {
+        const currentClass = classes.find((c) => c.id === classId);
+        const classForm = currentClass?.form;
+        // Filter subjects: include all regular subjects + groups that match this class's form
+        const filteredSubjects = subjects.filter((s) => {
+          // Regular subjects (no isGroup flag) are always included
+          if (!s.isGroup) return true;
+          // Group subjects must match the class form
+          if (classForm && s.applicableForms && s.applicableForms.length > 0) {
+            return s.applicableForms.includes(classForm);
+          }
+          // If no form specified, exclude the group
+          return false;
+        });
+        
+        return (
+          <SlotEditModal
+            slot={editModal.slot}
+            targetDay={editModal.day}
+            targetPeriod={editModal.period}
+            classId={classId}
+            className={currentClass?.name ?? ""}
+            subjects={filteredSubjects}
+            teachers={teacherOptions}
+            allSlots={slots}
+            conflictCfg={conflictCfg}
+            saving={modalSaving}
+            error={modalError}
+            onSave={handleSaveSlot}
+            onClose={() => { setEditModal(null); setModalError(null); }}
+          />
+        );
+      })()}
 
       {/* Keyboard shortcuts help */}
       {showHelp && (
