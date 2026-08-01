@@ -88,7 +88,9 @@ export async function POST(req: NextRequest, { params }: Ctx) {
 
   // Handle group subjects: convert GROUP_<id> back to anchor subject ID
   let groupId: string | null = null;
+  let isGroupSubject = false;
   if (d.subjectId.startsWith("GROUP_")) {
+    isGroupSubject = true;
     groupId = d.subjectId.substring(6); // Remove GROUP_ prefix
     // Get the anchor subject ID (first member of the group)
     const group = await prisma.electiveGroup.findUnique({
@@ -102,29 +104,30 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     d = { ...d, subjectId: group.members[0].subjectId };
   }
 
-  // Verify the class and teacher belong to this school
+  // Verify the class belongs to this school
   const classCheck = await prisma.schoolClass.findFirst({
     where: { id: d.classId, schoolId: user.schoolId },
     select: { id: true },
   });
   if (!classCheck) return NextResponse.json({ error: "Class not found." }, { status: 400 });
 
-  // Check teacher assignment - both regular subjects and group subjects
-  let teacherCheck: { teacherId: string } | null = null;
-
-  if (groupId) {
-    // For groups, check classElectiveGroupTeacher
-    teacherCheck = await prisma.classElectiveGroupTeacher.findFirst({
-      where: {
-        groupId,
-        classId: d.classId,
-        teacherId: d.teacherId,
-      },
-      select: { teacherId: true },
+  // For group subjects, use a placeholder teacher (actual teachers are in ClassElectiveGroupTeacher)
+  // For regular subjects, validate the teacher assignment
+  if (isGroupSubject && d.teacherId === "GROUP_PLACEHOLDER") {
+    // Group subjects don't need teacher validation here
+    // Teachers are assigned per subject within the group via ClassElectiveGroupTeacher
+    // For now, use the first available teacher or create a system placeholder
+    const anyTeacher = await prisma.teacher.findFirst({
+      where: { schoolId: user.schoolId },
+      select: { id: true },
     });
+    if (!anyTeacher) {
+      return NextResponse.json({ error: "No teachers found in school." }, { status: 400 });
+    }
+    d = { ...d, teacherId: anyTeacher.id };
   } else {
-    // For regular subjects, check teacherSubject
-    teacherCheck = await prisma.teacherSubject.findFirst({
+    // Regular subject - validate teacher assignment
+    const teacherCheck = await prisma.teacherSubject.findFirst({
       where: {
         teacherId: d.teacherId,
         subjectId: d.subjectId,
@@ -132,10 +135,10 @@ export async function POST(req: NextRequest, { params }: Ctx) {
       },
       select: { teacherId: true },
     });
-  }
 
-  if (!teacherCheck)
-    return NextResponse.json({ error: "That teacher is not assigned to this subject." }, { status: 400 });
+    if (!teacherCheck)
+      return NextResponse.json({ error: "That teacher is not assigned to this subject." }, { status: 400 });
+  }
 
   // Check class conflict
   const classConflict = await prisma.$queryRaw<Array<{ id: string }>>`
