@@ -96,6 +96,7 @@ export async function GET(req: NextRequest) {
     where: { schoolId },
     select: {
       id: true,
+      name: true,
       scopeForm: true,
       scopeStreams: true,
       lessonsPerWeek: true,
@@ -109,6 +110,7 @@ export async function GET(req: NextRequest) {
     .filter((g) => g.members.length > 0)
     .map((g) => ({
       groupId: g.id,
+      name: g.name,
       subjectIds: g.members.map((m) => m.subjectId),
       lessonsPerWeek: g.lessonsPerWeek,
       doublesPerWeek: g.doublesPerWeek ?? 0,
@@ -163,6 +165,7 @@ export async function GET(req: NextRequest) {
         internalCode: number | null;
         isEmpty: boolean;
         isGroupAnchor?: boolean;
+        groupName?: string;
         groupMembers?: Array<{ subjectId: string; subjectCode: string; subjectName: string }>;
         allTeachers?: string[];
       }
@@ -189,6 +192,7 @@ export async function GET(req: NextRequest) {
               internalCode: slot.internalCode,
               isEmpty: false,
               isGroupAnchor: slot.isGroupAnchor,
+              groupName: slot.groupName,
               groupMembers: slot.groupMembers,
               allTeachers: slot.allTeachers,
             }

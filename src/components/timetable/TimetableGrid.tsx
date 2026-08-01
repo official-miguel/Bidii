@@ -46,6 +46,8 @@ export type GridSlot = {
   isManual?:   boolean;
   /** If true, this slot represents a group of subjects */
   isGroupAnchor?: boolean;
+  /** Name of the elective group (if isGroupAnchor) */
+  groupName?: string;
   /** Group members (other subjects in the same group) */
   groupMembers?: Array<{ subjectId: string; subjectCode: string; subjectName: string }>;
   /** All teachers involved in this group slot */
@@ -291,25 +293,26 @@ function LessonCell({
   // For group slots, show abbreviated info or full group details
   const isGroup = slot.isGroupAnchor && slot.groupMembers && slot.groupMembers.length > 0;
   const memberCount = isGroup ? slot.groupMembers!.length + 1 : 0; // +1 for anchor
+  const displayCode = isGroup && slot.groupName ? slot.groupName : slot.subjectCode;
 
   return (
     <button
       type="button"
       disabled={readOnly}
       onClick={() => onClick?.(day, period, slot)}
-      aria-label={`${slot.subjectCode}${isGroup ? ` (group, ${memberCount} subjects)` : ""} — ${slot.teacherName}, period ${period}`}
+      aria-label={`${displayCode}${isGroup ? ` (group, ${memberCount} subjects)` : ""} — ${isGroup && slot.allTeachers ? slot.allTeachers.join(", ") : slot.teacherName}, period ${period}`}
       className={`w-full min-h-[52px] rounded border px-1.5 py-1.5 text-left flex flex-col justify-between
         ${palette!.bg} ${palette!.border}
         ${interactive ? "hover:brightness-95 transition-all cursor-pointer active:scale-[0.98]" : "cursor-default"}
         ${slot.isLocked ? "opacity-80 ring-1 ring-inset ring-slate-400/30" : ""}
         ${isGroup ? "ring-2 ring-inset ring-teal/40 bg-opacity-80" : ""}
       `}
-      title={isGroup ? `Group: ${[slot.subjectCode, ...slot.groupMembers!.map(m => m.subjectCode)].join(", ")}` : undefined}
+      title={isGroup ? `Group: ${slot.groupName} (${[slot.subjectCode, ...slot.groupMembers!.map(m => m.subjectCode)].join(", ")})` : undefined}
     >
       <div className="flex items-start justify-between gap-1 min-w-0">
         <div className="flex-1 min-w-0">
           <span className={`text-xs font-bold leading-tight truncate block ${palette!.text}`}>
-            {slot.subjectCode}
+            {displayCode}
             {isGroup && <span className="text-[9px] ml-0.5">+{slot.groupMembers!.length}</span>}
           </span>
           {isGroup && slot.groupMembers && slot.groupMembers.length > 0 && (

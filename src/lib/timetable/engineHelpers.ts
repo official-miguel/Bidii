@@ -384,6 +384,7 @@ export type RawTeacherAssignment = {
  */
 export type GroupPayloadDescriptor = {
   groupId:        string;
+  name:           string;
   /** Subject IDs that belong to this group, in the order they should be sent */
   subjectIds:     string[];
   /** lessonsPerWeek from ElectiveGroup — shared by all subjects in the group */
@@ -680,15 +681,16 @@ export function collapseGroupSlotsForDisplay<
 ): Array<
   T & {
     isGroupAnchor?: boolean;
+    groupName?: string;
     groupMembers?: Array<{ subjectId: string; subjectCode: string; subjectName: string }>;
     allTeachers?: string[];
   }
 > {
   // Build a map of which subjects belong to which groups and which is the anchor
-  // Map: "subjectId" → { groupId, isAnchor, allSubjectIds }
+  // Map: "subjectId" → { groupId, groupName, isAnchor, allSubjectIds }
   const subjectToGroup = new Map<
     string,
-    { groupId: string; isAnchor: boolean; allSubjectIds: string[] }
+    { groupId: string; groupName: string; isAnchor: boolean; allSubjectIds: string[] }
   >();
 
   for (const group of groupDescriptors) {
@@ -696,6 +698,7 @@ export function collapseGroupSlotsForDisplay<
       const sid = group.subjectIds[i];
       subjectToGroup.set(sid, {
         groupId: group.groupId,
+        groupName: group.name,
         isAnchor: i === 0,
         allSubjectIds: group.subjectIds,
       });
@@ -708,6 +711,7 @@ export function collapseGroupSlotsForDisplay<
     string,
     {
       anchor: T;
+      groupName: string | null;
       nonAnchorTeachers: Map<string, { subjectId: string; subjectCode: string; subjectName: string; teacherName: string }>;
     }
   >();
@@ -721,6 +725,7 @@ export function collapseGroupSlotsForDisplay<
     if (!slotMap.has(key)) {
       slotMap.set(key, {
         anchor: slot,
+        groupName: groupInfo?.groupName ?? null,
         nonAnchorTeachers: new Map(),
       });
     }
@@ -743,12 +748,13 @@ export function collapseGroupSlotsForDisplay<
   const result: Array<
     T & {
       isGroupAnchor?: boolean;
+      groupName?: string;
       groupMembers?: Array<{ subjectId: string; subjectCode: string; subjectName: string }>;
       allTeachers?: string[];
     }
   > = [];
 
-  for (const { anchor, nonAnchorTeachers } of slotMap.values()) {
+  for (const { anchor, groupName, nonAnchorTeachers } of slotMap.values()) {
     const groupInfo = subjectToGroup.get(anchor.subjectId);
     const isGroupAnchor = groupInfo?.isAnchor ?? false;
 
@@ -775,6 +781,7 @@ export function collapseGroupSlotsForDisplay<
       result.push({
         ...anchor,
         isGroupAnchor: true,
+        groupName: groupName ?? undefined,
         groupMembers,
         allTeachers: Array.from(allTeachers),
       });
