@@ -93,6 +93,7 @@ export async function GET(req: NextRequest) {
     where: { schoolId: user.schoolId },
     select: {
       id: true,
+      name: true,
       scopeForm: true,
       scopeStreams: true,
       lessonsPerWeek: true,
@@ -106,6 +107,7 @@ export async function GET(req: NextRequest) {
     .filter((g) => g.members.length > 0)
     .map((g) => ({
       groupId: g.id,
+      name: g.name,
       subjectIds: g.members.map((m) => m.subjectId),
       lessonsPerWeek: g.lessonsPerWeek,
       doublesPerWeek: g.doublesPerWeek ?? 0,
