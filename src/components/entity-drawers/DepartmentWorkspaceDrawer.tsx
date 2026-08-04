@@ -15,7 +15,7 @@
 import { useEffect, useRef, useState } from "react";
 import SlideOver from "@/components/workspace/SlideOver";
 import { Avatar, Chip, Spinner } from "@/components/ui";
-import { BookOpen, Users, Crown, ExternalLink, XCircle, Pencil, Check, ChevronDown } from "lucide-react";
+import { BookOpen, Users, Crown, ExternalLink, XCircle, Pencil, ChevronDown } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Types

@@ -13,12 +13,12 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   Save, Trash2, Plus, Sparkles, Sun, Sunset, Moon,
-  CheckCircle2, AlertTriangle, RefreshCw, Info, X,
+  CheckCircle2, AlertTriangle, RefreshCw, Info,
 } from "lucide-react";
 import ContextNavigation from "@/components/ContextNavigation";
 import {
   PageHeader, ErrorBanner,
-  inputClass, labelClass, primaryButtonClass, secondaryButtonClass,
+  inputClass, primaryButtonClass, secondaryButtonClass,
 } from "@/components/ui";
 import { TIMETABLE_NAV } from "@/lib/timetable/navItems";
 

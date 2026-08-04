@@ -13,7 +13,6 @@ import { requireRole } from "@/lib/auth";
 import { requirePermission } from "@/lib/permissions";
 import { randomUUID } from "crypto";
 import { generateTimetable } from "@/lib/timetable/deterministicEngine";
-import { getLessonColumns } from "@/lib/timetable/engineHelpers";
 import type { TemplateColumn, EngineClass, EngineSubject } from "@/lib/timetable/deterministicEngine";
 import { TimetableSession } from "@prisma/client";
 
@@ -145,7 +144,6 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   }
 
   const templateColumns = timetableConfig.columns as TemplateColumn[];
-  const lessonColumns = getLessonColumns(templateColumns);
 
   // Build engine inputs
   const subjectMap = new Map<string, EngineSubject>();
@@ -335,7 +333,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
           VALUES (${randomUUID()}, ${params.id}, ${schoolId}, ${s.classId},
                   ${s.dayOfWeek}, ${s.period}, ${s.subjectId}, ${s.teacherId},
                   ${s.room ?? null}, false, ${now}, ${now})
-          ON CONFLICT ("versionId", "classId", "dayOfWeek", period) DO NOTHING`;
+          ON CONFLICT ("versionId", "classId", "teacherId", "dayOfWeek", period) DO NOTHING`;
       }
 
       await tx.$executeRaw`

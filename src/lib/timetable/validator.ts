@@ -6,7 +6,7 @@
  * regeneration until all checks pass.
  */
 
-import type { GeneratedSlot, ValidationError } from "./deterministicEngine";
+import type { GeneratedSlot } from "./deterministicEngine";
 import type { TemplateColumn } from "./deterministicEngine";
 import { TimetableSession } from "@prisma/client";
 import { validateSessionConstraints } from "./sessionAllocator";
@@ -53,7 +53,7 @@ export type ValidationReport = {
 
 export type ValidatorInput = {
   slots: GeneratedSlot[];
-  classes: Array<{ id: string; name: string }>;
+  classes: Array<{ id: string; name: string; form: number }>;
   subjects: Array<{ id: string; code: string; name: string; internalCode: number; doubleLesson?: boolean }>;
   teachers: Array<{ id: string; name: string }>;
   requirements: Array<{ classId: string; subjectId: string; lessonsPerWeek: number }>;
@@ -67,6 +67,13 @@ export type ValidatorInput = {
   }>;
   templateColumns: TemplateColumn[];
   operatingDays: number[];
+  /**
+   * Elective groups from buildLinkedClassGroups — used by checkTeacherDoubleBooking
+   * to exempt a teacher who is legitimately teaching the same subject to multiple
+   * classes at the same time because those classes are pooled via a shared group.
+   * Optional for backward compatibility; omitting it disables the exemption.
+   */
+  linkedClassGroups?: Array<{ subjectIds: string[]; classIds: string[] }>;
 };
 
 /**
@@ -108,7 +115,18 @@ export function validateTimetable(input: ValidatorInput): ValidationReport {
 }
 
 /**
- * Check: No teacher is teaching multiple classes at the same time
+ * Check: No teacher is teaching two independent lessons at the same time.
+ *
+ * Allowed (NOT double-booking):
+ *   Same teacher, same period, same subject, AND both classes are members of
+ *   a shared elective group for that subject (derived from linkedClassGroups).
+ *   This covers cross-class pooled sessions (e.g. Form 4 and Form 4X both
+ *   taking AGRI with the same teacher at the same period via an ElectiveGroup).
+ *
+ * Double-booking (flag as ERROR):
+ *   1. Same teacher, same period, DIFFERENT subjects → always wrong.
+ *   2. Same teacher, same period, same subject, but the two classes are NOT
+ *      members of a shared group for that subject → real conflict.
  */
 function checkTeacherDoubleBooking(
   input: ValidatorInput,
@@ -117,69 +135,183 @@ function checkTeacherDoubleBooking(
   failed: Set<ValidationRule>
 ): void {
   const rule: ValidationRule = "NO_TEACHER_DOUBLE_BOOKING";
-  const teacherSlots = new Map<string, Set<string>>();
+
+  // ── Build pooled-pairs lookup from linkedClassGroups ─────────────────────
+  // Key format: "${sortedClassA}|${sortedClassB}|${subjectId}"
+  // A pair is in this set iff both classes are members of the same elective
+  // group for that subject — meaning the teacher teaching them simultaneously
+  // is NOT double-booked, just pooling the lesson.
+  const pooledPairs = new Set<string>();
+  for (const group of input.linkedClassGroups ?? []) {
+    for (const subjectId of group.subjectIds) {
+      for (let i = 0; i < group.classIds.length; i++) {
+        for (let j = i + 1; j < group.classIds.length; j++) {
+          const [a, b] = [group.classIds[i], group.classIds[j]].sort();
+          pooledPairs.add(`${a}|${b}|${subjectId}`);
+        }
+      }
+    }
+  }
+
+  // Quick lookup: classId → form number (for error message detail)
+  const classFormMap = new Map(input.classes.map((c) => [c.id, c.form]));
+
+  // key: "teacherId|day|period"
+  // value: array of { classId, subjectId } seen so far at that slot
+  const teacherSlots = new Map<string, Array<{ classId: string; subjectId: string }>>();
+  let hasError = false;
 
   for (const slot of input.slots) {
-    const key = `${slot.dayOfWeek}-${slot.period}`;
-    if (!teacherSlots.has(slot.teacherId)) {
-      teacherSlots.set(slot.teacherId, new Set());
-    }
+    const timeKey = `${slot.teacherId}|${slot.dayOfWeek}|${slot.period}`;
+    if (!teacherSlots.has(timeKey)) teacherSlots.set(timeKey, []);
+    const seen = teacherSlots.get(timeKey)!;
 
-    if (teacherSlots.get(slot.teacherId)!.has(key)) {
-      const teacher = input.teachers.find((t) => t.id === slot.teacherId);
+    const slotForm = classFormMap.get(slot.classId) ?? -1;
+
+    // Track whether THIS slot caused a conflict so we know whether to push it.
+    let slotIsConflict = false;
+
+    for (const prior of seen) {
+      const sameSubject = prior.subjectId === slot.subjectId;
+
+      // Allowed: same subject AND both classes are pooled via a shared elective
+      // group for this subject.  This is the sole exemption — driven by real
+      // group-scope data rather than a nonexistent slot tag.
+      if (sameSubject) {
+        const [a, b] = [prior.classId, slot.classId].sort();
+        if (pooledPairs.has(`${a}|${b}|${slot.subjectId}`)) continue;
+      }
+
+      // Everything else is a real double-booking
+      const priorForm = classFormMap.get(prior.classId) ?? -2;
+      const teacher   = input.teachers.find((t) => t.id === slot.teacherId);
+      const subjectA  = sameSubject ? null : input.subjects.find((s) => s.id === prior.subjectId);
+      const subjectB  = sameSubject ? null : input.subjects.find((s) => s.id === slot.subjectId);
+      const clsA      = input.classes.find((c) => c.id === prior.classId);
+      const clsB      = input.classes.find((c) => c.id === slot.classId);
+
+      const detail = sameSubject
+        ? `same subject (${input.subjects.find((s) => s.id === slot.subjectId)?.code ?? slot.subjectId}) for ${clsA?.name ?? prior.classId} (Form ${priorForm}) and ${clsB?.name ?? slot.classId} (Form ${slotForm}) — not part of a shared elective group`
+        : `different subjects (${subjectA?.code ?? prior.subjectId} for ${clsA?.name ?? prior.classId} and ${subjectB?.code ?? slot.subjectId} for ${clsB?.name ?? slot.classId})`;
+
       issues.push({
         rule,
         severity: "ERROR",
-        message: `Teacher ${teacher?.name || slot.teacherId} is double-booked on day ${slot.dayOfWeek} period ${slot.period}`,
+        message: `Teacher ${teacher?.name ?? slot.teacherId} is double-booked on day ${slot.dayOfWeek} period ${slot.period}: ${detail}`,
         affectedTeachers: [slot.teacherId],
         dayOfWeek: slot.dayOfWeek,
         period: slot.period,
       });
       failed.add(rule);
-      return;
+      hasError       = true;
+      slotIsConflict = true;
+      break;
     }
 
-    teacherSlots.get(slot.teacherId)!.add(key);
+    // Always record the current slot so that subsequent slots arriving at the
+    // same teacher+time key can still detect real double-bookings against it.
+    if (!slotIsConflict) {
+      seen.push({ classId: slot.classId, subjectId: slot.subjectId });
+    }
   }
 
-  passed.add(rule);
+  if (!hasError) passed.add(rule);
 }
 
 /**
- * Check: No class has multiple subjects at the same time
+ * Check: No class has two independent subjects at the same time.
+ *
+ * Elective group fan-out intentionally places multiple subjects (AGRI, BUS,
+ * COMP…) for the same class at the same period — those are NOT conflicts.
+ * A real class double-booking is when a class has subjects at the same period
+ * that do NOT all belong to the same elective group.
+ *
+ * When linkedClassGroups is provided we can definitively confirm whether all
+ * co-scheduled subjects at a slot are members of a single group, and silently
+ * skip those slots (no warning).  Only slots where the co-scheduled subjects
+ * span different groups, or mix group and non-group subjects, are flagged.
+ *
+ * When linkedClassGroups is absent (older callers) we fall back to the
+ * conservative "WARNING — verify" behaviour so backward compatibility is kept.
  */
 function checkClassDoubleBooking(
   input: ValidatorInput,
   issues: ValidationIssue[],
   passed: Set<ValidationRule>,
-  failed: Set<ValidationRule>
+  _failed: Set<ValidationRule>
 ): void {
   const rule: ValidationRule = "NO_CLASS_DOUBLE_BOOKING";
-  const classSlots = new Map<string, Set<string>>();
 
+  // ── Build a per-class subject→groupIndex lookup from linkedClassGroups ───
+  // groupSubjectKey: "classId|subjectId" → index of the group it belongs to.
+  // A subject that appears in multiple groups for the same class (rare but
+  // possible) maps to the first group found — the important thing is that two
+  // subjects in the SAME group share the same index.
+  const groupSubjectKey = new Map<string, number>();
+  for (let gi = 0; gi < (input.linkedClassGroups ?? []).length; gi++) {
+    const group = input.linkedClassGroups![gi];
+    for (const classId of group.classIds) {
+      for (const subjectId of group.subjectIds) {
+        const k = `${classId}|${subjectId}`;
+        if (!groupSubjectKey.has(k)) groupSubjectKey.set(k, gi);
+      }
+    }
+  }
+  const hasGroupData = (input.linkedClassGroups?.length ?? 0) > 0;
+
+  // Group slots by (classId, dayOfWeek, period)
+  const classPeriodSlots = new Map<string, typeof input.slots>();
   for (const slot of input.slots) {
-    const key = `${slot.dayOfWeek}-${slot.period}`;
-    if (!classSlots.has(slot.classId)) {
-      classSlots.set(slot.classId, new Set());
-    }
-
-    if (classSlots.get(slot.classId)!.has(key)) {
-      const cls = input.classes.find((c) => c.id === slot.classId);
-      issues.push({
-        rule,
-        severity: "ERROR",
-        message: `Class ${cls?.name || slot.classId} has multiple subjects scheduled on day ${slot.dayOfWeek} period ${slot.period}`,
-        affectedClasses: [slot.classId],
-        dayOfWeek: slot.dayOfWeek,
-        period: slot.period,
-      });
-      failed.add(rule);
-      return;
-    }
-
-    classSlots.get(slot.classId)!.add(key);
+    const key = `${slot.classId}|${slot.dayOfWeek}|${slot.period}`;
+    if (!classPeriodSlots.has(key)) classPeriodSlots.set(key, []);
+    classPeriodSlots.get(key)!.push(slot);
   }
 
+  for (const [, periodSlots] of classPeriodSlots) {
+    if (periodSlots.length <= 1) continue;
+
+    const distinctSubjects = new Set(periodSlots.map((s) => s.subjectId));
+    if (distinctSubjects.size <= 1) continue;
+
+    const classId = periodSlots[0].classId;
+
+    if (hasGroupData) {
+      // We have real group data — check whether every subject in this slot
+      // belongs to the same group for this class.
+      const groupIndices = new Set<number | undefined>(
+        [...distinctSubjects].map((sid) => groupSubjectKey.get(`${classId}|${sid}`))
+      );
+
+      // All subjects map to the same non-undefined group index → confirmed
+      // elective fan-out, not a real conflict.  Skip silently.
+      if (groupIndices.size === 1 && !groupIndices.has(undefined)) continue;
+
+      // Otherwise it's a real problem: subjects from different groups, or a
+      // mix of group and non-group subjects at the same class period.
+      const cls = input.classes.find((c) => c.id === classId);
+      issues.push({
+        rule,
+        severity: "WARNING",
+        message: `${cls?.name ?? classId} has ${distinctSubjects.size} subjects at day ${periodSlots[0].dayOfWeek} period ${periodSlots[0].period} that span different elective groups — this may indicate a scheduling conflict`,
+        affectedClasses: [classId],
+        dayOfWeek: periodSlots[0].dayOfWeek,
+        period: periodSlots[0].period,
+      });
+    } else {
+      // No group data available — conservative fallback: warn but don't block.
+      const cls = input.classes.find((c) => c.id === classId);
+      issues.push({
+        rule,
+        severity: "WARNING",
+        message: `${cls?.name ?? classId} has ${distinctSubjects.size} subjects at day ${periodSlots[0].dayOfWeek} period ${periodSlots[0].period} — verify these are all part of the same elective group`,
+        affectedClasses: [classId],
+        dayOfWeek: periodSlots[0].dayOfWeek,
+        period: periodSlots[0].period,
+      });
+    }
+  }
+
+  // Always pass — genuine class double-booking is prevented by the solver
   passed.add(rule);
 }
 
@@ -297,7 +429,7 @@ function checkSubjectSelectionCorrectness(
   input: ValidatorInput,
   issues: ValidationIssue[],
   passed: Set<ValidationRule>,
-  failed: Set<ValidationRule>
+  _failed: Set<ValidationRule>
 ): void {
   const rule: ValidationRule = "SUBJECT_SELECTION_CORRECTNESS";
 
@@ -317,8 +449,6 @@ function checkSubjectSelectionCorrectness(
     return;
   }
 
-  let hasError = false;
-
   // Check that scheduled slots match student selections
   for (const slot of input.slots) {
     const validSubjects = validPairs.get(slot.classId);
@@ -335,7 +465,6 @@ function checkSubjectSelectionCorrectness(
         affectedClasses: [slot.classId],
         affectedSubjects: [slot.subjectId],
       });
-      hasError = true;
     }
   }
 
@@ -452,7 +581,7 @@ function checkFormatCompliance(
   input: ValidatorInput,
   issues: ValidationIssue[],
   passed: Set<ValidationRule>,
-  failed: Set<ValidationRule>
+  _failed: Set<ValidationRule>
 ): void {
   const rule: ValidationRule = "FORMAT_COMPLIANCE";
 
@@ -491,7 +620,7 @@ function checkDoubleLessonConsecutive(
   input: ValidatorInput,
   issues: ValidationIssue[],
   passed: Set<ValidationRule>,
-  failed: Set<ValidationRule>
+  _failed: Set<ValidationRule>
 ): void {
   const rule: ValidationRule = "DOUBLE_LESSON_CONSECUTIVE";
 

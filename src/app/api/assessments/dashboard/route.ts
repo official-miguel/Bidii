@@ -13,9 +13,7 @@ import { scoreToGrade, meanGrade, pointsToGrade, subjectScore, type KcseGrade, A
 const DASHBOARD_STUDENT_LIMIT = 5_000;
 
 // Dashboard results are expensive to compute but change rarely between saves.
-// Cache is intentionally disabled so filter changes always return fresh data.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const DASHBOARD_CACHE_TTL_S = 0;
+// Caching is intentionally disabled — filter changes must always return fresh data.
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = prisma as any;
@@ -492,7 +490,7 @@ async function dashboardHandler(req: NextRequest) {
 }
 
 function emptyDashboard(
-  period: { id: string; name: string; academicYear: string; term: number | null },
+  _period: { id: string; name: string; academicYear: string; term: number | null },
   filters: { periodId: string; classId?: string; subjectId?: string; form?: number }
 ) {
   return NextResponse.json({

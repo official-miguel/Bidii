@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ShieldAlert, Plus, Filter, X, CheckCircle2, Clock, AlertCircle, Search } from "lucide-react";
+import { ShieldAlert, Plus, Filter, X, CheckCircle2, AlertCircle, Search } from "lucide-react";
 import QuickIncidentModal from "./QuickIncidentModal";
 import {
   Avatar,

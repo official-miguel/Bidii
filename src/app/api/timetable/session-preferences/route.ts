@@ -18,7 +18,7 @@ import {
   analyzeSessionCapacity,
 } from "@/lib/timetable/sessionAllocator";
 
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   try {
     const user =
       (await requireRole("PRINCIPAL")) ??
@@ -139,7 +139,7 @@ export async function PUT(req: NextRequest) {
       });
 
       // Create new preferences
-      const created = await tx.timetablePreference.createMany({
+      await tx.timetablePreference.createMany({
         data: preferences.map((pref: any) => ({
           configId: schoolId,
           instruction: pref.instruction || `${pref.subjectCode} in ${pref.preferredSession.toLowerCase()}`,

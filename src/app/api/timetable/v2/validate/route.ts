@@ -18,6 +18,7 @@ import {
   analyseStaffShortages,
   type StaffShortageConfig,
 } from "@/lib/timetable/liveConflictDetector";
+import { buildLinkedClassGroups } from "@/lib/timetable/engineHelpers";
 import type { GeneratedSlot, TemplateColumn } from "@/lib/timetable/deterministicEngine";
 import { TimetableSession } from "@prisma/client";
 
@@ -78,6 +79,7 @@ export async function GET(req: NextRequest) {
     classes,
     subjects,
     teachers,
+    electiveGroupsRaw,
   ] = await Promise.all([
     prisma.timetableConfig.findUnique({
       where: { schoolId },
@@ -100,7 +102,7 @@ export async function GET(req: NextRequest) {
     }),
     prisma.schoolClass.findMany({
       where: { schoolId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, form: true, stream: true },
     }),
     prisma.subject.findMany({
       where: { schoolId },
@@ -110,6 +112,15 @@ export async function GET(req: NextRequest) {
       where: { schoolId },
       select: { id: true, fullName: true },
     }),
+    prisma.electiveGroup.findMany({
+      where: { schoolId },
+      select: {
+        id: true,
+        scopeForm: true,
+        scopeStreams: true,
+        members: { select: { subjectId: true } },
+      },
+    }),
   ]);
 
   if (!config) {
@@ -118,6 +129,9 @@ export async function GET(req: NextRequest) {
       { status: 400 }
     );
   }
+
+  // ── Build pooled-pairs data so the validator can exempt group sessions ─────
+  const linkedClassGroups = buildLinkedClassGroups(electiveGroupsRaw, classes);
 
   // ── Run conflict validator ──────────────────────────────────────────────
   const slots: GeneratedSlot[] = rawSlots.map((s) => ({
@@ -139,7 +153,7 @@ export async function GET(req: NextRequest) {
 
   const report = validateTimetable({
     slots,
-    classes: classes.map((c) => ({ id: c.id, name: c.name })),
+    classes: classes.map((c) => ({ id: c.id, name: c.name, form: c.form })),
     subjects: subjects.map((s) => ({
       id: s.id,
       code: s.code,
@@ -155,6 +169,7 @@ export async function GET(req: NextRequest) {
     sessionPreferences: sessionPrefs,
     templateColumns: config.columns as TemplateColumn[],
     operatingDays: config.operatingDays,
+    linkedClassGroups,
   });
 
   // ── Staff shortage analysis ─────────────────────────────────────────────

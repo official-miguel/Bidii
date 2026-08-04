@@ -80,16 +80,40 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
     return NextResponse.json({ error: "This class already has a lesson in that slot." }, { status: 409 });
   }
 
-  // Check teacher conflict (excluding the slot being moved)
-  const teacherConflict = await prisma.$queryRaw<Array<{ classId: string }>>`
-    SELECT "classId" FROM "TimetableVersionSlot"
+  // Check teacher conflict (excluding the slot being moved).
+  // A teacher occupying the target period for a *different* class is only a
+  // real conflict if the two subjects are unrelated.  When both the slot being
+  // moved and the occupying slot belong to the same ElectiveGroup AND share the
+  // same subjectId, the teacher is running a pooled/merged group session — that
+  // is intentional and must not be blocked.
+  const teacherConflict = await prisma.$queryRaw<Array<{ classId: string; subjectId: string }>>`
+    SELECT "classId", "subjectId" FROM "TimetableVersionSlot"
     WHERE "versionId" = ${params.id} AND "teacherId" = ${effectiveTeacherId}
       AND "dayOfWeek" = ${dayOfWeek} AND period = ${period} AND id != ${slotId}`;
+
   if (teacherConflict.length > 0) {
-    const clashClass = await prisma.schoolClass.findFirst({ where: { id: teacherConflict[0].classId }, select: { name: true } });
-    return NextResponse.json({
-      error: `Teacher is already teaching ${clashClass?.name ?? "another class"} in that slot.`,
-    }, { status: 409 });
+    // Allow the move if every occupying slot shares an elective group AND the
+    // same subjectId as the slot being placed (pooled teaching session).
+    const occupyingSubjectId = teacherConflict[0].subjectId;
+    const isPooled =
+      occupyingSubjectId === slot.subjectId &&
+      (await prisma.$queryRaw<Array<{ count: bigint }>>`
+        SELECT COUNT(*) AS count
+        FROM "ElectiveGroupMember" egm1
+        JOIN "ElectiveGroupMember" egm2 ON egm2."groupId" = egm1."groupId"
+        WHERE egm1."subjectId" = ${slot.subjectId}
+          AND egm2."subjectId" = ${occupyingSubjectId}
+      `).some((r) => Number(r.count) > 0);
+
+    if (!isPooled) {
+      const clashClass = await prisma.schoolClass.findFirst({
+        where: { id: teacherConflict[0].classId },
+        select: { name: true },
+      });
+      return NextResponse.json({
+        error: `Teacher is already teaching ${clashClass?.name ?? "another class"} in that slot.`,
+      }, { status: 409 });
+    }
   }
 
   // Perform the move + mark as manual override

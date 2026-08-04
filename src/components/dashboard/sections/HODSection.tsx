@@ -26,7 +26,6 @@ export default function HODSection({
   if (!derived) return null;
 
   const assessmentsHref = `/${rolePrefix}/assessments`;
-  const calendarHref = rolePrefix === "teacher" ? "/teacher/calendar" : "/staff/calendar";
 
   return (
     <section aria-labelledby="hod-heading" className="space-y-4">

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { requirePermission } from "@/lib/permissions";
 
-export async function GET() {
+export async function GET(_req: NextRequest) {
   const user = (await requireRole("PRINCIPAL")) ?? (await requirePermission("SUBJECTS", "view"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -17,6 +17,32 @@ export async function GET() {
       _count: { select: { teacherSubjects: true } },
     },
   });
+
+  // Get subject IDs that are members of elective groups for marking
+  const groupMemberSubjectIds = await prisma.electiveGroupMember.findMany({
+    where: { 
+      group: { schoolId: user.schoolId }
+    },
+    select: { 
+      subjectId: true,
+      group: { select: { id: true, name: true } }
+    }
+  });
+
+  const groupMemberMap = new Map();
+  for (const member of groupMemberSubjectIds) {
+    if (!groupMemberMap.has(member.subjectId)) {
+      groupMemberMap.set(member.subjectId, []);
+    }
+    groupMemberMap.get(member.subjectId).push(member.group);
+  }
+
+  // Add group membership info to subjects
+  const enrichedSubjects = subjects.map(subject => ({
+    ...subject,
+    isGroupMember: groupMemberMap.has(subject.id),
+    memberOfGroups: groupMemberMap.get(subject.id) || []
+  }));
 
   // Fetch elective groups and represent them as pseudo-subjects for timetable
   // A group acts like a subject with multiple component subjects
@@ -53,7 +79,7 @@ export async function GET() {
     department: null,
   }));
 
-  return NextResponse.json([...subjects, ...groupAsSubjects]);
+  return NextResponse.json([...enrichedSubjects, ...groupAsSubjects]);
 }
 
 const createSchema = z.object({

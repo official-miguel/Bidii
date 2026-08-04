@@ -101,10 +101,13 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
   //   slotB will occupy slotA's (day, period)   → slotB.teacherId must be free there
   //
   // We exclude both slotA and slotB from these checks because they are the
-  // ones being moved — any other occupant is a genuine clash.
+  // ones being moved — any other occupant is a genuine clash UNLESS it is a
+  // pooled elective-group session: the occupying slot shares the same subjectId
+  // AND both subjects belong to a common ElectiveGroup.  In that case the
+  // teacher is legitimately running one merged session for multiple classes.
 
-  const teacherAClash = await prisma.$queryRaw<Array<{ classId: string; className: string }>>`
-    SELECT s."classId", c.name AS "className"
+  const teacherAClash = await prisma.$queryRaw<Array<{ classId: string; className: string; subjectId: string }>>`
+    SELECT s."classId", c.name AS "className", s."subjectId"
     FROM "TimetableVersionSlot" s
     JOIN "SchoolClass" c ON c.id = s."classId"
     WHERE s."versionId" = ${params.id}
@@ -114,17 +117,28 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
       AND s.id NOT IN (${slotAId}, ${slotBId})`;
 
   if (teacherAClash.length > 0) {
-    const clashName = teacherAClash[0].className;
-    return NextResponse.json(
-      {
-        error: `Swap refused — the teacher of "${slotA.subjectId}" is already teaching ${clashName} in that period.`,
-      },
-      { status: 409 }
-    );
+    const occupyingSubjectId = teacherAClash[0].subjectId;
+    const isPooled =
+      occupyingSubjectId === slotA.subjectId &&
+      (await prisma.$queryRaw<Array<{ count: bigint }>>`
+        SELECT COUNT(*) AS count
+        FROM "ElectiveGroupMember" egm1
+        JOIN "ElectiveGroupMember" egm2 ON egm2."groupId" = egm1."groupId"
+        WHERE egm1."subjectId" = ${slotA.subjectId}
+          AND egm2."subjectId" = ${occupyingSubjectId}
+      `).some((r) => Number(r.count) > 0);
+
+    if (!isPooled) {
+      const clashName = teacherAClash[0].className;
+      return NextResponse.json(
+        { error: `Swap refused — the teacher of "${slotA.subjectId}" is already teaching ${clashName} in that period.` },
+        { status: 409 }
+      );
+    }
   }
 
-  const teacherBClash = await prisma.$queryRaw<Array<{ classId: string; className: string }>>`
-    SELECT s."classId", c.name AS "className"
+  const teacherBClash = await prisma.$queryRaw<Array<{ classId: string; className: string; subjectId: string }>>`
+    SELECT s."classId", c.name AS "className", s."subjectId"
     FROM "TimetableVersionSlot" s
     JOIN "SchoolClass" c ON c.id = s."classId"
     WHERE s."versionId" = ${params.id}
@@ -134,13 +148,24 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
       AND s.id NOT IN (${slotAId}, ${slotBId})`;
 
   if (teacherBClash.length > 0) {
-    const clashName = teacherBClash[0].className;
-    return NextResponse.json(
-      {
-        error: `Swap refused — the teacher of "${slotB.subjectId}" is already teaching ${clashName} in that period.`,
-      },
-      { status: 409 }
-    );
+    const occupyingSubjectId = teacherBClash[0].subjectId;
+    const isPooled =
+      occupyingSubjectId === slotB.subjectId &&
+      (await prisma.$queryRaw<Array<{ count: bigint }>>`
+        SELECT COUNT(*) AS count
+        FROM "ElectiveGroupMember" egm1
+        JOIN "ElectiveGroupMember" egm2 ON egm2."groupId" = egm1."groupId"
+        WHERE egm1."subjectId" = ${slotB.subjectId}
+          AND egm2."subjectId" = ${occupyingSubjectId}
+      `).some((r) => Number(r.count) > 0);
+
+    if (!isPooled) {
+      const clashName = teacherBClash[0].className;
+      return NextResponse.json(
+        { error: `Swap refused — the teacher of "${slotB.subjectId}" is already teaching ${clashName} in that period.` },
+        { status: 409 }
+      );
+    }
   }
 
   // ── Class double-booking check ────────────────────────────────────────────

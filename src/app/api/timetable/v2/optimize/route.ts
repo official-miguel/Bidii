@@ -14,8 +14,9 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { requirePermission } from "@/lib/permissions";
 import { validateTimetable } from "@/lib/timetable/validator";
+import { buildLinkedClassGroups } from "@/lib/timetable/engineHelpers";
 import type { GeneratedSlot } from "@/lib/timetable/deterministicEngine";
-import { TimetableSession, TimetableSlotType } from "@prisma/client";
+import { TimetableSession } from "@prisma/client";
 import type { TemplateColumn } from "@/lib/timetable/deterministicEngine";
 
 const schema = z.object({
@@ -76,7 +77,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Load config and requirements for validation
-  const [config, requirements, teacherAssignments, teacherUnavailability, classes, subjects] =
+  const [config, requirements, teacherAssignments, teacherUnavailability, classes, subjects, electiveGroupsRaw] =
     await Promise.all([
       prisma.timetableConfig.findUnique({
         where: { schoolId },
@@ -105,6 +106,15 @@ export async function POST(req: NextRequest) {
         where: { schoolId },
         select: { id: true, code: true, name: true, internalCode: true, doubleLesson: true },
       }),
+      prisma.electiveGroup.findMany({
+        where: { schoolId },
+        select: {
+          id: true,
+          scopeForm: true,
+          scopeStreams: true,
+          members: { select: { subjectId: true } },
+        },
+      }),
     ]);
 
   if (!config) {
@@ -131,9 +141,11 @@ export async function POST(req: NextRequest) {
       isHard: p.isHard,
     }));
 
+  const linkedClassGroups = buildLinkedClassGroups(electiveGroupsRaw, classes);
+
   const report = validateTimetable({
     slots,
-    classes: classes.map((c) => ({ id: c.id, name: c.name })),
+    classes: classes.map((c) => ({ id: c.id, name: c.name, form: c.form })),
     subjects: subjects.map((s) => ({
       id: s.id,
       code: s.code,
@@ -149,6 +161,7 @@ export async function POST(req: NextRequest) {
     sessionPreferences: sessionPrefs,
     templateColumns: config.columns as TemplateColumn[],
     operatingDays: config.operatingDays,
+    linkedClassGroups,
   });
 
   return NextResponse.json({

@@ -15,14 +15,19 @@ The core insight is that we use TWO layers of variables:
   placed[cid, sid]         — IntVar : count of lessons actually placed (0…needed)
 
 Hard constraints (never violated)
-  1. No teacher double-booking    — teacher × day × period ≤ 1
+  1. No teacher double-booking    — teacher × day × period ≤ 1, EXCEPT for
+                                    pooled group sessions where the same teacher
+                                    co-teaches all classes simultaneously
   2. No class double-booking      — class  × day × period ≤ 1
   3. Teacher unavailability       — blocked slots have no variables
   4. Teacher daily load cap       — adaptive: raised when total load exceeds
-                                    configured cap × num_days
+                                    configured cap × num_days; pooled sessions
+                                    count as ONE lesson toward the cap
   5. Double lessons consecutive   — only placed at lesson-period pairs that are
                                     truly adjacent in the template (no BREAK/LUNCH
                                     column between them)
+  6. Linked-class-group sync      — all classes in an elective group must have
+                                    every group subject at the SAME (day, period)
 
 Objective (maximised, priority order via weights)
   P1 (weight 10 000) — maximise total lessons placed across all requirements
@@ -242,18 +247,69 @@ def _solve(req: SolverRequest) -> SolverResponse:
         if _lesson_positions[i + 1] == _lesson_positions[i] + 1:
             valid_double_starts.add(i)  # 0-based lesson index
 
+    # ── 2c. Pooled-session lookup (built from linkedClassGroups) ─────────
+    #
+    # A "pooled session" is a (teacher, subject, d_idx, p) slot where the
+    # same teacher simultaneously teaches the same subject to MORE THAN ONE
+    # class because all those classes are co-scheduled via a LinkedClassGroup.
+    # The teacher physically delivers ONE lesson; the CP-SAT variables for
+    # every class in the group at that (d_idx, p) must all be 1 together
+    # (enforced by the add_implication pairs in section 8b).
+    #
+    # This lookup is used in sections 3, 7, and 8 to avoid counting those
+    # shared variables multiple times against the teacher.
+    #
+    # pooled_var_pairs: set of frozenset({var_id_a, var_id_b}) pairs that are
+    # in the same group for the same subject.  Built lazily after x is populated
+    # (see "── 2c-late" marker just before section 7).
+    #
+    # group_class_pairs: set of (cid1, cid2, sid) triples where cid1 and cid2
+    # are in the same LinkedClassGroup for subject sid.  Used in sections 3 & 8
+    # before x is built.
+    group_class_pairs: set[tuple[str, str, str]] = set()
+    for grp in req.linkedClassGroups:
+        for sid in grp.subjectIds:
+            for i, c1 in enumerate(grp.classIds):
+                for c2 in grp.classIds[i + 1:]:
+                    group_class_pairs.add((c1, c2, sid))
+                    group_class_pairs.add((c2, c1, sid))
+
     # ── 3. Adaptive daily cap per teacher ────────────────────────────────
     # A teacher with N total lessons/week needs at least ceil(N / num_days)
     # per day.  For double-lesson subjects each lessonsPerWeek unit occupies
     # 2 physical periods, so we convert to physical period count first.
+    #
+    # For linked-class-group subjects the same teacher covers N classes at
+    # the SAME slot — it is ONE physical lesson, not N.  We therefore only
+    # count the requirement ONCE per (teacher, subject) pair instead of once
+    # per (teacher, subject, class).
     teacher_total: dict[str, int] = {}
+    # Track which (teacher, subject) pairs have already been counted so that
+    # group subjects are counted exactly once.
+    teacher_subject_counted: set[tuple[str, str]] = set()
     for r in req.requirements:
         tid = assignment_map.get((r.classId, r.subjectId))
-        if tid:
-            subject = subject_by_id.get(r.subjectId)
-            is_double = subject.doubleLesson if subject else False
-            physical = r.lessonsPerWeek * (2 if is_double else 1)
-            teacher_total[tid] = teacher_total.get(tid, 0) + physical
+        if not tid:
+            continue
+        subject = subject_by_id.get(r.subjectId)
+        is_double = subject.doubleLesson if subject else False
+        physical = r.lessonsPerWeek * (2 if is_double else 1)
+        # Is this (teacher, subject) a pooled group subject?
+        # It is pooled if ANY other class in the requirements has the same
+        # teacher for the same subject AND they share a group.
+        is_pooled = any(
+            assignment_map.get((r2.classId, r2.subjectId)) == tid
+            and r2.subjectId == r.subjectId
+            and r2.classId != r.classId
+            and (r.classId, r2.classId, r.subjectId) in group_class_pairs
+            for r2 in req.requirements
+        )
+        if is_pooled:
+            ts_key = (tid, r.subjectId)
+            if ts_key in teacher_subject_counted:
+                continue  # already counted this pooled lesson once
+            teacher_subject_counted.add(ts_key)
+        teacher_total[tid] = teacher_total.get(tid, 0) + physical
 
     effective_cap_for: dict[str, int] = {}
     for tid, total in teacher_total.items():
@@ -370,7 +426,64 @@ def _solve(req: SolverRequest) -> SolverResponse:
         if len(slot_vars) > 1:
             model.add_at_most_one(slot_vars)
 
+    # ── 2c-late. Build pooled-variable pairs from linkedClassGroups ───────
+    #
+    # Now that x is fully populated we can identify which variable pairs
+    # represent the same teacher teaching the same subject to two co-scheduled
+    # classes (a pooled session).  These pairs must be EXEMPTED from the
+    # add_at_most_one teacher double-booking constraint below — they are
+    # intentionally both 1 at the same (d_idx, p) because section 8b forces
+    # them equal via add_implication.
+    #
+    # pooled_pair_key: frozenset of the two cp_model variable names that are
+    # in the same group for the same subject at the same slot.  Using the
+    # variable's .name attribute gives a stable, hashable identity.
+    pooled_pair_keys: set[frozenset] = set()
+    for grp in req.linkedClassGroups:
+        for sid in grp.subjectIds:
+            for d_idx in range(len(days)):
+                for p in range(num_periods):
+                    # Collect all variables in this group for this (sid, d_idx, p)
+                    grp_vars_at_slot = [
+                        x[(cid, sid, d_idx, p)]
+                        for cid in grp.classIds
+                        if (cid, sid, d_idx, p) in x
+                    ]
+                    if len(grp_vars_at_slot) < 2:
+                        continue
+                    # Every pair within this group at this slot is pooled
+                    for i, va in enumerate(grp_vars_at_slot):
+                        for vb in grp_vars_at_slot[i + 1:]:
+                            pooled_pair_keys.add(frozenset({va.name, vb.name}))
+                    # Double-lesson: these vars also occupy p+1 — exempt those too
+                    subject = subject_by_id.get(sid)
+                    if subject and subject.doubleLesson:
+                        # The variable is stored at p (the start), but it
+                        # also occupies p+1.  teacher_slot_vars[tid, d_idx, p+1]
+                        # will contain the same variable objects, so the same
+                        # pooled_pair_keys already cover the p+1 slot.
+                        pass  # covered by the loop below via variable identity
+
     # ── 7. No teacher double-booking ─────────────────────────────────────
+    #
+    # A teacher can only be in one place at a time — UNLESS the conflicting
+    # variables belong to the same LinkedClassGroup for the same subject at
+    # the same slot (a "pooled session").  In that case the teacher is teaching
+    # all those classes simultaneously in one room; section 8b forces all
+    # those variables to the same value, so having more than one = 1 is both
+    # valid and required.
+    #
+    # Strategy: for each (teacher, d_idx, p) bucket with >1 variable, split
+    # the variables into "pooled clusters" (variables that are pairwise pooled
+    # with every other member) and "independent" ones.  Apply add_at_most_one
+    # only to variables from DIFFERENT clusters — i.e. a teacher cannot teach
+    # two independent lessons AND a pooled cluster lesson at the same slot, but
+    # can have multiple variables firing within a single pooled cluster.
+    #
+    # Implementation: partition the variable list using a union-find on
+    # pooled_pair_keys, then take one representative per component.  The
+    # add_at_most_one fires on those representatives — at most one *cluster*
+    # can be active at any slot, which is correct.
     teacher_slot_vars: dict[tuple[str, int, int], list[cp_model.IntVar]] = {}
     for (cid, sid, d_idx, p), v in x.items():
         tid = assignment_map.get((cid, sid))
@@ -382,11 +495,61 @@ def _solve(req: SolverRequest) -> SolverResponse:
         if is_double:
             teacher_slot_vars.setdefault((tid, d_idx, p + 1), []).append(v)
 
+    def _cluster_representatives(
+        slot_vars: list[cp_model.IntVar],
+        pooled_keys: set[frozenset],
+    ) -> list[cp_model.IntVar]:
+        """
+        Partition slot_vars into pooled clusters via union-find.
+        Return one representative variable per cluster.
+        Two variables are in the same cluster when their (name, name) pair
+        is in pooled_keys — meaning they are co-scheduled group variables.
+        """
+        n = len(slot_vars)
+        parent = list(range(n))
+
+        def find(i: int) -> int:
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+
+        def union(i: int, j: int) -> None:
+            parent[find(i)] = find(j)
+
+        for i in range(n):
+            for j in range(i + 1, n):
+                if frozenset({slot_vars[i].name, slot_vars[j].name}) in pooled_keys:
+                    union(i, j)
+
+        # Pick the lowest-index member of each component as the representative
+        seen_roots: set[int] = set()
+        reps: list[cp_model.IntVar] = []
+        for i in range(n):
+            root = find(i)
+            if root not in seen_roots:
+                seen_roots.add(root)
+                reps.append(slot_vars[i])
+        return reps
+
     for slot_vars in teacher_slot_vars.values():
-        if len(slot_vars) > 1:
-            model.add_at_most_one(slot_vars)
+        if len(slot_vars) <= 1:
+            continue
+        # Reduce to one representative per pooled cluster, then constrain
+        reps = _cluster_representatives(slot_vars, pooled_pair_keys)
+        if len(reps) > 1:
+            model.add_at_most_one(reps)
 
     # ── 8. Teacher daily load cap (adaptive) ─────────────────────────────
+    #
+    # Each variable contributes its physical weight (1 for single, 2 for
+    # double) toward the teacher's daily lesson count.  For pooled-session
+    # variables (same teacher, same subject, same slot, co-scheduled classes)
+    # only ONE variable per pooled cluster should contribute — the teacher is
+    # physically present once.
+    #
+    # We reuse _cluster_representatives to pick one variable per cluster per
+    # (teacher, day) bucket.
     teacher_day_vars: dict[tuple[str, int], list[tuple[cp_model.IntVar, int]]] = {}
     for (cid, sid, d_idx, p), v in x.items():
         tid = assignment_map.get((cid, sid))
@@ -398,7 +561,11 @@ def _solve(req: SolverRequest) -> SolverResponse:
 
     for (tid, d_idx), wvars in teacher_day_vars.items():
         cap = effective_cap_for.get(tid, req.maxLessonsPerTeacherPerDay)
-        model.add(sum(v * w for v, w in wvars) <= cap)
+        # Deduplicate pooled clusters: keep one (var, weight) per cluster
+        vars_only = [v for v, _ in wvars]
+        reps_set = set(r.name for r in _cluster_representatives(vars_only, pooled_pair_keys))
+        deduped_wvars = [(v, w) for v, w in wvars if v.name in reps_set]
+        model.add(sum(v * w for v, w in deduped_wvars) <= cap)
 
     # ── 8b. Hard group synchronisation ───────────────────────────────────
     #
@@ -468,25 +635,41 @@ def _solve(req: SolverRequest) -> SolverResponse:
                             # c2 has a var but anchor has no slot here → c2 must be 0.
                             model.add(v_other == 0)
 
-    # Warn about groups whose subjects may be unsatisfiable due to
-    # incompatible teacher availability across classes.
+    # ── 8c. Feasibility warning for under-constrained groups ─────────────
+    #
+    # A pooled session requires every involved class to have a candidate
+    # variable at the SAME (d_idx, p).  A slot is only viable for the whole
+    # group when none of the assigned teachers is marked unavailable at that
+    # slot — i.e. a variable exists for every class in `involved`.
+    #
+    # Note: teacher double-booking is NO LONGER a limiting factor here —
+    # pooled sessions are explicitly exempt (section 7).  The only real
+    # constraint is per-class teacher unavailability, which is already
+    # reflected by the presence/absence of x[(cid, sid, d_idx, p)].
     for grp in req.linkedClassGroups:
         if len(grp.classIds) < 2:
             continue
         for sid in grp.subjectIds:
             sub_code = subject_by_id.get(sid, Subject(id=sid, code=sid)).code
+            # Only consider classes that actually have a requirement for this subject
             involved = [
                 cid for cid in grp.classIds
                 if any(r.classId == cid and r.subjectId == sid for r in req.requirements)
             ]
             if len(involved) < 2:
                 continue
-            # Count candidate slots that exist for ALL involved classes
-            common_slots = 0
-            for d_idx in range(len(days)):
-                for p in range(num_periods):
-                    if all(x.get((cid, sid, d_idx, p)) is not None for cid in involved):
-                        common_slots += 1
+
+            # Count (d_idx, p) slots where ALL involved classes have a variable —
+            # meaning every class's assigned teacher is available at that slot.
+            common_slots = sum(
+                1
+                for d_idx in range(len(days))
+                for p in range(num_periods)
+                if all(x.get((cid, sid, d_idx, p)) is not None for cid in involved)
+            )
+
+            # How many pooled occurrences are needed?
+            # (lessonsPerWeek is already the occurrence count — 1 per double-block)
             needed = next(
                 (r.lessonsPerWeek for r in req.requirements
                  if r.classId == involved[0] and r.subjectId == sid),
@@ -494,17 +677,30 @@ def _solve(req: SolverRequest) -> SolverResponse:
             )
             subject = subject_by_id.get(sid)
             is_double = subject.doubleLesson if subject else False
-            needed_blocks = needed // 2 if is_double else needed
+            # For doubles each occurrence occupies 2 periods; variables are
+            # created at the START period only, so needed_blocks == needed.
+            needed_blocks = needed
+
             if common_slots < needed_blocks:
                 class_names = [
                     class_by_id.get(cid, SchoolClass(id=cid, name=cid)).name
                     for cid in involved
                 ]
+                teachers_involved = ", ".join(
+                    filter(None, {
+                        teacher_by_id.get(
+                            assignment_map.get((cid, sid), ""), Teacher(id="", name="")
+                        ).name
+                        for cid in involved
+                        if assignment_map.get((cid, sid))
+                    })
+                )
                 warnings.append(
                     f"Group sync: {sub_code} for {', '.join(class_names)} needs "
-                    f"{needed_blocks} common slot(s) but only {common_slots} exist "
-                    f"where ALL classes' teachers are free. "
-                    f"Reduce teacher unavailability or assign more teachers."
+                    f"{needed_blocks} common {'double-block' if is_double else 'slot'}(s) "
+                    f"but only {common_slots} exist where every class's teacher is free "
+                    f"simultaneously (teachers: {teachers_involved}). "
+                    f"Reduce teacher unavailability or assign additional teachers."
                 )
 
     # ── 9. Objective ─────────────────────────────────────────────────────
@@ -563,8 +759,12 @@ def _solve(req: SolverRequest) -> SolverResponse:
     for (tid, d_idx), wvars in teacher_day_vars.items():
         half = effective_cap_for.get(tid, req.maxLessonsPerTeacherPerDay) // 2
         bal_v = model.new_bool_var(f"bal_{tid}_{d_idx}")
-        model.add(sum(v * w for v, w in wvars) <= half).only_enforce_if(bal_v)
-        model.add(sum(v * w for v, w in wvars) > half).only_enforce_if(bal_v.negated())
+        # Use the same deduplicated wvars we already built for section 8
+        vars_only = [v for v, _ in wvars]
+        reps_set = set(r.name for r in _cluster_representatives(vars_only, pooled_pair_keys))
+        deduped_wvars = [(v, w) for v, w in wvars if v.name in reps_set]
+        model.add(sum(v * w for v, w in deduped_wvars) <= half).only_enforce_if(bal_v)
+        model.add(sum(v * w for v, w in deduped_wvars) > half).only_enforce_if(bal_v.negated())
         objective_terms.append((bal_v, 5))
 
     if objective_terms:

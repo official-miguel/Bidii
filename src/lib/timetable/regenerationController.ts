@@ -2,27 +2,13 @@
  * src/lib/timetable/regenerationController.ts
  *
  * Orchestration layer between the API routes and the CP-SAT solver.
+ * Calls the solver, runs the post-generation validator, and wraps the
+ * result in the RegenerationResult shape the routes expect.
  *
- * PREVIOUS DESIGN (greedy engine):
- *   A for-loop retried generateTimetable() up to N times, hoping a different
- *   random ordering would avoid conflicts.  Retries were needed because the
- *   greedy algorithm had no backtracking and could paint itself into a corner.
- *
- * CURRENT DESIGN (CP-SAT solver):
- *   CP-SAT is a complete solver — it either finds the optimal (or feasible)
- *   solution in a single call, or mathematically proves the problem is
- *   infeasible.  The retry loop is therefore replaced with a single call.
- *   generateWithValidation() keeps its original signature so both API routes
- *   continue to work without modification.
- *
- * What this file still does:
- *   - Calls the solver via cpSatEngine.generateTimetableViaCpSat()
- *   - Runs the full post-generation validator (same 9 rules as before) so any
- *     edge case that CP-SAT misses is still caught
- *   - Wraps the result in the RegenerationResult shape the routes expect
- *   - Keeps checkFeasibility(), quickValidate(), analyzeValidationFailure(),
- *     and formatRegenerationResult() intact — they are used by other parts of
- *     the codebase
+ * The CP-SAT solver is a complete solver — it either finds a feasible
+ * solution in one call or proves the problem is infeasible.  No retry
+ * loop is used.  generateWithValidation() preserves its original signature
+ * so both API routes work without modification.
  */
 
 import { validateTimetable, type ValidationReport } from "./validator";
@@ -30,7 +16,7 @@ import type { ValidatorInput } from "./validator";
 import type { EngineResult } from "./deterministicEngine";
 import { generateTimetableViaCpSat, isSolverHealthy, type CpSatInput } from "./cpSatEngine";
 
-// ─── Public types (unchanged — API routes depend on these) ───────────────────
+// ─── Public types ────────────────────────────────────────────────────────────
 
 export type RegenerationConfig = {
   maxAttempts: number;        // kept for API compatibility; CP-SAT ignores this
@@ -65,10 +51,9 @@ const DEFAULT_CONFIG: RegenerationConfig = {
 /**
  * Generate a timetable via the CP-SAT solver, then validate the result.
  *
- * The first argument uses the CpSatInput shape (which is a superset of the
- * old deterministicEngine input — the config sub-object carries templateColumns
- * and operatingDays).  The second argument is the ValidatorInput base (same as
- * before, minus slots).  Both API routes already supply these correctly.
+ * @param engineInput  CP-SAT solver input, including config (templateColumns, operatingDays).
+ * @param validatorInput  Validator base — all fields except slots, which are filled from the result.
+ * @param config  Optional overrides for timeout and lifecycle callbacks.
  */
 export async function generateWithValidation(
   engineInput: CpSatInput,

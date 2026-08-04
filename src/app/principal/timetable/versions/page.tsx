@@ -54,6 +54,11 @@ const STATUS_BADGE: Record<string, string> = {
 function vulnChip(v: Version): { label: string; cls: string } | null {
   const vuln = v.vulnerabilities;
   if (!vuln) return null;
+  // Strip NO_CLASS_DOUBLE_BOOKING warnings — these were false positives from
+  // the old validator; the solver enforces this constraint itself.
+  const realWarnings = vuln.conflicts.filter(
+    (c) => !(c.type === "NO_CLASS_DOUBLE_BOOKING" && c.severity === "warning")
+  ).filter((c) => c.severity === "warning").length;
   if (vuln.totalErrors > 0)
     return {
       label: `${vuln.totalErrors} error${vuln.totalErrors !== 1 ? "s" : ""}`,
@@ -64,9 +69,9 @@ function vulnChip(v: Version): { label: string; cls: string } | null {
       label: `${vuln.staffShortages.length} staffing gap${vuln.staffShortages.length !== 1 ? "s" : ""}`,
       cls:   "bg-blue-50 text-blue-700 border-blue-200",
     };
-  if (vuln.totalWarnings > 0)
+  if (realWarnings > 0)
     return {
-      label: `${vuln.totalWarnings} warning${vuln.totalWarnings !== 1 ? "s" : ""}`,
+      label: `${realWarnings} warning${realWarnings !== 1 ? "s" : ""}`,
       cls:   "bg-warn-bg text-warn border-warn/20",
     };
   return { label: "Clean", cls: "bg-success-bg text-success border-success/20" };

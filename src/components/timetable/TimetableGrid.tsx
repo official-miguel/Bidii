@@ -291,8 +291,8 @@ function LessonCell({
   }
 
   // For group slots, show abbreviated info or full group details
-  const isGroup = slot.isGroupAnchor && slot.groupMembers && slot.groupMembers.length > 0;
-  const memberCount = isGroup ? slot.groupMembers!.length + 1 : 0; // +1 for anchor
+  const isGroup = slot.isGroupAnchor; // A slot is a group if it's marked as anchor, regardless of member count
+  const memberCount = isGroup && slot.groupMembers ? slot.groupMembers.length + 1 : 0; // +1 for anchor
   const displayCode = isGroup && slot.groupName ? slot.groupName : slot.subjectCode;
 
   return (
@@ -307,13 +307,13 @@ function LessonCell({
         ${slot.isLocked ? "opacity-80 ring-1 ring-inset ring-slate-400/30" : ""}
         ${isGroup ? "ring-2 ring-inset ring-teal/40 bg-opacity-80" : ""}
       `}
-      title={isGroup ? `Group: ${slot.groupName} (${[slot.subjectCode, ...slot.groupMembers!.map(m => m.subjectCode)].join(", ")})` : undefined}
+      title={isGroup && slot.groupMembers ? `Group: ${slot.groupName} (${[slot.subjectCode, ...slot.groupMembers.map(m => m.subjectCode)].join(", ")})` : undefined}
     >
       <div className="flex items-start justify-between gap-1 min-w-0">
         <div className="flex-1 min-w-0">
           <span className={`text-xs font-bold leading-tight truncate block ${palette!.text}`}>
             {displayCode}
-            {isGroup && <span className="text-[9px] ml-0.5">+{slot.groupMembers!.length}</span>}
+            {isGroup && slot.groupMembers && slot.groupMembers.length > 0 && <span className="text-[9px] ml-0.5">+{slot.groupMembers.length}</span>}
           </span>
           {isGroup && slot.groupMembers && slot.groupMembers.length > 0 && (
             <p className={`text-[8px] truncate leading-tight mt-0.5 ${palette!.sub} opacity-70`}>

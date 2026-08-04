@@ -269,7 +269,6 @@ function scoreSlot(
   }
 
   // Spread across days - reward using a new day
-  const daysUsed = classState.getDaysUsed(subject.id);
   if (!classState.subjectDays.get(subject.id)?.has(day)) {
     score += 25;
   }
@@ -296,9 +295,9 @@ function scoreSlot(
 // ═══════════════════════════════════════════════════════════════════════════
 
 function placeLesson(
-  classId: string,
+  _classId: string,
   subject: EngineSubject,
-  teacherId: string,
+  _teacherId: string,
   classState: ClassState,
   teacherState: TeacherState,
   unavailability: Set<string>,
@@ -379,11 +378,9 @@ export function generateTimetable(input: {
   const {
     subjects,
     classes,
-    teachers,
     requirements,
     teacherAssignments,
     teacherUnavailability,
-    studentSelections,
     sessionPreferences,
     config,
   } = input;
@@ -394,8 +391,6 @@ export function generateTimetable(input: {
 
   // Build lookup maps
   const subjectMap = new Map(subjects.map((s) => [s.id, s]));
-  const classMap = new Map(classes.map((c) => [c.id, c]));
-  const teacherMap = new Map(teachers.map((t) => [t.id, t]));
 
   const requirementMap = new Map<string, SubjectRequirement[]>();
   for (const req of requirements) {
@@ -655,15 +650,14 @@ export function validateTimetable(
   slots: GeneratedSlot[],
   requirements: SubjectRequirement[],
   teacherAssignments: TeacherAssignment[],
-  studentSelections: StudentSubjectSelection[],
-  config: EngineConfig
+  _studentSelections: StudentSubjectSelection[],
+  _config: EngineConfig
 ): ValidationError[] {
   const errors: ValidationError[] = [];
 
   // Check for class double-booking
   const classOccupancy = new Map<string, Set<string>>();
   for (const slot of slots) {
-    const key = `${slot.classId}-${slot.dayOfWeek}-${slot.period}`;
     if (!classOccupancy.has(slot.classId)) {
       classOccupancy.set(slot.classId, new Set());
     }

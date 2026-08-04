@@ -551,11 +551,13 @@ model StudentElective {
 
 /// Section 2C — the weekly timetable grid. dayOfWeek: 0=Mon..4=Fri, period:
 /// 1-based lesson slot in the day. Two unique constraints do the heavy lifting:
-/// a class can't have two subjects in the same slot, and a teacher can't be
-/// double-booked across two classes in the same slot (2C.1). classId and
-/// teacherId are already school-scoped, so those constraints don't need
-/// schoolId added — but schoolId is kept here too for cheap "give me this
-/// school's whole timetable" queries without a join.
+/// a class can't have two subjects in the same slot (class_slot), and a teacher
+/// can't be double-booked for the same class at the same time (teacher_class_slot).
+/// The teacher constraint now includes classId so that a teacher legitimately
+/// running a pooled/merged group session for two different classes at the same
+/// period can have two rows (one per class) without triggering a violation.
+/// classId and teacherId are already school-scoped, so schoolId is not needed in
+/// the constraints — but is kept for cheap school-wide queries without a join.
 model TimetableSlot {
   id          String      @id @default(cuid())
   classId     String
@@ -573,7 +575,10 @@ model TimetableSlot {
   teacher     Teacher     @relation(fields: [teacherId], references: [id])
 
   @@unique([classId, dayOfWeek, period], name: "class_slot")
-  @@unique([teacherId, dayOfWeek, period], name: "teacher_slot")
+  /// Prevents the same teacher being booked for the same class twice at the same
+  /// time. classId is intentionally included so a teacher can cover two different
+  /// classes in the same period (pooled/merged elective group session).
+  @@unique([classId, teacherId, dayOfWeek, period], name: "teacher_class_slot")
   @@index([schoolId])
 }
 
@@ -781,10 +786,17 @@ model TimetableVersionSlot {
   version     TimetableVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
   school      School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
 
-  @@unique([versionId, classId, dayOfWeek, period], name: "TimetableVersionSlot_class_slot_key")
-  @@unique([versionId, teacherId, dayOfWeek, period], name: "TimetableVersionSlot_teacher_slot_key")
+  // Prevent the same teacher being booked for the same class twice at the same
+  // slot. classId is intentionally part of the key: a teacher can legitimately
+  // appear in two rows at the same (versionId, teacherId, dayOfWeek, period) when
+  // they are running a pooled/merged elective group session for two different
+  // classes simultaneously — each class gets its own row, and those rows are
+  // distinguished by classId. The old constraint (without classId) silently
+  // dropped the second class's row via ON CONFLICT DO NOTHING, causing data loss.
+  @@unique([versionId, classId, teacherId, dayOfWeek, period], name: "TimetableVersionSlot_teacher_class_slot_key")
   @@index([versionId])
   @@index([schoolId])
+  @@index([versionId, classId, dayOfWeek, period]) // Index for queries, but not unique
   @@index([classId])
   @@index([teacherId])
   @@index([versionId, isLocked])

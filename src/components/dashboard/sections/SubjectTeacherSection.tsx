@@ -24,7 +24,7 @@ interface Props {
 }
 
 export default function SubjectTeacherSection({
-  rolePrefix, derived, subjects, todaySlots, todayAbsences, activePeriods,
+  rolePrefix, derived: _derived, subjects, todaySlots, todayAbsences, activePeriods,
 }: Props) {
   const subjectCount = subjects.length;
 

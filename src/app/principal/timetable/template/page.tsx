@@ -16,10 +16,9 @@ import {
 import ContextNavigation from "@/components/ContextNavigation";
 import {
   PageHeader, ErrorBanner,
-  inputClass, primaryButtonClass, secondaryButtonClass,
+  inputClass, primaryButtonClass,
   FormField,
-} from "@/components/ui";
-import { TIMETABLE_NAV } from "@/lib/timetable/navItems";
+} from "@/components/ui";import { TIMETABLE_NAV } from "@/lib/timetable/navItems";
 
 // ── Constants ─────────────────────────────────────────────────────────────
 

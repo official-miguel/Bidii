@@ -13,7 +13,7 @@ import { requirePermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { TimetableSlotType, TimetableSession } from "@prisma/client";
 import { generateDefaultTemplate, getTemplateSummary } from "@/lib/timetable/templateManager";
-import type { TemplateColumnInput } from "@/lib/timetable/templateManager";
+
 
 /**
  * GET — returns config in a format compatible with both old and new clients:

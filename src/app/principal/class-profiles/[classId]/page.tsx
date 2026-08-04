@@ -16,7 +16,6 @@ import Link from "next/link";
 import {
   PageHeader,
   ErrorBanner,
-  EmptyState,
   Chip,
   primaryButtonClass,
   secondaryButtonClass,
@@ -140,7 +139,7 @@ function TypeToggle({
 
 function ElectiveGroupsClassView({
   groups,
-  classId,
+  classId: _classId,
   allTeachers,
   onAddTeacher,
   onRemoveTeacher,
