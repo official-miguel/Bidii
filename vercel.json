@@ -1,6 +1,6 @@
 {
   "functions": {
-    "src/app/api/timetable/generate/route.ts": {
+    "src/app/api/timetable/v2/generate/route.ts": {
       "maxDuration": 90
     },
     "src/app/api/timetable/v2/generate/route.ts": {

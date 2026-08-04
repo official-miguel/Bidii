@@ -245,7 +245,6 @@ export async function POST(req: NextRequest, { params }: Ctx) {
         }
 
         // Treat other classes' slots as teacher unavailability
-        const regenSet = new Set(op.classIds);
         const otherSlots = await prisma.$queryRaw<
           Array<{ teacherId: string; dayOfWeek: number; period: number }>
         >`

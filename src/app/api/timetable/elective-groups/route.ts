@@ -66,9 +66,27 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const scopeFormParam = searchParams.get("scopeForm");
 
-  const where: Record<string, unknown> = { schoolId: user.schoolId };
+  // Build the where clause.
+  // When a specific form is requested (scopeForm > 0), return both that form's
+  // groups AND school-wide groups (scopeForm = 0) so nothing is hidden.
+  // When scopeForm = 0 is explicitly requested, return only school-wide groups.
+  // When no scopeForm param is given, return everything for the school.
+  let where: Record<string, unknown>;
   if (scopeFormParam !== null) {
-    where.scopeForm = Number(scopeFormParam);
+    const requestedForm = Number(scopeFormParam);
+    if (requestedForm > 0) {
+      // Form-specific view: include this form's groups + school-wide groups
+      where = {
+        schoolId: user.schoolId,
+        OR: [{ scopeForm: requestedForm }, { scopeForm: 0 }],
+      };
+    } else {
+      // Explicitly asked for school-wide only (scopeForm=0)
+      where = { schoolId: user.schoolId, scopeForm: 0 };
+    }
+  } else {
+    // No filter — return all groups for this school
+    where = { schoolId: user.schoolId };
   }
 
   try {

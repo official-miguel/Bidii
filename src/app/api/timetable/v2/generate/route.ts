@@ -18,7 +18,7 @@ import { requirePermission } from "@/lib/permissions";
 import { randomUUID } from "crypto";
 import { generateWithValidation } from "@/lib/timetable/regenerationController";
 import { runPreGenerationChecks } from "@/lib/timetable/preGenerationChecks";
-import { getLessonColumns, buildLinkedClassGroups, buildGroupAwarePayload, fanOutGroupSlots } from "@/lib/timetable/engineHelpers";
+import { getLessonColumns, buildLinkedClassGroups, buildGroupAwarePayload, fanOutGroupSlots, mergeGroupTeachers, resolveGroupAnchors } from "@/lib/timetable/engineHelpers";
 import type { GroupPayloadDescriptor } from "@/lib/timetable/engineHelpers";
 import { analyseStaffShortages, type StaffShortageConfig } from "@/lib/timetable/liveConflictDetector";
 import type { TemplateColumn, EngineSubject, EngineClass } from "@/lib/timetable/deterministicEngine";
@@ -75,6 +75,7 @@ async function _handlePost(req: NextRequest) {
     sessionPreferences,
     electiveGroupsRaw,
     classElectiveTeachersRaw,
+    formElectiveTeachersRaw,
   ] = await Promise.all([
     prisma.schoolClass.findMany({
       where: {
@@ -140,6 +141,12 @@ async function _handlePost(req: NextRequest) {
       where: { schoolId },
       select: { groupId: true, classId: true, subjectId: true, teacherId: true },
     }),
+    // Form-wide elective group teacher assignments (fallback source when
+    // ClassElectiveGroupTeacher rows are absent — assigned via Requirements page)
+    prisma.electiveGroupTeacher.findMany({
+      where: { schoolId },
+      select: { groupId: true, subjectId: true, teacherId: true },
+    }),
   ]);
 
   if (!timetableConfig) {
@@ -196,6 +203,19 @@ async function _handlePost(req: NextRequest) {
       lessonsPerWeek: r.lessonsPerWeek,
     }));
 
+  // ── Merge form-wide and per-class group teacher assignments ─────────────
+  // Teachers assigned via Timetable → Requirements land in ElectiveGroupTeacher
+  // (form-wide).  Teachers assigned via the class profile page land in
+  // ClassElectiveGroupTeacher (per-class).  The engine reads only the per-class
+  // table, so we synthesise per-class equivalents from the form-wide rows for
+  // any class that has no existing per-class assignment for that pairing.
+  const mergedClassElectiveTeachers = mergeGroupTeachers(
+    formElectiveTeachersRaw,
+    classElectiveTeachersRaw,
+    electiveGroupsRaw,
+    classesRaw,
+  );
+
   // ── Group-aware payload: collapse group subjects to one anchor each ────────
   // Build GroupPayloadDescriptor for every elective group that has members.
   //
@@ -211,7 +231,7 @@ async function _handlePost(req: NextRequest) {
 
   // groupId → Set of classIds that have ≥1 ClassElectiveGroupTeacher row
   const groupClassesWithTeachers = new Map<string, Set<string>>();
-  for (const gt of classElectiveTeachersRaw) {
+  for (const gt of mergedClassElectiveTeachers) {
     if (!groupClassesWithTeachers.has(gt.groupId)) {
       groupClassesWithTeachers.set(gt.groupId, new Set());
     }
@@ -239,25 +259,62 @@ async function _handlePost(req: NextRequest) {
     })
     .filter((d) => d.classIds.length >= 1);
 
-  const groupPayload = buildGroupAwarePayload(
-    engineRequirements,
-    teacherAssignments,
-    groupDescriptors,
-    classElectiveTeachersRaw,
-  );
+  // Auto-resolve anchor conflicts: if two groups share the same first subject,
+  // rotate one group's member list so each gets a unique anchor before the
+  // solver payload is built.
+  const resolvedGroupDescriptors = resolveGroupAnchors(groupDescriptors);
 
-  // Build the anchor key set for fan-out (used after solver returns)
-  const anchorKeys = new Set<string>();
-  for (const desc of groupDescriptors) {
-    if (desc.subjectIds.length === 0) continue;
-    const anchorSid = desc.subjectIds[0];
-    for (const cid of desc.classIds) {
-      anchorKeys.add(`${cid}:${anchorSid}`);
+  // ── Drop requirements that have no teacher assigned ──────────────────────
+  // Subjects stored in SubjectLessonRequirement without a matching
+  // ClassSubjectTeacher row (or elective group teacher row) cannot be
+  // scheduled.  Rather than blocking generation with a hard error we silently
+  // exclude them so the rest of the timetable can still be produced.
+  // The caller can run /api/timetable/v2/pre-check to see the full list of
+  // subjects that were skipped for this reason.
+  const assignedPairs = new Set<string>(); // "classId:subjectId"
+  for (const a of teacherAssignments) {
+    assignedPairs.add(`${a.classId}:${a.subjectId}`);
+  }
+  // Also mark group subjects as covered (their teacher comes from
+  // mergedClassElectiveTeachers — checked later via buildGroupAwarePayload)
+  for (const gt of mergedClassElectiveTeachers) {
+    assignedPairs.add(`${gt.classId}:${gt.subjectId}`);
+  }
+
+  // Group anchor subjects are covered once groupDescriptors are resolved, so
+  // add them now (anchor = first subject in each group for each class).
+  for (const gd of resolvedGroupDescriptors) {
+    const anchorId = gd.subjectIds[0];
+    for (const classId of gd.classIds) {
+      assignedPairs.add(`${classId}:${anchorId}`);
     }
   }
 
+  const skippedNoTeacher: string[] = [];
+  const engineRequirementsWithTeacher = engineRequirements.filter((r) => {
+    if (assignedPairs.has(`${r.classId}:${r.subjectId}`)) return true;
+    // Record what was dropped for the response warnings
+    const cls = classesRaw.find((c) => c.id === r.classId);
+    const subjectMeta = [...subjectMap.values()].find((s) => s.id === r.subjectId);
+    skippedNoTeacher.push(
+      `${cls?.name ?? r.classId}: ${subjectMeta?.code ?? r.subjectId} skipped (no teacher assigned)`
+    );
+    return false;
+  });
+
+  const groupPayload = buildGroupAwarePayload(
+    engineRequirementsWithTeacher,
+    teacherAssignments,
+    resolvedGroupDescriptors,
+    mergedClassElectiveTeachers,
+  );
+
+  // The anchorRealKeyToCompositeKeys reverse lookup is built inside
+  // buildGroupAwarePayload and passed through groupPayload — no separate
+  // anchorKeys Set is needed in the generate route any more.
+
   // Augment subject map with any group subjects not already present
-  for (const gt of classElectiveTeachersRaw) {
+  for (const gt of mergedClassElectiveTeachers) {
     if (!subjectMap.has(gt.subjectId)) {
       // Subject may have no SubjectLessonRequirement row (pure group subject) —
       // fetch it lazily so engineSubjects is complete for the validator.
@@ -270,11 +327,11 @@ async function _handlePost(req: NextRequest) {
   }
   const engineSubjectsWithGroups = Array.from(subjectMap.values());
 
-  // Also collect any new teacher IDs from ClassElectiveGroupTeacher
+  // Also collect any new teacher IDs from the merged group teacher set
   const allTeacherIds = [
     ...new Set([
       ...teacherAssignments.map((a) => a.teacherId),
-      ...classElectiveTeachersRaw.map((g) => g.teacherId),
+      ...mergedClassElectiveTeachers.map((g) => g.teacherId),
     ]),
   ];
   const teachersRaw = await prisma.teacher.findMany({
@@ -312,6 +369,7 @@ async function _handlePost(req: NextRequest) {
       studentSelections: studentSelectionsInput,
       templateColumns: lessonColumns.length,
       operatingDays: timetableConfig.operatingDays,
+      groups: resolvedGroupDescriptors,
     });
 
     if (!preCheck.canProceed) {
@@ -342,6 +400,7 @@ async function _handlePost(req: NextRequest) {
     sessionPreferences: sessionPrefs,
     templateColumns,
     operatingDays: timetableConfig.operatingDays,
+    linkedClassGroups: linkedClassGroupsList,
   };
 
   const result = await generateWithValidation(
@@ -398,11 +457,13 @@ async function _handlePost(req: NextRequest) {
     );
   }
 
-  // ── Fan-out group slots: expand anchor slots → one per group subject ────────
+  // ── Fan-out group slots: expand anchor slots → one per group subject ──────
+  // Uses the reverse lookup built by buildGroupAwarePayload to map each
+  // solver anchor slot to all (groupId, subjectId, teacherId) fan-out entries.
   const expandedSlots = fanOutGroupSlots(
     result.finalResult!.slots,
     groupPayload.fanOutMap,
-    anchorKeys,
+    groupPayload.anchorRealKeyToCompositeKeys,
   );
   // Replace result slots with the expanded set for persistence and response
   result.finalResult!.slots = expandedSlots;
@@ -478,26 +539,26 @@ async function _handlePost(req: NextRequest) {
   const { Prisma } = await import("@prisma/client");
 
   // ── Deduplicate slots before inserting ────────────────────────────────────
-  // TimetableVersionSlot has TWO unique constraints:
-  //   • (versionId, classId, dayOfWeek, period)   — one subject per class slot
-  //   • (versionId, teacherId, dayOfWeek, period)  — no teacher double-booking
+  // The DB unique constraint is (versionId, teacherId, dayOfWeek, period) —
+  // one slot per teacher per time position.  The (classId, dayOfWeek, period)
+  // combination is intentionally NOT unique so multiple elective group subjects
+  // can share the same class period.
   //
-  // After fanOutGroupSlots expands anchor slots into multiple group subjects, a
-  // teacher who covers several group subjects for different classes can appear
-  // multiple times at the same (dayOfWeek, period).  The ON CONFLICT clause can
-  // only name one constraint, so the second unique key would throw a raw
-  // PostgreSQL error that bubbles up as a 500.
+  // After fanOutGroupSlots expands anchor slots, a teacher who covers the same
+  // group subject for multiple classes (e.g. GEO taught to Form 2 AND Form 4
+  // at the same period in a school-wide group) will appear at the same
+  // (teacherId, dayOfWeek, period) across different classIds.  Each occurrence
+  // is a legitimate, distinct row (different classId) and must be kept.
   //
-  // We deduplicate here (keep first occurrence wins) to guarantee neither
-  // constraint is violated before we ever touch the database.
-  const classSlotSeen = new Set<string>();   // "classId|day|period"
-  const teacherSlotSeen = new Set<string>(); // "teacherId|day|period"
+  // We therefore key the dedup on (classId, subjectId, dayOfWeek, period) —
+  // one subject per class per slot.  This prevents true duplicates (the same
+  // slot emitted twice) while preserving cross-class group slots.
+  const slotSeen = new Set<string>(); // "classId|subjectId|day|period"
+
   const deduplicatedSlots = result.finalResult!.slots.filter((s) => {
-    const classKey   = `${s.classId}|${s.dayOfWeek}|${s.period}`;
-    const teacherKey = `${s.teacherId}|${s.dayOfWeek}|${s.period}`;
-    if (classSlotSeen.has(classKey) || teacherSlotSeen.has(teacherKey)) return false;
-    classSlotSeen.add(classKey);
-    teacherSlotSeen.add(teacherKey);
+    const key = `${s.classId}|${s.subjectId}|${s.dayOfWeek}|${s.period}`;
+    if (slotSeen.has(key)) return false;
+    slotSeen.add(key);
     return true;
   });
 
@@ -547,7 +608,7 @@ async function _handlePost(req: NextRequest) {
         (id, "versionId", "schoolId", "classId", "dayOfWeek", period,
          "subjectId", "teacherId", room, "isManual", "createdAt", "updatedAt")
       VALUES ${Prisma.join(rows)}
-      ON CONFLICT DO NOTHING`;
+      ON CONFLICT ("versionId", "classId", "teacherId", "dayOfWeek", period) DO NOTHING`;
   }
 
   // Replace result slots with the deduplicated set so slotCount and the
@@ -565,6 +626,7 @@ async function _handlePost(req: NextRequest) {
     solverStatus: "CP-SAT",
     stats: result.finalResult.stats,
     warnings: result.finalResult.warnings,
+    skippedNoTeacher: skippedNoTeacher.length > 0 ? skippedNoTeacher : undefined,
     staffShortages: staffShortages.length > 0 ? staffShortages : undefined,
     vulnerabilities: vulnerabilitySnapshot,
     validation: {

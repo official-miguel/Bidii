@@ -36,7 +36,6 @@ function StepIndicator({ current }: { current: 1 | 2 }) {
       {steps.map(({ n, label }, i) => {
         const done    = n < current;
         const active  = n === current;
-        const _pending = n > current;
         return (
           <div key={n} className="flex items-center gap-1.5">
             <div className="flex items-center gap-2">

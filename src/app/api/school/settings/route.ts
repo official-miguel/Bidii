@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
-import { requirePermission } from "@/lib/permissions";
 
 export async function GET() {
   const user = await requireRole("PRINCIPAL");

@@ -15,7 +15,7 @@ async function getVersion(versionId: string, schoolId: string) {
 }
 
 // ── GET /api/timetable/v2/versions/[id] ────────────────────────────────────
-export async function GET(req: NextRequest, { params }: Ctx) {
+export async function GET(_req: NextRequest, { params }: Ctx) {
   const user = (await requireRole("PRINCIPAL")) ?? (await requirePermission("TIMETABLE", "view"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -69,7 +69,7 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
 // ── DELETE /api/timetable/v2/versions/[id] ────────────────────────────────
 // Deletes a DRAFT or ARCHIVED version (PUBLISHED cannot be deleted directly).
 
-export async function DELETE(req: NextRequest, { params }: Ctx) {
+export async function DELETE(_req: NextRequest, { params }: Ctx) {
   const user = (await requireRole("PRINCIPAL")) ?? (await requirePermission("TIMETABLE", "manage"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

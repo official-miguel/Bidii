@@ -113,8 +113,6 @@ export async function POST(
     }
 
     try {
-      console.log("[POST /cubicles bulk] Starting bulk create:", { count: cubicleNames.length, capacityEach, bedType, customOccupancy });
-      
       const created = await prisma.$transaction(async (tx) => {
         // Continue bed numbering from highest existing
         const lastBed = await tx.bed.findFirst({
@@ -143,11 +141,8 @@ export async function POST(
             })
           )
         );
-        console.log("[POST /cubicles bulk] Created cubicles:", cubicles.map(c => ({ id: c.id, name: c.name })));
-
         // For each cubicle, auto-generate beds based on capacity and bed type
         for (const cubicle of cubicles) {
-          console.log(`[POST /cubicles bulk] Auto-generating ${capacityEach} ${bedType} beds for cubicle ${cubicle.name}, starting from bed #${nextBedNumber}`);
           for (let i = 1; i <= capacityEach; i++) {
             const bed = await tx.bed.create({
               data: {
@@ -210,7 +205,6 @@ export async function POST(
               });
             }
           }
-          console.log(`[POST /cubicles bulk] Generated ${capacityEach} ${bedType} beds for cubicle ${cubicle.id}`);
         }
 
         // Update dorm's totalCapacity
@@ -221,7 +215,6 @@ export async function POST(
           where: { id: params.dormId },
           data: { totalCapacity: positionCount },
         });
-        console.log("[POST /cubicles bulk] Updated dorm totalCapacity to:", positionCount);
 
         // Fetch cubicles with counts for response
         const createdWithCounts = await tx.cubicle.findMany({
@@ -237,12 +230,6 @@ export async function POST(
             },
           },
         });
-
-        console.log("[POST /cubicles bulk] Response cubicles with counts:", createdWithCounts.map(c => ({
-          id: c.id,
-          name: c.name,
-          _count: c._count,
-        })));
 
         return createdWithCounts;
       });
@@ -303,8 +290,6 @@ export async function POST(
   }
 
   try {
-    console.log("[POST /cubicles single] Starting single cubicle create:", { name, capacity, bedType, customOccupancy });
-    
     const cubicle = await prisma.$transaction(async (tx) => {
       // Create the cubicle
       const newCubicle = await tx.cubicle.create({
@@ -321,7 +306,6 @@ export async function POST(
               : undefined,
         },
       });
-      console.log("[POST /cubicles single] Created cubicle:", { id: newCubicle.id, name: newCubicle.name, capacity: newCubicle.capacity });
 
       // Continue bed numbering from highest existing
       const lastBed = await tx.bed.findFirst({
@@ -337,7 +321,6 @@ export async function POST(
         }
       }
 
-      console.log(`[POST /cubicles single] Starting bed numbering from Bed ${nextBedNumber}`);
       for (let i = 1; i <= capacity; i++) {
         const bed = await tx.bed.create({
           data: {
@@ -400,7 +383,6 @@ export async function POST(
           });
         }
       }
-      console.log(`[POST /cubicles single] Generated ${capacity} ${bedType} beds for cubicle ${newCubicle.id}`);
 
       // Update dorm's totalCapacity
       const positionCount = await tx.sleepingPosition.count({
@@ -410,7 +392,6 @@ export async function POST(
         where: { id: params.dormId },
         data: { totalCapacity: positionCount },
       });
-      console.log("[POST /cubicles single] Updated dorm totalCapacity to:", positionCount);
 
       // Fetch with full counts for response
       const result = await tx.cubicle.findUnique({
@@ -425,12 +406,6 @@ export async function POST(
             },
           },
         },
-      });
-      
-      console.log("[POST /cubicles single] Response cubicle with counts:", {
-        id: result?.id,
-        name: result?.name,
-        _count: result?._count,
       });
 
       return result;

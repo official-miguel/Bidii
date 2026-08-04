@@ -574,7 +574,7 @@ function EditCubicleModal({
 // ── CubicleSection ────────────────────────────────────────────────────────────
 
 function CubicleSection({
-  cubicle: initialCubicle, dormId, onAddBeds, onBedDeleted,
+  cubicle: initialCubicle, dormId, onAddBeds: _onAddBeds, onBedDeleted,
 }: {
   cubicle: CubicleDetail;
   dormId: string;
@@ -590,10 +590,8 @@ function CubicleSection({
   async function fetchBeds() {
     if (beds.length > 0) { setExpanded((e) => !e); return; }
     setExpanded(true); setLoadingBeds(true);
-    console.log(`[CubicleSection] Fetching beds for cubicle ${cubicle.id} (${cubicle.name}), dormId: ${dormId}`);
     const res = await fetch(`/api/accommodation/dormitories/${dormId}/beds?cubicleId=${cubicle.id}`);
     const data = await res.json();
-    console.log(`[CubicleSection] Got ${data.length || 0} beds from API:`, data);
     if (res.ok) setBeds(data);
     setLoadingBeds(false);
   }
@@ -601,11 +599,9 @@ function CubicleSection({
   function refreshBeds() {
     setBeds([]);
     setLoadingBeds(true);
-    console.log(`[CubicleSection] Refreshing beds for cubicle ${cubicle.id} (${cubicle.name}), dormId: ${dormId}`);
     fetch(`/api/accommodation/dormitories/${dormId}/beds?cubicleId=${cubicle.id}`)
       .then((r) => r.ok ? r.json() : [])
       .then((data) => {
-        console.log(`[CubicleSection] Refreshed got ${data.length || 0} beds:`, data);
         setBeds(data);
       })
       .finally(() => setLoadingBeds(false));

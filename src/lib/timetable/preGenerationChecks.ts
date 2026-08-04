@@ -6,6 +6,7 @@
  */
 
 import { analyzeStreamBalance, type BalancingConfig } from "./streamBalancer";
+import type { GroupPayloadDescriptor } from "./engineHelpers";
 
 export type PreGenerationIssue = {
   type:
@@ -14,7 +15,8 @@ export type PreGenerationIssue = {
     | "NO_STUDENTS_IN_SUBJECT"
     | "INSUFFICIENT_CAPACITY"
     | "EMPTY_SLOTS"
-    | "CONFIGURATION_ERROR";
+    | "CONFIGURATION_ERROR"
+    | "DUPLICATE_GROUP_ANCHOR";
   severity: "BLOCKING" | "WARNING" | "INFO";
   message: string;
   affectedSubject?: string;
@@ -66,6 +68,12 @@ export type PreGenerationInput = {
   }>;
   templateColumns: number; // Total lesson slots per day
   operatingDays: number[];
+  /**
+   * Elective group descriptors — used to check that no two groups in the same
+   * form scope share the same anchor subject.  Optional: omit when not available
+   * (the check is simply skipped).
+   */
+  groups?: GroupPayloadDescriptor[];
 };
 
 /**
@@ -81,6 +89,11 @@ export function runPreGenerationChecks(
   }
 ): PreGenerationReport {
   const issues: PreGenerationIssue[] = [];
+
+  // Check for duplicate anchor subjects across groups in the same form scope
+  if (input.groups && input.groups.length > 0) {
+    checkGroupAnchorConflicts(input.groups, input.subjects, issues);
+  }
 
   // Check stream balance for elective subjects
   checkStreamBalance(input, balancingConfig, issues);
@@ -112,6 +125,47 @@ export function runPreGenerationChecks(
       approvalsNeeded,
     },
   };
+}
+
+/**
+ * Check for any groups that still share an anchor after auto-resolution.
+ * This only fires when a group has ALL its subjects already claimed as
+ * anchors by other groups — an edge case that resolveGroupAnchors cannot fix
+ * without changing group membership.  Surfaced as INFO (not BLOCKING) because
+ * the timetable can still be generated; the ambiguous group will share slot
+ * counts with another group, which may cause uneven scheduling.
+ */
+function checkGroupAnchorConflicts(
+  groups: GroupPayloadDescriptor[],
+  subjects: PreGenerationInput["subjects"],
+  issues: PreGenerationIssue[],
+): void {
+  const subjectName = new Map(subjects.map((s) => [s.id, s.code]));
+  const anchorSeen = new Map<string, { groupName: string; groupId: string }>();
+
+  for (const group of groups) {
+    if (group.subjectIds.length === 0 || group.classIds.length === 0) continue;
+    const anchorSubjectId = group.subjectIds[0];
+    const prior = anchorSeen.get(anchorSubjectId);
+
+    if (prior) {
+      const subCode = subjectName.get(anchorSubjectId) ?? anchorSubjectId;
+      issues.push({
+        type: "DUPLICATE_GROUP_ANCHOR",
+        severity: "INFO",
+        message:
+          `Groups "${prior.groupName}" and "${group.name}" share anchor subject ${subCode}. ` +
+          `This happens when both groups contain only subjects that are already anchors elsewhere. ` +
+          `Consider splitting the groups or changing their membership so each starts with a unique subject.`,
+        affectedSubject: anchorSubjectId,
+        suggestedAction:
+          `Review group membership in Timetable → Requirements and ensure each group ` +
+          `has at least one subject not used as a first member in any sibling group.`,
+      });
+    } else {
+      anchorSeen.set(anchorSubjectId, { groupName: group.name, groupId: group.groupId });
+    }
+  }
 }
 
 /**

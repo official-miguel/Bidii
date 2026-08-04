@@ -21,7 +21,7 @@ import { TimetableSlotType, TimetableSession } from "@prisma/client";
 // Force dynamic rendering since we use cookies for authentication
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   try {
     const user =
       (await requireRole("PRINCIPAL")) ??

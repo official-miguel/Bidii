@@ -38,12 +38,6 @@ interface BorrowRow {
   book?: { title: string; author: string | null } | null;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-interface ReservationRow {
-  id: string; status: string; reservationType: string; createdAt: string;
-  catalogue: { id: string; title: string };
-}
-
 interface CardDetail {
   student: { id: string; fullName: string; admissionNumber: string; schoolClass: { name: string; form: number }; files: { id: string }[] };
   card: {

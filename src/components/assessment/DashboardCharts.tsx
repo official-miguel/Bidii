@@ -184,18 +184,6 @@ function Section({
 }
 
 // ---------------------------------------------------------------------------
-// Heat-map colour for a score 0–100
-// ---------------------------------------------------------------------------
-
-function heatColour(score: number | null): string {
-  if (score === null) return "bg-paper text-slate";
-  if (score >= 75) return "bg-green-100 text-green-800";
-  if (score >= 60) return "bg-blue-100 text-blue-800";
-  if (score >= 50) return "bg-amber-100 text-amber-800";
-  if (score >= 40) return "bg-orange-100 text-orange-800";
-  return "bg-red-100 text-red-800";
-}
-
 // Heat colour keyed on KCSE points (1–12 scale).
 function heatColourPts(pts: number | null): string {
   if (pts === null) return "bg-paper text-slate";
@@ -716,18 +704,6 @@ export default function DashboardCharts({ classes, subjects }: Props) {
               12: "A", 11: "A-", 10: "B+", 9: "B", 8: "B-",
               7: "C+", 6: "C", 5: "C-", 4: "D+", 3: "D", 2: "D-", 1: "E",
             };
-            const chartData = data.trendData.map((t) => ({
-              label: t.period.term
-                ? `T${t.period.term} ${t.period.academicYear}`
-                : t.period.name,
-              pts: t.period.id === periodId
-                ? null               // highlighted separately
-                : (t.meanPoints ?? null),
-              ptsSelected: t.period.id === periodId
-                ? (t.meanPoints ?? null)
-                : null,
-              periodId: t.period.id,
-            }));
             // Merge into one series so the line is unbroken
             const lineData = data.trendData.map((t) => ({
               label: t.period.term

@@ -14,7 +14,6 @@ import {
   analyzeStreamBalance,
   suggestStreamAssignments,
   calculateRebalancingMoves,
-  validateStreamApproval,
   type BalancingConfig,
 } from "@/lib/timetable/streamBalancer";
 

@@ -120,7 +120,7 @@ export async function PUT(req: NextRequest) {
       });
 
       // Create new requirements
-      const created = await tx.subjectLessonRequirement.createMany({
+      await tx.subjectLessonRequirement.createMany({
         data: requirements.map((req: any) => ({
           schoolId,
           classId,
@@ -272,6 +272,104 @@ export async function POST(req: NextRequest) {
         created: created.count,
         totalWeeklySlots,
         message: `Auto-populated ${created.count} lesson requirements (${totalWeeklySlots} slots/week across ${lessonPeriodsPerDay} periods × ${activeDays} days)`,
+      });
+    }
+
+    // ── sync-framework ──────────────────────────────────────────────────────
+    // Ensures every class receives ALL subjects that are applicable to its
+    // form (framework).  Only NEW (classId, subjectId) pairs are inserted;
+    // existing requirements are never modified or deleted.
+    //
+    // When a subject has a teacher, it will appear in the timetable.
+    // When a subject has NO teacher it is still stored here but the generate
+    // and pre-check routes silently skip it before handing work to the solver.
+    if (action === "sync-framework") {
+      const timetableConfig = await prisma.timetableConfig.findUnique({
+        where: { schoolId },
+        select: {
+          operatingDays: true,
+          columns: {
+            where: { slotType: "LESSON" },
+            select: { id: true },
+          },
+        },
+      });
+
+      const lessonPeriodsPerDay = timetableConfig?.columns.length ?? 8;
+      const activeDays = timetableConfig?.operatingDays.length ?? 5;
+      const totalWeeklySlots = lessonPeriodsPerDay * activeDays;
+
+      const classes = await prisma.schoolClass.findMany({
+        where: { schoolId },
+        select: { id: true, form: true },
+      });
+
+      const subjects = await prisma.subject.findMany({
+        where: { schoolId },
+        select: { id: true, applicableForms: true, doubleLesson: true },
+      });
+
+      // Load existing requirements so we can skip pairs that already exist.
+      const existingReqs = await prisma.subjectLessonRequirement.findMany({
+        where: { schoolId },
+        select: { classId: true, subjectId: true, lessonsPerWeek: true },
+      });
+      const existingKeys = new Set(
+        existingReqs.map((r) => `${r.classId}:${r.subjectId}`)
+      );
+
+      const toInsert: {
+        schoolId: string;
+        classId: string;
+        subjectId: string;
+        lessonsPerWeek: number;
+      }[] = [];
+
+      for (const cls of classes) {
+        const applicable = subjects.filter((s) =>
+          s.applicableForms.includes(cls.form)
+        );
+        if (applicable.length === 0) continue;
+
+        const totalUnits = applicable.reduce(
+          (sum, s) => sum + (s.doubleLesson ? 2 : 1),
+          0
+        );
+        const slotsPerUnit = Math.floor(totalWeeklySlots / totalUnits);
+        let remainder = totalWeeklySlots - slotsPerUnit * totalUnits;
+
+        for (const subject of applicable) {
+          const key = `${cls.id}:${subject.id}`;
+          if (existingKeys.has(key)) continue; // already configured — leave it
+
+          const units = subject.doubleLesson ? 2 : 1;
+          let lessons = slotsPerUnit * units;
+          if (remainder > 0) {
+            lessons += 1;
+            remainder -= 1;
+          }
+
+          toInsert.push({
+            schoolId,
+            classId: cls.id,
+            subjectId: subject.id,
+            lessonsPerWeek: Math.max(1, lessons),
+          });
+        }
+      }
+
+      const created = await prisma.subjectLessonRequirement.createMany({
+        data: toInsert,
+        skipDuplicates: true,
+      });
+
+      return NextResponse.json({
+        success: true,
+        created: created.count,
+        totalWeeklySlots,
+        message:
+          `Synced framework subjects: added ${created.count} missing requirement${created.count !== 1 ? "s" : ""} ` +
+          `(existing requirements were not modified)`,
       });
     }
 

@@ -216,12 +216,12 @@ export default function BuilderPage() {
   const cellRefs = useRef<Map<string, HTMLElement>>(new Map());
   useEffect(() => {
     Promise.all([
-      fetch("/api/timetable/v2/versions").then((r) => r.json()),
-      fetch("/api/classes").then((r) => r.json()),
-      fetch("/api/subjects").then((r) => r.json()),
-      fetch("/api/staff").then((r) => r.json()),
-      fetch("/api/timetable/template").then((r) => r.json()),
-      fetch("/api/timetable/unavailability").then((r) => r.json()),
+      fetch("/api/timetable/v2/versions").then((r) => r.json()).catch(e => { console.error("Error fetching versions:", e); return []; }),
+      fetch("/api/classes").then((r) => r.json()).catch(e => { console.error("Error fetching classes:", e); return []; }),
+      fetch("/api/subjects").then((r) => r.json()).catch(e => { console.error("Error fetching subjects:", e); return []; }),
+      fetch("/api/staff").then((r) => r.json()).catch(e => { console.error("Error fetching staff:", e); return []; }),
+      fetch("/api/timetable/template").then((r) => r.json()).catch(e => { console.error("Error fetching template:", e); return {}; }),
+      fetch("/api/timetable/unavailability").then((r) => r.json()).catch(e => { console.error("Error fetching unavailability:", e); return []; }),
     ]).then(([vs, cls, sub, tch, tpl, unav]) => {
       const vList: Version[] = vs ?? [];
       setVersions(vList);
@@ -290,17 +290,27 @@ export default function BuilderPage() {
         const latestDraft = vList.find((v) => v.status === "DRAFT");
         if (latestDraft) setVersionId(latestDraft.id);
       }
-    }).catch(() => {});
-  }, []);
+    }).catch((error) => {
+      console.error("Error in main data loading:", error);
+      // Set some sensible defaults to prevent the app from crashing
+      setVersions([]);
+      setClasses([]);
+      setSubjects([]);
+      setTeachers([]);
+    });
+  }, [paramVersionId]);
 
   // ── Load slots ────────────────────────────────────────────────────────────
   const loadSlots = useCallback(async () => {
-    if (mode === "class" && !classId) return;
-    if (mode === "teacher" && !teacherId) return;
-    if (mode === "school") return; // school view has its own loader
-    if (!versionId) return;
-    setLoading(true); setError(null);
     try {
+      if (mode === "class" && !classId) return;
+      if (mode === "teacher" && !teacherId) return;
+      if (mode === "school") return; // school view has its own loader
+      if (!versionId) return;
+      
+      setLoading(true); 
+      setError(null);
+      
       let url = "";
       const ver = versions.find((v) => v.id === versionId);
       if (mode === "class" && ver?.status !== "PUBLISHED") {
@@ -312,6 +322,7 @@ export default function BuilderPage() {
         const vp = ver?.status !== "PUBLISHED" ? `&versionId=${versionId}` : "";
         url = `/api/timetable/v2/teacher-view?teacherId=${teacherId}${vp}`;
       }
+      
       const res  = await fetch(url);
       if (!res.ok) throw new Error("Failed to load timetable.");
       const data = await res.json();
@@ -333,13 +344,21 @@ export default function BuilderPage() {
         setDiffSlots([]);
       }
     } catch (e) {
+      console.error("loadSlots error:", e);
       setError((e as Error).message);
     } finally {
       setLoading(false);
     }
   }, [mode, classId, teacherId, versionId, versions]);
 
-  useEffect(() => { loadSlots(); }, [loadSlots]);
+  useEffect(() => { 
+    if (loadSlots) {
+      loadSlots().catch(error => {
+        console.error("Error in loadSlots:", error);
+        setError("Failed to load timetable data");
+      });
+    }
+  }, [loadSlots]);
 
   // ── Load ALL slots for school-wide view ───────────────────────────────────
   const loadSchoolSlots = useCallback(async () => {
@@ -388,6 +407,12 @@ export default function BuilderPage() {
       if (sp.dayOfWeek !== null) blocked.add(`${sp.dayOfWeek}-${sp.period}`);
       else activeDays.forEach((d) => blocked.add(`${d}-${sp.period}`));
     }
+    // Build classId → form map so the conflict engine can distinguish
+    // elective-group fan-out (same subject, same form, multiple streams)
+    // from genuine cross-form double-booking.
+    const classFormMap = new Map<string, number>(
+      classes.map((c) => [c.id, c.form])
+    );
     return {
       operatingDays:              activeDays,
       periodsPerDay:              config?.periodsPerDay ?? 8,
@@ -396,8 +421,9 @@ export default function BuilderPage() {
       teacherUnavailability:      unavailMap,
       requiredLessons:            reqMap,
       doubleSubjects:             doubleSet,
+      classFormMap,
     };
-  }, [specials, activeDays, config, maxPerDay, unavailMap, reqMap, doubleSet]);
+  }, [specials, activeDays, config, maxPerDay, unavailMap, reqMap, doubleSet, classes]);
 
   useEffect(() => {
     if (!slots.length) {
@@ -439,11 +465,6 @@ export default function BuilderPage() {
     if (!config) return new Map();
     return new Map(computePeriodTimes(config).map((t) => [t.period, t]));
   }, [lessonColumns, config]);
-
-  const periods = useMemo(
-    () => Array.from({ length: config?.periodsPerDay ?? 8 }, (_, i) => i + 1),
-    [config]
-  );
 
   const slotMap = useMemo(() => {
     const m = new Map<string, LiveSlot>();
@@ -1508,9 +1529,15 @@ function SlotCell({
       {/* Top row: subject code + status icons */}
       <div className="flex items-start justify-between gap-1">
         <div className="min-w-0">
-          <p className="font-bold text-xs leading-tight">{slot.subjectCode}</p>
+          <p className="font-bold text-xs leading-tight">
+            {slot.isGroupAnchor && slot.groupName ? `📦 ${slot.groupName}` : slot.subjectCode}
+          </p>
           <p className="text-[10px] leading-tight opacity-80 mt-0.5 truncate">
-            {mode === "class" ? slot.teacherName : slot.className}
+            {mode === "class" 
+              ? (slot.isGroupAnchor && (slot.allTeachers?.length ?? 0) > 1 
+                  ? `${slot.allTeachers!.length} teachers` 
+                  : slot.teacherName)
+              : slot.className}
           </p>
         </div>
         <div className="flex items-center gap-0.5 shrink-0">

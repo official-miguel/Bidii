@@ -12,7 +12,7 @@ import { useRouter } from "next/navigation";
 import {
   Zap, CheckCircle2, AlertTriangle, AlertCircle, RefreshCw,
   Upload, Trash2, ChevronDown, ChevronUp, Info, Shield,
-  Play, ClipboardList, ArrowRight, ExternalLink,
+  ClipboardList, ArrowRight, ExternalLink,
 } from "lucide-react";
 import ContextNavigation from "@/components/ContextNavigation";
 import { PageHeader, ErrorBanner, inputClass, labelClass, primaryButtonClass, secondaryButtonClass } from "@/components/ui";
@@ -34,10 +34,6 @@ type PreCheckResult = {
   config?: { classCount: number; subjectCount: number; totalLessonsRequired: number; lessonSlotsPerWeek: number };
 };
 
-type ValidationIssue = {
-  rule: string; severity: "ERROR" | "WARNING"; message: string;
-};
-
 type GenerationResult = {
   success: boolean; versionId?: string; attempts: number;
   stats?: { totalLessonsScheduled: number; totalLessonsRequired: number; completionRate: number };
@@ -54,8 +50,13 @@ type GenerationResult = {
  */
 function fixUrl(issue: PreCheckIssue): string | null {
   switch (issue.type) {
-    case "MISSING_TEACHER_ASSIGNMENT":
-      return "/principal/subjects";
+    case "MISSING_TEACHER_ASSIGNMENT": {
+      // affectedClasses[0] is the classId — deep-link to that class's profile
+      const classId = issue.affectedClasses?.[0];
+      return classId
+        ? `/principal/class-profiles/${encodeURIComponent(classId)}`
+        : "/principal/class-profiles";
+    }
     case "EMPTY_SLOTS": {
       // affectedClasses[0] is the classId — deep-link to that class
       const classId = issue.affectedClasses?.[0];
@@ -78,7 +79,7 @@ function fixUrl(issue: PreCheckIssue): string | null {
 
 function fixLabel(type: string): string {
   switch (type) {
-    case "MISSING_TEACHER_ASSIGNMENT": return "Assign teachers";
+    case "MISSING_TEACHER_ASSIGNMENT": return "Open class profile";
     case "EMPTY_SLOTS":                return "Edit requirements";
     case "INSUFFICIENT_CAPACITY":      return "Edit requirements";
     case "STREAM_IMBALANCE":           return "Review student selections";
@@ -451,9 +452,7 @@ export default function GeneratePage() {
                             {result.validation.summary.errors} constraint violation{result.validation.summary.errors !== 1 ? "s" : ""}
                           </span>
                       }
-                      {result.validation.summary.warnings > 0 && (
-                        <span className="text-xs text-warn">· {result.validation.summary.warnings} warning{result.validation.summary.warnings !== 1 ? "s" : ""}</span>
-                      )}
+                      {/* Warning count removed — validator always produces 0 warnings with elective-group awareness */}
                     </div>
                   )}
                 </div>

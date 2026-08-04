@@ -1,10 +1,10 @@
-/// Section: AI Timetable Generator — turns a school's TimetableConfig
-/// (day start time, period length, break/lunch placement and length) into
-/// actual clock times for each period. The generator and every grid in the
-/// app schedule in abstract period numbers (1, 2, 3…) — this is the one
-/// place that maps period numbers to "8:00–8:40" for a given school, so
-/// every screen that shows a timetable can display the school's own real
-/// format instead of a bare period number.
+/**
+ * Maps abstract period numbers (1, 2, 3…) to actual clock times for a
+ * given school's TimetableConfig (day start time, period length, break/lunch
+ * placement and duration). Every timetable grid in the app schedules in
+ * period numbers — this is the one place that converts them to "8:00–8:40"
+ * so every screen shows the school's own real format.
+ */
 
 export type ScheduleTimesConfig = {
   periodsPerDay: number;
@@ -38,10 +38,11 @@ function formatMinutes(totalMinutes: number): string {
   return `${hours12}:${String(minutes).padStart(2, "0")}`;
 }
 
-/// Returns the start/end clock time for every period 1..periodsPerDay,
-/// accounting for a break and/or lunch inserted after specific periods.
-/// Purely additive/descriptive — never used by the scheduling algorithm
-/// itself, only for display.
+/**
+ * Returns the start/end clock time for every period 1..periodsPerDay,
+ * accounting for a break and/or lunch inserted after specific periods.
+ * Used for display only — the scheduling algorithm works in period numbers.
+ */
 export function computePeriodTimes(config: ScheduleTimesConfig): PeriodTime[] {
   const periods: PeriodTime[] = [];
   let cursor = parseStartTime(config.dayStartTime);
@@ -68,8 +69,10 @@ export function computePeriodTimes(config: ScheduleTimesConfig): PeriodTime[] {
   return periods;
 }
 
-/// The school's whole day, start to finish, as a display string — e.g.
-/// "School day: 8:00 – 15:40". Used in the AI panel's settings summary.
+/**
+ * Returns the school day as a display string — e.g. "8:00 – 15:40".
+ * Used in the timetable settings summary panel.
+ */
 export function schoolDaySpan(config: ScheduleTimesConfig): string {
   const periods = computePeriodTimes(config);
   if (periods.length === 0) return "";

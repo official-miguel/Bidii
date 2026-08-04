@@ -57,9 +57,9 @@ const DEFAULT_CONFIG: BalancingConfig = {
  * Analyze stream balance for a subject across multiple streams
  */
 export function analyzeStreamBalance(
-  subject: { id: string; code: string; name: string },
+  _subject: { id: string; code: string; name: string },
   streams: StreamOption[],
-  students: StreamStudent[],
+  _students: StreamStudent[],
   config: BalancingConfig = DEFAULT_CONFIG
 ): BalancingResult {
   const warnings: string[] = [];
@@ -166,7 +166,7 @@ export function analyzeStreamBalance(
 export function suggestStreamAssignments(
   students: StreamStudent[],
   streams: StreamOption[],
-  config: BalancingConfig = DEFAULT_CONFIG
+  _config: BalancingConfig = DEFAULT_CONFIG
 ): Map<string, string> {
   // Create assignments map: studentId -> classId
   const assignments = new Map<string, string>();
@@ -175,9 +175,6 @@ export function suggestStreamAssignments(
 
   // Sort streams by current count (ascending)
   const sortedStreams = [...streams].sort((a, b) => a.currentCount - b.currentCount);
-
-  // Calculate target size per stream
-  const targetSize = Math.ceil(students.length / streams.length);
 
   // Track current counts
   const streamCounts = new Map<string, number>();
@@ -218,7 +215,7 @@ export function calculateRebalancingMoves(
   currentAssignments: Map<string, string>, // studentId -> classId
   students: StreamStudent[],
   streams: StreamOption[],
-  config: BalancingConfig = DEFAULT_CONFIG
+  _config: BalancingConfig = DEFAULT_CONFIG
 ): Array<{
   studentId: string;
   studentName: string;
@@ -241,7 +238,7 @@ export function calculateRebalancingMoves(
   for (const stream of streams) {
     streamSizes.set(stream.classId, 0);
   }
-  for (const [studentId, classId] of currentAssignments) {
+  for (const [, classId] of currentAssignments) {
     streamSizes.set(classId, (streamSizes.get(classId) ?? 0) + 1);
   }
 

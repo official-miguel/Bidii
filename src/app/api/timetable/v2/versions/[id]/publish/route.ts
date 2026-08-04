@@ -11,7 +11,7 @@ type Ctx = { params: { id: string } };
 // ARCHIVED. Slots from the published version are written into TimetableSlot
 // so the legacy API routes and the offline store stay in sync.
 
-export async function POST(req: NextRequest, { params }: Ctx) {
+export async function POST(_req: NextRequest, { params }: Ctx) {
   const user = (await requireRole("PRINCIPAL")) ?? (await requirePermission("TIMETABLE", "manage"));
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -52,9 +52,12 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   `;
 
   // ── Sync into legacy TimetableSlot table ────────────────────────────────
-  // Remove old slots for the school, then write all slots from this version.
-  // This keeps the offline store, teacher views, and all legacy API routes
-  // reading the current live timetable without any code changes.
+  // Full replace: delete all existing slots for this school then re-insert
+  // from the version being published.  The DELETE means no existing row can
+  // conflict, so ON CONFLICT DO NOTHING is a safe no-op guard.
+  // The constraint is now (classId, teacherId, dayOfWeek, period) so a teacher
+  // running a pooled session for two different classes at the same period
+  // produces two distinct rows — one per class — without violating uniqueness.
   await prisma.$executeRaw`DELETE FROM "TimetableSlot" WHERE "schoolId" = ${user.schoolId}`;
 
   await prisma.$executeRaw`
@@ -66,11 +69,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
       "teacherId", room, ${user.schoolId}, ${now}, ${now}
     FROM "TimetableVersionSlot"
     WHERE "versionId" = ${params.id}
-    ON CONFLICT ("classId", "dayOfWeek", period) DO UPDATE
-      SET "subjectId" = EXCLUDED."subjectId",
-          "teacherId" = EXCLUDED."teacherId",
-          room        = EXCLUDED.room,
-          "updatedAt" = EXCLUDED."updatedAt"
+    ON CONFLICT ("classId", "teacherId", "dayOfWeek", period) DO NOTHING
   `;
 
   // Audit log
@@ -89,7 +88,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
 }
 
 // ── DELETE /api/timetable/v2/versions/[id]/publish (unpublish) ────────────
-export async function DELETE(req: NextRequest, { params }: Ctx) {
+export async function DELETE(_req: NextRequest, { params }: Ctx) {
   const user = await requireRole("PRINCIPAL");
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useRef, useCallback, useState } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { usePathname } from "next/navigation";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -110,7 +110,6 @@ export function usePermissionCache(
   schoolId: string | null | undefined,
   userId:   string | null | undefined
 ): UsePermissionCacheResult {
-  const router   = useRouter();
   const pathname = usePathname();
   const key      = schoolId && userId ? cacheKey(schoolId, userId) : null;
 

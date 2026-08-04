@@ -10,10 +10,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { requirePermission } from "@/lib/permissions";
-import { Prisma } from "@prisma/client";
-import { TimetableSlotType, TimetableSession } from "@prisma/client";
+import { TimetableSlotType } from "@prisma/client";
 import { collapseGroupSlotsForDisplay } from "@/lib/timetable/engineHelpers";
-import type { TemplateColumn, EngineSubject } from "@/lib/timetable/deterministicEngine";
+import type { TemplateColumn } from "@/lib/timetable/deterministicEngine";
 import type { GroupPayloadDescriptor } from "@/lib/timetable/engineHelpers";
 
 export async function GET(req: NextRequest) {
@@ -220,7 +219,6 @@ export async function GET(req: NextRequest) {
   });
 
   // Summary stats
-  const totalLessons = displaySlots.length;
   const totalSlots = templateColumns.filter((c) => c.slotType === TimetableSlotType.LESSON).length
     * operatingDays.length;
   const filledSlots = displaySlots.length;

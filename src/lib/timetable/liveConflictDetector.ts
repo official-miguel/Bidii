@@ -43,6 +43,20 @@ export type LiveSlot = {
   isLocked: boolean;
   lockScope?: string | null;
   lockReason?: string | null;
+  // Group display properties
+  isGroupAnchor?: boolean;
+  groupName?: string;
+  groupMembers?: Array<{ subjectId: string; subjectCode: string; subjectName: string }>;
+  allTeachers?: string[];
+  /**
+   * The ElectiveGroup this slot belongs to, if any.  Set by the server-side
+   * conflicts route (which has DB access) and forwarded by the builder UI
+   * after collapse.  When present, two slots that share the same groupId AND
+   * the same subjectId are treated as one pooled/merged teaching session
+   * regardless of which classId they carry — covering the "same teacher,
+   * same group subject, multiple streams" scenario (Conflict 3).
+   */
+  groupId?: string | null;
 };
 
 export type ConflictEngineConfig = {
@@ -53,6 +67,9 @@ export type ConflictEngineConfig = {
   teacherUnavailability: Map<string, Set<string>>;
   requiredLessons: Map<string, number>;
   doubleSubjects: Set<string>;
+  /** classId → form number — used to distinguish group fan-out (same form)
+   *  from genuine cross-form double-booking (different forms). */
+  classFormMap: Map<string, number>;
 };
 
 // ── Staff shortage types ───────────────────────────────────────────────────
@@ -118,41 +135,129 @@ export function detectLiveConflicts(
   }
 
   // Pass 1: Teacher and class double-booking
-  const teacherOcc = new Map<string, LiveSlot>();
-  const classOcc = new Map<string, LiveSlot>();
+  //
+  // Teacher double-booking rules:
+  //   ALLOWED   — same teacher, same period, same subject, same groupId (non-null,
+  //               matching on both sides) — covers both:
+  //               • stream-parallel elective groups (Form 4 East/West sharing the
+  //                 same period for Music within the same ElectiveGroup), and
+  //               • cross-class pooled sessions (Form 2 East + Form 2 West merged
+  //                 into one physical lesson by the same teacher).
+  //               groupId MUST be present on both slots; a null groupId on either
+  //               side means the subject is not part of a group and cannot claim
+  //               this exemption, even if the subject and form happen to match.
+  //   ALLOWED   — same teacher, same period, same subject, split sub-streams
+  //               (Conflict 2): each sub-stream teacher gets a distinct teacherId
+  //               key so the occupancy map never sees a collision — no special
+  //               handling needed.
+  //   CONFLICT  — same teacher, same period, different subjects (always wrong).
+  //   CONFLICT  — same teacher, same period, same subject but groupId is null on
+  //               either side, or groupIds differ — two unrelated bookings that
+  //               happen to share a subject code are still a real double-booking.
+  //
+  // Class double-booking rules:
+  //   ALLOWED   — multiple subjects at the same (class, period) when they all
+  //               belong to the same elective group fan-out.
+  //   CONFLICT  — two subjects at the same (class, period) with different
+  //               subjectIds AND no group relationship (pure double-schedule).
+
+  // teacherOcc: "teacherId|day|period" → array of { classId, subjectId, groupId }
+  const teacherOcc = new Map<
+    string,
+    Array<{ classId: string; subjectId: string; groupId: string | null | undefined }>
+  >();
+  // classOcc: "classId|day|period" → array of LiveSlot
+  const classOcc = new Map<string, LiveSlot[]>();
 
   for (const s of slots) {
-    const slotK = `${s.dayOfWeek}-${s.period}`;
-    const tk = `${s.teacherId}|${slotK}`;
-    const ck = `${s.classId}|${slotK}`;
+    const slotK    = `${s.dayOfWeek}-${s.period}`;
+    const tk       = `${s.teacherId}|${slotK}`;
+    const ck       = `${s.classId}|${slotK}`;
 
-    if (teacherOcc.has(tk)) {
-      const other = teacherOcc.get(tk)!;
+    // ── Teacher double-booking check ────────────────────────────────────
+    if (!teacherOcc.has(tk)) teacherOcc.set(tk, []);
+    const priorTeacherSlots = teacherOcc.get(tk)!;
+
+    // Track whether this slot itself caused a new conflict so we can decide
+    // whether to add it to priorTeacherSlots.  We always push on clean
+    // comparisons so that subsequent real conflicts are still detected.
+    let thisSlotIsConflict = false;
+
+    for (const prior of priorTeacherSlots) {
+      const sameSubject = prior.subjectId === s.subjectId;
+
+      // ── Allowed: confirmed group session (stream-parallel OR pooled) ────
+      // Both slots must carry the same non-null groupId.  This is the ONLY
+      // way to exempt same-teacher same-subject same-period across classes.
+      // Slots without a groupId are non-group subjects; two non-group slots
+      // for the same subject that coincidentally share a teacher and period
+      // are a real double-booking (e.g. teacher accidentally double-assigned).
+      if (
+        sameSubject &&
+        s.groupId != null &&
+        prior.groupId != null &&
+        s.groupId === prior.groupId
+      ) continue;
+
+      // ── Genuine double-booking ──────────────────────────────────────────
       const keyA = teacherKey(s.teacherId, s.dayOfWeek, s.period);
       const keyB = classKey(s.classId, s.dayOfWeek, s.period);
-      const keyC = classKey(other.classId, s.dayOfWeek, s.period);
-      const msg = `${s.teacherName} is double-booked — teaching ${other.className} and ${s.className} at period ${s.period}.`;
+      const keyC = classKey(prior.classId, s.dayOfWeek, s.period);
+
+      const priorClassName =
+        slots.find((x) => x.classId === prior.classId)?.className ?? prior.classId;
+      const msg = sameSubject
+        ? `${s.teacherName} is double-booked — same subject (${s.subjectCode}) for ${priorClassName} and ${s.className} at period ${s.period} but they are not part of a shared elective group.`
+        : `${s.teacherName} is double-booked — teaching ${priorClassName} and ${s.className} at period ${s.period}.`;
       const action = `Move one lesson to a different period or assign a different teacher.`;
+
       add(keyA, { type: "TEACHER_DOUBLE_BOOKED", severity: "error", message: msg, action, relatedKeys: [keyB, keyC] });
       add(keyB, { type: "TEACHER_DOUBLE_BOOKED", severity: "error", message: msg, action, relatedKeys: [keyA, keyC] });
       add(keyC, { type: "TEACHER_DOUBLE_BOOKED", severity: "error", message: msg, action, relatedKeys: [keyA, keyB] });
-    } else {
-      teacherOcc.set(tk, s);
+      thisSlotIsConflict = true;
+      break;
     }
 
-    if (classOcc.has(ck)) {
-      const other = classOcc.get(ck)!;
+    // Always record this slot so subsequent arrivals can compare against it —
+    // whether or not it conflicted with an earlier slot.  (The old code skipped
+    // the push when a conflict was found, which caused false-negatives for any
+    // real double-booking involving a third or later slot at the same key.)
+    if (!thisSlotIsConflict) {
+      priorTeacherSlots.push({ classId: s.classId, subjectId: s.subjectId, groupId: s.groupId });
+    }
+
+    // ── Class double-booking check ───────────────────────────────────────
+    // Multiple subjects at the same (class, period) is only a conflict when
+    // they are genuinely different, unrelated subjects.  Elective group fan-out
+    // intentionally places Music + Art + Business for the same class at the same
+    // period — those slots carry isGroupAnchor or groupName and are allowed.
+    // Raw (uncollapsed) group slots from the server also carry groupId — two
+    // different subjectIds at the same (class, period) are not a conflict when
+    // both belong to the same group.
+    if (!classOcc.has(ck)) classOcc.set(ck, []);
+    const priorClassSlots = classOcc.get(ck)!;
+
+    for (const prior of priorClassSlots) {
+      // Collapsed display slots — group anchor flag covers all fan-out members
+      if (s.isGroupAnchor || prior.isGroupAnchor || s.groupName || prior.groupName) continue;
+      // Same subject twice (e.g. group fan-out before collapse) — allowed
+      if (prior.subjectId === s.subjectId) continue;
+      // Raw server slots carrying a groupId — same group means intentional fan-out
+      if (s.groupId != null && prior.groupId != null && s.groupId === prior.groupId) continue;
+
+      // Two different subjects at the same class period with no group relationship — real conflict
       const key = classKey(s.classId, s.dayOfWeek, s.period);
       add(key, {
         type: "CLASS_DOUBLE_BOOKED",
         severity: "error",
-        message: `${s.className} has two subjects at period ${s.period} — ${other.subjectCode} and ${s.subjectCode}.`,
+        message: `${s.className} has two subjects at period ${s.period} — ${prior.subjectCode} and ${s.subjectCode}.`,
         action: `Remove one subject from this slot.`,
         relatedKeys: [],
       });
-    } else {
-      classOcc.set(ck, s);
+      break;
     }
+
+    priorClassSlots.push(s);
   }
 
   // Pass 2: Teacher unavailability

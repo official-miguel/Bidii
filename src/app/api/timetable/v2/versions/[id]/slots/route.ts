@@ -5,6 +5,8 @@ import { requireRole } from "@/lib/auth";
 import { requirePermission } from "@/lib/permissions";
 import { randomUUID } from "crypto";
 import { Prisma } from "@prisma/client";
+import { collapseGroupSlotsForDisplay } from "@/lib/timetable/engineHelpers";
+import type { GroupPayloadDescriptor } from "@/lib/timetable/engineHelpers";
 
 type Ctx = { params: { id: string } };
 
@@ -36,6 +38,7 @@ export async function GET(req: NextRequest, { params }: Ctx) {
       subjectId: string; subjectCode: string; subjectName: string;
       teacherId: string; teacherName: string;
       room: string | null; isManual: boolean; notes: string | null;
+      internalCode: number;
     }>
   >`
     SELECT
@@ -43,7 +46,7 @@ export async function GET(req: NextRequest, { params }: Ctx) {
       s."dayOfWeek", s.period,
       s."subjectId", sub.code AS "subjectCode", sub.name AS "subjectName",
       s."teacherId", t."fullName" AS "teacherName",
-      s.room, s."isManual", s.notes
+      s.room, s."isManual", s.notes, sub."internalCode"
     FROM "TimetableVersionSlot" s
     JOIN "SchoolClass"  c   ON c.id = s."classId"
     JOIN "Subject"      sub ON sub.id = s."subjectId"
@@ -54,7 +57,60 @@ export async function GET(req: NextRequest, { params }: Ctx) {
     ORDER BY s."dayOfWeek", s.period, c.name
   `;
 
-  return NextResponse.json(slots);
+  // ── Apply group display collapse logic ─────────────────────────────────
+  // Fetch group information for collapse
+  const electiveGroups = await prisma.electiveGroup.findMany({
+    where: { schoolId: user.schoolId },
+    select: {
+      id: true,
+      name: true,
+      scopeForm: true,
+      scopeStreams: true,
+      lessonsPerWeek: true,
+      doublesPerWeek: true,
+      members: {
+        select: { subjectId: true },
+        orderBy: { createdAt: 'asc' }
+      }
+    }
+  });
+
+  // Build group descriptors for collapse function
+  const groupDescriptors: GroupPayloadDescriptor[] = electiveGroups
+    .filter((g) => g.members.length > 0)
+    .map((g) => ({
+      groupId: g.id,
+      name: g.name,
+      subjectIds: g.members.map((m) => m.subjectId),
+      lessonsPerWeek: g.lessonsPerWeek,
+      doublesPerWeek: g.doublesPerWeek ?? 0,
+      classIds: [], // Not needed for display collapse
+    }));
+
+  // Build subjectId → groupId lookup so the client-side conflict engine can
+  // apply the pooled-teaching exemption (same teacher, same subject, same group,
+  // different classes = intentional co-scheduling, not a double-booking).
+  const subjectToGroupId = new Map<string, string>();
+  for (const g of electiveGroups) {
+    for (const member of g.members) {
+      if (!subjectToGroupId.has(member.subjectId)) {
+        subjectToGroupId.set(member.subjectId, g.id);
+      }
+    }
+  }
+
+  // Apply collapse logic to show group names instead of individual subjects
+  const displaySlots = collapseGroupSlotsForDisplay(slots, groupDescriptors);
+
+  // Stamp groupId onto every returned slot so the builder's client-side
+  // detectLiveConflicts can correctly exempt elective group co-scheduling
+  // from TEACHER_DOUBLE_BOOKED false positives.
+  const stamped = displaySlots.map((s) => ({
+    ...s,
+    groupId: subjectToGroupId.get(s.subjectId) ?? null,
+  }));
+
+  return NextResponse.json(stamped);
 }
 
 // ── POST /api/timetable/v2/versions/[id]/slots ────────────────────────────
@@ -111,21 +167,72 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   });
   if (!classCheck) return NextResponse.json({ error: "Class not found." }, { status: 400 });
 
-  // For group subjects, use a placeholder teacher (actual teachers are in ClassElectiveGroupTeacher)
+  // For group subjects, we need to create slots for all members with their assigned teachers
   // For regular subjects, validate the teacher assignment
   if (isGroupSubject && d.teacherId === "GROUP_PLACEHOLDER") {
-    // Group subjects don't need teacher validation here
-    // Teachers are assigned per subject within the group via ClassElectiveGroupTeacher
-    // For now, use the first available teacher or create a system placeholder
-    const anyTeacher = await prisma.teacher.findFirst({
-      where: { schoolId: user.schoolId },
-      select: { id: true },
-    });
-    if (!anyTeacher) {
-      return NextResponse.json({ error: "No teachers found in school." }, { status: 400 });
+    // Group subject — fetch all members and their assigned teachers for this class
+    if (!groupId) {
+      return NextResponse.json({ error: "Group ID missing for group subject." }, { status: 400 });
     }
-    d = { ...d, teacherId: anyTeacher.id };
-  } else {
+
+    // Get all group members
+    const groupMembers = await prisma.electiveGroupMember.findMany({
+      where: { groupId },
+      select: { subjectId: true },
+      orderBy: { createdAt: "asc" },
+    });
+
+    if (groupMembers.length === 0) {
+      return NextResponse.json({ error: "Group has no member subjects." }, { status: 400 });
+    }
+
+    // Get all teacher assignments for this group + class
+    const teacherAssignments = await prisma.classElectiveGroupTeacher.findMany({
+      where: {
+        groupId,
+        classId: d.classId,
+        schoolId: user.schoolId,
+      },
+      select: { subjectId: true, teacherId: true },
+    });
+
+    if (teacherAssignments.length === 0) {
+      return NextResponse.json({
+        error: "No teachers assigned to this group for this class. Assign teachers in the class profile first.",
+      }, { status: 400 });
+    }
+
+    // Build a map: subjectId → teacherId[]
+    const subjectTeachers = new Map<string, string[]>();
+    for (const ta of teacherAssignments) {
+      const list = subjectTeachers.get(ta.subjectId) ?? [];
+      list.push(ta.teacherId);
+      subjectTeachers.set(ta.subjectId, list);
+    }
+
+    // Verify all group members have at least one teacher
+    const missingTeachers: string[] = [];
+    for (const member of groupMembers) {
+      const teachers = subjectTeachers.get(member.subjectId);
+      if (!teachers || teachers.length === 0) {
+        const subject = await prisma.subject.findUnique({
+          where: { id: member.subjectId },
+          select: { name: true },
+        });
+        missingTeachers.push(subject?.name ?? member.subjectId);
+      }
+    }
+
+    if (missingTeachers.length > 0) {
+      return NextResponse.json({
+        error: `Missing teacher assignments for: ${missingTeachers.join(", ")}. Assign them in the class profile first.`,
+      }, { status: 400 });
+    }
+
+    // All validation passed — we'll create slots after conflict checks
+    // Store the group data for later use
+    d = { ...d, subjectId: groupMembers[0].subjectId, teacherId: teacherAssignments[0].teacherId };
+  } else if (!isGroupSubject) {
     // Regular subject - validate teacher assignment
     const teacherCheck = await prisma.teacherSubject.findFirst({
       where: {
@@ -138,6 +245,12 @@ export async function POST(req: NextRequest, { params }: Ctx) {
 
     if (!teacherCheck)
       return NextResponse.json({ error: "That teacher is not assigned to this subject." }, { status: 400 });
+  } else {
+    // isGroupSubject is true but teacherId is not GROUP_PLACEHOLDER
+    // This shouldn't happen from the UI, but handle it for safety
+    return NextResponse.json({
+      error: "Invalid teacher assignment for group subject.",
+    }, { status: 400 });
   }
 
   // Check class conflict
@@ -150,36 +263,106 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     return NextResponse.json({ error: "This class already has a lesson in that slot." }, { status: 409 });
 
   // Check teacher conflict
-  const teacherConflict = await prisma.$queryRaw<Array<{ id: string; classId: string }>>`
-    SELECT vs.id, vs."classId" FROM "TimetableVersionSlot" vs
-    WHERE vs."versionId" = ${params.id} AND vs."teacherId" = ${d.teacherId}
-      AND vs."dayOfWeek" = ${d.dayOfWeek} AND vs.period = ${d.period}
-  `;
-  if (teacherConflict.length > 0) {
-    const clashClass = await prisma.schoolClass.findFirst({
-      where: { id: teacherConflict[0].classId },
-      select: { name: true },
+  // For group subjects, check all teachers that will be assigned
+  let teachersToCheck: string[] = [];
+  if (isGroupSubject && groupId) {
+    const teacherAssignments = await prisma.classElectiveGroupTeacher.findMany({
+      where: { groupId, classId: d.classId, schoolId: user.schoolId },
+      select: { teacherId: true },
     });
-    return NextResponse.json({
-      error: `This teacher is already teaching ${clashClass?.name ?? "another class"} in that slot.`,
-    }, { status: 409 });
+    teachersToCheck = [...new Set(teacherAssignments.map(ta => ta.teacherId))];
+  } else {
+    teachersToCheck = [d.teacherId];
   }
 
-  const slotId = randomUUID();
-  const now    = new Date();
+  // Check if any of these teachers have conflicts
+  for (const teacherId of teachersToCheck) {
+    const teacherConflict = await prisma.$queryRaw<Array<{ id: string; classId: string }>>`
+      SELECT vs.id, vs."classId" FROM "TimetableVersionSlot" vs
+      WHERE vs."versionId" = ${params.id} AND vs."teacherId" = ${teacherId}
+        AND vs."dayOfWeek" = ${d.dayOfWeek} AND vs.period = ${d.period}
+    `;
+    if (teacherConflict.length > 0) {
+      const teacher = await prisma.teacher.findFirst({
+        where: { id: teacherId },
+        select: { fullName: true },
+      });
+      const clashClass = await prisma.schoolClass.findFirst({
+        where: { id: teacherConflict[0].classId },
+        select: { name: true },
+      });
+      return NextResponse.json({
+        error: `${teacher?.fullName ?? "This teacher"} is already teaching ${clashClass?.name ?? "another class"} in that slot.`,
+      }, { status: 409 });
+    }
+  }
 
-  await prisma.$executeRaw`
-    INSERT INTO "TimetableVersionSlot"
-      (id, "versionId", "schoolId", "classId", "dayOfWeek", period,
-       "subjectId", "teacherId", room, "isManual", notes, "createdAt", "updatedAt")
-    VALUES (
-      ${slotId}, ${params.id}, ${user.schoolId}, ${d.classId},
-      ${d.dayOfWeek}, ${d.period}, ${d.subjectId}, ${d.teacherId},
-      ${d.room ?? null}, ${d.isManual ?? true}, ${d.notes ?? null},
-      ${now}, ${now}
-    )
-  `;
+  const now = new Date();
+  const createdSlotIds: string[] = [];
 
+  // If this is a group subject, create fan-out slots for all members
+  if (isGroupSubject && groupId) {
+    // Re-fetch group members and teacher assignments (we validated them earlier)
+    const groupMembers = await prisma.electiveGroupMember.findMany({
+      where: { groupId },
+      select: { subjectId: true },
+      orderBy: { createdAt: "asc" },
+    });
+
+    const teacherAssignments = await prisma.classElectiveGroupTeacher.findMany({
+      where: {
+        groupId,
+        classId: d.classId,
+        schoolId: user.schoolId,
+      },
+      select: { subjectId: true, teacherId: true },
+    });
+
+    // Build a map: subjectId → teacherId[]
+    const subjectTeachers = new Map<string, string[]>();
+    for (const ta of teacherAssignments) {
+      const list = subjectTeachers.get(ta.subjectId) ?? [];
+      list.push(ta.teacherId);
+      subjectTeachers.set(ta.subjectId, list);
+    }
+
+    // Create one slot per (subject, teacher) pair
+    for (const member of groupMembers) {
+      const teachers = subjectTeachers.get(member.subjectId) ?? [];
+      for (const teacherId of teachers) {
+        const slotId = randomUUID();
+        await prisma.$executeRaw`
+          INSERT INTO "TimetableVersionSlot"
+            (id, "versionId", "schoolId", "classId", "dayOfWeek", period,
+             "subjectId", "teacherId", room, "isManual", notes, "createdAt", "updatedAt")
+          VALUES (
+            ${slotId}, ${params.id}, ${user.schoolId}, ${d.classId},
+            ${d.dayOfWeek}, ${d.period}, ${member.subjectId}, ${teacherId},
+            ${d.room ?? null}, ${d.isManual ?? true}, ${d.notes ?? null},
+            ${now}, ${now}
+          )
+        `;
+        createdSlotIds.push(slotId);
+      }
+    }
+  } else {
+    // Regular subject — create a single slot
+    const slotId = randomUUID();
+    await prisma.$executeRaw`
+      INSERT INTO "TimetableVersionSlot"
+        (id, "versionId", "schoolId", "classId", "dayOfWeek", period,
+         "subjectId", "teacherId", room, "isManual", notes, "createdAt", "updatedAt")
+      VALUES (
+        ${slotId}, ${params.id}, ${user.schoolId}, ${d.classId},
+        ${d.dayOfWeek}, ${d.period}, ${d.subjectId}, ${d.teacherId},
+        ${d.room ?? null}, ${d.isManual ?? true}, ${d.notes ?? null},
+        ${now}, ${now}
+      )
+    `;
+    createdSlotIds.push(slotId);
+  }
+
+  // Log the change (use first slot ID for the log reference)
   const afterSnap = { classId: d.classId, subjectId: d.subjectId, teacherId: d.teacherId,
     dayOfWeek: d.dayOfWeek, period: d.period, room: d.room ?? null };
 
@@ -188,7 +371,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
       (id, "schoolId", "versionId", "slotId", action, "changeSource",
        "afterState", detail, "performedById", "performedAt")
     VALUES (
-      ${randomUUID()}, ${user.schoolId}, ${params.id}, ${slotId},
+      ${randomUUID()}, ${user.schoolId}, ${params.id}, ${createdSlotIds[0]},
       'SLOT_ADDED'::"TimetableChangeAction", 'MANUAL',
       ${JSON.stringify(afterSnap)}::jsonb,
       ${JSON.stringify({ classId: d.classId, dayOfWeek: d.dayOfWeek, period: d.period })}::jsonb,
@@ -203,7 +386,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     JOIN "SchoolClass" c   ON c.id = s."classId"
     JOIN "Subject"     sub ON sub.id = s."subjectId"
     JOIN "Teacher"     t   ON t.id = s."teacherId"
-    WHERE s.id = ${slotId}
+    WHERE s.id = ${createdSlotIds[0]}
   `;
 
   return NextResponse.json(newSlot[0], { status: 201 });

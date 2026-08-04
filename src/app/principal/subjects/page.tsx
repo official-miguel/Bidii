@@ -29,8 +29,10 @@ type Subject = {
   code: string;
   type: "CORE" | "ELECTIVE";
   applicableForms: number[];
-  department: Department;
+  department: Department | null;
   _count: { teacherSubjects: number };
+  isGroupMember?: boolean;
+  memberOfGroups?: { id: string; name: string }[];
 };
 
 type SchoolClass = { id: string; name: string; form: number };
@@ -235,7 +237,7 @@ export default function SubjectsPage() {
                   .filter(s => {
                     const q = search.toLowerCase();
                     if (q && !s.name.toLowerCase().includes(q) && !s.code.toLowerCase().includes(q)) return false;
-                    if (filterDept && s.department.id !== filterDept) return false;
+                    if (filterDept && (!s.department || s.department.id !== filterDept)) return false;
                     if (filterType && s.type !== filterType) return false;
                     return true;
                   })
@@ -248,8 +250,19 @@ export default function SubjectsPage() {
                     <td className="px-4 py-3.5">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-ink group-hover:text-teal transition-colors">{s.name}</span>
+                        {s.isGroupMember && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                            📦 Group Member
+                          </span>
+                        )}
                         <ExternalLink className="h-3.5 w-3.5 text-slate/30 group-hover:text-teal transition-colors shrink-0 hidden sm:block" />
                       </div>
+                      {/* Show group membership info */}
+                      {s.isGroupMember && s.memberOfGroups && s.memberOfGroups.length > 0 && (
+                        <div className="text-xs text-slate mt-1">
+                          Member of: {s.memberOfGroups.map(g => g.name).join(', ')}
+                        </div>
+                      )}
                       {/* On mobile, show code + forms inline under the name */}
                       <div className="flex flex-wrap items-center gap-1.5 mt-0.5 sm:hidden">
                         <span className="text-xs font-mono text-slate bg-slate-50 border border-line rounded px-1 py-0.5">{s.code}</span>
@@ -267,14 +280,18 @@ export default function SubjectsPage() {
                       </Chip>
                     </td>
                     <td className="px-4 py-3.5 hidden md:table-cell" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        onClick={() => openDeptDrawer(s.department.id)}
-                        className="text-sm text-slate hover:text-teal hover:underline flex items-center gap-1 transition-colors"
-                      >
-                        {s.department.name}
-                        <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-60" />
-                      </button>
+                      {s.department ? (
+                        <button
+                          type="button"
+                          onClick={() => openDeptDrawer(s.department!.id)}
+                          className="text-sm text-slate hover:text-teal hover:underline flex items-center gap-1 transition-colors"
+                        >
+                          {s.department.name}
+                          <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-60" />
+                        </button>
+                      ) : (
+                        <span className="text-sm text-slate-400 italic">No department</span>
+                      )}
                     </td>
                     <td className="px-4 py-3.5 hidden sm:table-cell">
                       <div className="flex flex-wrap gap-0.5">
@@ -364,7 +381,7 @@ export default function SubjectsPage() {
                 <select
                   name="departmentId"
                   required
-                  defaultValue={editing?.department.id || ""}
+                  defaultValue={editing?.department?.id || ""}
                   className={inputClass}
                 >
                   <option value="" disabled>
