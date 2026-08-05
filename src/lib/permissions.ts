@@ -219,7 +219,7 @@ export async function getTeacherEffectivePermissions(user: User): Promise<Effect
     },
   });
 
-  let perms: EffectivePermissions = {};
+  const perms: EffectivePermissions = {};
 
   const merge = (module: Module, access: Partial<ModuleAccess>) => {
     const current = perms[module] ?? { ...NO_ACCESS };
