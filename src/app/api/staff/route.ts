@@ -2,28 +2,79 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
-import { requireRole, hashPassword } from "@/lib/auth";
-import { requirePermission } from "@/lib/permissions";
+import { requireRole, hashPassword, getCurrentUser } from "@/lib/auth";
+import { requirePermission, getTeacherEffectivePermissions } from "@/lib/permissions";
 import { sendWelcomeEmail } from "@/lib/email";
 
 export async function GET() {
-  // PRINCIPAL always sees the full directory. ADMIN_STAFF users whose role
-  // grants at least view access to the Staff module (e.g. Secretary) can
-  // now see the directory too — TEACHER logins are untouched.
-  const user = (await requireRole("PRINCIPAL")) ?? (await requirePermission("STAFF", "view"));
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // PRINCIPAL always sees the full directory.
+  // ADMIN_STAFF users whose role grants at least view access to the Staff module see full data.
+  // TEACHER with STAFF.canView (via assigned role) sees full data.
+  // Plain Subject Teacher (TEACHER with no STAFF.canView) sees trimmed data.
+  const principalUser = await requireRole("PRINCIPAL");
+  if (principalUser) {
+    const teachers = await prisma.teacher.findMany({
+      where: { schoolId: principalUser.schoolId, archivedAt: null },
+      orderBy: { fullName: "asc" },
+      include: {
+        primaryDepartment: { select: { id: true, name: true } },
+        classTeacherOf: { select: { id: true, name: true } },
+        teacherSubjects: { include: { subject: { select: { id: true, name: true, code: true } } } },
+        user: { select: { email: true, isActive: true, role: true, mustChangePassword: true, staffRole: { select: { id: true, name: true } } } },
+      },
+    });
+    return NextResponse.json(teachers);
+  }
 
-  const teachers = await prisma.teacher.findMany({
-    where: { schoolId: user.schoolId, archivedAt: null },
-    orderBy: { fullName: "asc" },
-    include: {
-      primaryDepartment: { select: { id: true, name: true } },
-      classTeacherOf: { select: { id: true, name: true } },
-      teacherSubjects: { include: { subject: { select: { id: true, name: true, code: true } } } },
-      user: { select: { email: true, isActive: true, role: true, mustChangePassword: true, staffRole: { select: { id: true, name: true } } } },
-    },
-  });
-  return NextResponse.json(teachers);
+  const staffUser = await requirePermission("STAFF", "view");
+  if (staffUser && staffUser.role === "ADMIN_STAFF") {
+    const teachers = await prisma.teacher.findMany({
+      where: { schoolId: staffUser.schoolId, archivedAt: null },
+      orderBy: { fullName: "asc" },
+      include: {
+        primaryDepartment: { select: { id: true, name: true } },
+        classTeacherOf: { select: { id: true, name: true } },
+        teacherSubjects: { include: { subject: { select: { id: true, name: true, code: true } } } },
+        user: { select: { email: true, isActive: true, role: true, mustChangePassword: true, staffRole: { select: { id: true, name: true } } } },
+      },
+    });
+    return NextResponse.json(teachers);
+  }
+
+  // Check if the caller is a TEACHER
+  const user = await getCurrentUser();
+  if (user && user.role === "TEACHER") {
+    const perms = await getTeacherEffectivePermissions(user);
+    if (perms.STAFF?.canView) {
+      // Teacher with STAFF.canView via assigned role — full list
+      const teachers = await prisma.teacher.findMany({
+        where: { schoolId: user.schoolId, archivedAt: null },
+        orderBy: { fullName: "asc" },
+        include: {
+          primaryDepartment: { select: { id: true, name: true } },
+          classTeacherOf: { select: { id: true, name: true } },
+          teacherSubjects: { include: { subject: { select: { id: true, name: true, code: true } } } },
+          user: { select: { email: true, isActive: true, role: true, mustChangePassword: true, staffRole: { select: { id: true, name: true } } } },
+        },
+      });
+      return NextResponse.json(teachers);
+    }
+    // Plain Subject Teacher — trimmed list (id, fullName, designation, primaryDepartment.name, staffId)
+    const teachers = await prisma.teacher.findMany({
+      where: { schoolId: user.schoolId, archivedAt: null },
+      orderBy: { fullName: "asc" },
+      select: {
+        id: true,
+        fullName: true,
+        designation: true,
+        staffId: true,
+        primaryDepartment: { select: { name: true } },
+      },
+    });
+    return NextResponse.json(teachers);
+  }
+
+  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 }
 
 /// Highest numeric staff ID in the school (non-numeric ones are kept as-is

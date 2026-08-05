@@ -12,7 +12,7 @@ import {
 import { useVirtualizer }   from "@tanstack/react-virtual";
 import { SkeletonTable }    from "@/components/ui/ProgressivePage";
 import WorkspaceToolbar from "@/components/workspace/WorkspaceToolbar";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Pencil } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Debounce hook
@@ -62,10 +62,14 @@ const StudentRow = React.memo(function StudentRow({
   s,
   className,
   onNavigate,
+  onEdit,
+  canEdit,
 }: {
   s: Student;
   className: string;
   onNavigate: (id: string) => void;
+  onEdit?: (id: string) => void;
+  canEdit?: boolean;
 }) {
   return (
     <tr className="group border-b border-line last:border-0 hover:bg-slate-50/50 transition-colors">
@@ -92,7 +96,14 @@ const StudentRow = React.memo(function StudentRow({
       </td>
       <td className="px-5 py-3.5 text-sm text-ink">{className || "—"}</td>
       <td className="px-5 py-3.5">
-        <div className="flex items-center justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {canEdit && onEdit && (
+            <ActionIconButton
+              icon={<Pencil className="h-4 w-4" />}
+              label="Edit student"
+              onClick={() => onEdit(s.id)}
+            />
+          )}
           <ActionIconButton
             icon={<ExternalLink className="h-4 w-4" />}
             label="View profile"
@@ -113,22 +124,33 @@ export default function TeacherStudentsPage() {
   const parentRef = useRef<HTMLDivElement>(null);
 
   // ── Direct API state (no store cache) ────────────────────────────────────
-  const [rawStudents,  setRawStudents]  = useState<Student[]>([]);
-  const [rawClasses,   setRawClasses]   = useState<{ id: string; name: string }[]>([]);
-  const [pageLoading,  setPageLoading]  = useState(true);
+  const [rawStudents,      setRawStudents]      = useState<Student[]>([]);
+  const [rawClasses,       setRawClasses]       = useState<{ id: string; name: string }[]>([]);
+  const [pageLoading,      setPageLoading]      = useState(true);
+  const [classTeacherOfId, setClassTeacherOfId] = useState<string>("");
 
   useEffect(() => {
     let cancelled = false;
     setPageLoading(true);
-    Promise.all([fetch("/api/students"), fetch("/api/classes")])
-      .then(([stuRes, clsRes]) => Promise.all([
+    Promise.all([
+      fetch("/api/students"),
+      fetch("/api/classes"),
+      fetch("/api/teacher/me"),
+    ])
+      .then(([stuRes, clsRes, meRes]) => Promise.all([
         stuRes.ok ? stuRes.json() : [],
         clsRes.ok ? clsRes.json() : [],
+        meRes.ok ? meRes.json() : null,
       ]))
-      .then(([stuData, clsData]) => {
+      .then(([stuData, clsData, meData]) => {
         if (cancelled) return;
         setRawStudents(stuData);
         setRawClasses(clsData);
+        // If teacher is a class teacher, default filter to their class
+        if (meData?.classTeacherOf?.id) {
+          setClassTeacherOfId(meData.classTeacherOf.id);
+          setFilterClassId(meData.classTeacherOf.id); // default filter (R4.3)
+        }
       })
       .catch(() => {})
       .finally(() => { if (!cancelled) setPageLoading(false); });
@@ -156,7 +178,9 @@ export default function TeacherStudentsPage() {
 
   const visibleStudents = useMemo(() => {
     let list = students;
-    if (filterClassId) list = list.filter((s) => s.classId === filterClassId);
+    // Only apply class filter when there's no active search query
+    // (search is always cross-class per R4.3)
+    if (filterClassId && !q) list = list.filter((s) => s.classId === filterClassId);
     if (q) list = list.filter(
       (s) =>
         s.fullName.toLowerCase().includes(q) ||
@@ -178,6 +202,11 @@ export default function TeacherStudentsPage() {
 
   const handleNavigate = useCallback(
     (id: string) => router.push(`/teacher/students/${id}`),
+    [router]
+  );
+
+  const handleEdit = useCallback(
+    (id: string) => router.push(`/teacher/students/${id}/edit`),
     [router]
   );
 
@@ -250,6 +279,8 @@ export default function TeacherStudentsPage() {
                         s={s}
                         className={classMap.get(s.classId)?.name ?? ""}
                         onNavigate={handleNavigate}
+                        onEdit={handleEdit}
+                        canEdit={!!classTeacherOfId && s.classId === classTeacherOfId}
                       />
                     </tbody>
                   </table>
@@ -270,6 +301,8 @@ export default function TeacherStudentsPage() {
                     s={s}
                     className={classMap.get(s.classId)?.name ?? ""}
                     onNavigate={handleNavigate}
+                    onEdit={handleEdit}
+                    canEdit={!!classTeacherOfId && s.classId === classTeacherOfId}
                   />
                 ))}
               </tbody>

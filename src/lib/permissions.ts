@@ -142,10 +142,13 @@ export async function getEffectivePermissions(user: User): Promise<EffectivePerm
     return full;
   }
 
-  // Both ADMIN_STAFF and TEACHER users can hold StaffRole assignments.
-  // For TEACHER the result is additive — it only unlocks extra hubs/modules
-  // on top of their built-in class/subject access; it never removes anything.
-  if (user.role === "ADMIN_STAFF" || user.role === "TEACHER") {
+  // TEACHER: use the five-source resolver
+  if (user.role === "TEACHER") {
+    return getTeacherEffectivePermissions(user);
+  }
+
+  // ADMIN_STAFF: union of all assigned StaffRole permissions (multi-role).
+  if (user.role === "ADMIN_STAFF") {
     // Collect all StaffRole IDs assigned to this user via the join table.
     const multiRoleRows = await prisma.userStaffRole.findMany({
       where: { userId: user.id },
@@ -160,8 +163,6 @@ export async function getEffectivePermissions(user: User): Promise<EffectivePerm
       roleIds = [user.staffRoleId];
     }
 
-    // A TEACHER with no extra roles has no extra RBAC permissions — their
-    // built-in access is handled by the teacher layout directly.
     if (roleIds.length === 0) return {};
 
     // Load all RolePermission rows for every assigned role in one query.
@@ -190,6 +191,115 @@ export async function getEffectivePermissions(user: User): Promise<EffectivePerm
   }
 
   return {};
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Five-Source Teacher Permission Resolver (R2)
+// Computes a teacher's full EffectivePermissions as the union of:
+//   Source 1 — Baseline Grant (every teacher)
+//   Source 2 — Subject Teacher Scope (ClassSubjectTeacher / elective rows)
+//   Source 3 — Class Teacher Scope (SchoolClass.classTeacherId)
+//   Source 4 — HOD Scope (Department.headTeacherId)
+//   Source 5 — Dorm Master Scope (Dormitory.boardingMasterId)
+//   Source 6 — Assigned Roles (UserStaffRole / User.staffRoleId)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getTeacherEffectivePermissions(user: User): Promise<EffectivePermissions> {
+  // Fetch teacher + all assignment data in ONE query
+  const teacher = await prisma.teacher.findUnique({
+    where: { userId: user.id },
+    select: {
+      id: true,
+      subjectAssignments: { select: { classId: true, subjectId: true } },
+      electiveGroupTeachers: { select: { groupId: true, subjectId: true } },
+      classElectiveGroupTeachers: { select: { groupId: true, classId: true, subjectId: true } },
+      classTeacherOf: { select: { id: true } },
+      departmentHeadOf: { select: { id: true } },
+      dormsBoardingMaster: { where: { schoolId: user.schoolId }, select: { id: true } },
+    },
+  });
+
+  let perms: EffectivePermissions = {};
+
+  const merge = (module: Module, access: Partial<ModuleAccess>) => {
+    const current = perms[module] ?? { ...NO_ACCESS };
+    perms[module] = mergeAccess(current, { ...NO_ACCESS, ...access });
+  };
+
+  // Source 1: Baseline Grant (every teacher)
+  merge("RECORDS_DISCIPLINE",   { canView: true, canCreate: true });
+  merge("RECORDS_ACHIEVEMENTS", { canView: true, canCreate: true });
+  merge("ATTENDANCE",           { canView: true });
+
+  if (teacher) {
+    const hasSubjectAssignments =
+      teacher.subjectAssignments.length > 0 ||
+      teacher.electiveGroupTeachers.length > 0 ||
+      teacher.classElectiveGroupTeachers.length > 0;
+
+    // Source 2: Subject Teacher Scope
+    if (hasSubjectAssignments) {
+      merge("ASSESSMENTS", { canView: true, canCreate: true, canEdit: true });
+      merge("STUDENTS",    { canView: true });
+    }
+
+    // Source 3: Class Teacher Scope
+    if (teacher.classTeacherOf) {
+      merge("STUDENTS",    { canView: true, canEdit: true });
+      merge("ATTENDANCE",  { canView: true, canCreate: true });
+    }
+
+    // Source 4: HOD Scope
+    if (teacher.departmentHeadOf) {
+      merge("ASSESSMENT_FRAMEWORK", { canConfigure: true });
+      merge("ANALYTICS",            { canView: true });
+    }
+
+    // Source 5: Dorm Master Scope
+    if (teacher.dormsBoardingMaster.length > 0) {
+      merge("ACCOMMODATION", { canView: true, canEdit: true });
+    }
+  }
+
+  // Source 6: Assigned Roles (existing StaffRole system — union on top)
+  const assignedPerms = await (async () => {
+    const multiRoleRows = await prisma.userStaffRole.findMany({
+      where: { userId: user.id },
+      select: { staffRoleId: true },
+    });
+    const roleIds: string[] = multiRoleRows.map((r) => r.staffRoleId);
+    if (roleIds.length === 0 && user.staffRoleId) roleIds.push(user.staffRoleId);
+    if (roleIds.length === 0) return {} as EffectivePermissions;
+
+    const rows = await prisma.rolePermission.findMany({
+      where: { staffRoleId: { in: roleIds } },
+    });
+    const result: EffectivePermissions = {};
+    for (const row of rows) {
+      const current = result[row.module] ?? { ...NO_ACCESS };
+      result[row.module] = mergeAccess(current, {
+        canView:      row.canView,
+        canCreate:    row.canCreate    ?? row.canManage,
+        canEdit:      row.canEdit      ?? row.canManage,
+        canDelete:    row.canDelete    ?? row.canManage,
+        canApprove:   row.canApprove   ?? false,
+        canExport:    row.canExport    ?? row.canManage,
+        canPrint:     row.canPrint     ?? row.canManage,
+        canManage:    row.canManage,
+        canConfigure: row.canConfigure ?? false,
+        canAIAccess:  row.canAIAccess  ?? false,
+      });
+    }
+    return result;
+  })();
+
+  // Merge assigned role permissions on top (union — never reduces)
+  for (const [mod, access] of Object.entries(assignedPerms) as [Module, ModuleAccess][]) {
+    const current = perms[mod as Module] ?? { ...NO_ACCESS };
+    perms[mod as Module] = mergeAccess(current, access);
+  }
+
+  return perms;
 }
 
 /**
@@ -248,6 +358,13 @@ export async function requirePermission(
 
   if (user.role === "ADMIN_STAFF") {
     const perms = await getEffectivePermissions(user);
+    const entry = perms[module];
+    if (!entry) return null;
+    if (checkAction(entry, action)) return user;
+  }
+
+  if (user.role === "TEACHER") {
+    const perms = await getTeacherEffectivePermissions(user);
     const entry = perms[module];
     if (!entry) return null;
     if (checkAction(entry, action)) return user;

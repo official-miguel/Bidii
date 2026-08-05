@@ -21,7 +21,9 @@ function isoDay(date: Date): string {
 ///   ADMIN_STAFF     → allowed when their role has the ATTENDANCE module
 ///                     permission (canView / canManage grants read; canCreate
 ///                     / canEdit / canManage grants write).
-///   TEACHER         → allowed only for the class they are the class teacher of.
+///   TEACHER         → allowed only for classes they teach (subject teacher or
+///                     class teacher). For "create", restricted to the exact
+///                     class they are class teacher of.
 /// Returns the user and, for teachers, their Teacher row so callers can stamp
 /// recordedById on writes.
 async function requireAttendanceAccess(classId: string, action: "view" | "create" = "view") {
@@ -29,20 +31,48 @@ async function requireAttendanceAccess(classId: string, action: "view" | "create
   const principalUser = await requireRole("PRINCIPAL");
   if (principalUser) return { user: principalUser, teacher: null, allowed: true as const };
 
-  // ADMIN_STAFF with ATTENDANCE permission.
-  const staffUser = await requirePermission("ATTENDANCE", action);
-  if (staffUser) return { user: staffUser, teacher: null, allowed: true as const };
-
-  // TEACHER — class-teacher-scoped access.
-  const user = await requireRole("TEACHER");
+  // Everyone else goes through requirePermission (handles ADMIN_STAFF and TEACHER via
+  // getTeacherEffectivePermissions — no ad-hoc requireRole("TEACHER") fallback needed).
+  const user = await requirePermission("ATTENDANCE", action);
   if (!user) return { user: null, teacher: null, allowed: false as const };
 
+  // ADMIN_STAFF with ATTENDANCE permission: full access across all classes.
+  if (user.role === "ADMIN_STAFF") return { user, teacher: null, allowed: true as const };
+
+  // TEACHER: requirePermission already verified they have ATTENDANCE.canView /
+  // canCreate via the five-source resolver. We still need to scope them to the
+  // specific classes they teach.
   const teacher = await prisma.teacher.findUnique({
     where: { userId: user.id },
     include: { classTeacherOf: true },
   });
-  const allowed = !!teacher?.classTeacherOf && teacher.classTeacherOf.id === classId;
-  return { user, teacher, allowed };
+
+  if (action === "create") {
+    // Only the class teacher of this exact class may submit the register.
+    const allowed = !!teacher?.classTeacherOf && teacher.classTeacherOf.id === classId;
+    return { user, teacher, allowed };
+  }
+
+  // view: class teacher of this class is always allowed.
+  if (teacher?.classTeacherOf?.id === classId) {
+    return { user, teacher, allowed: true as const };
+  }
+
+  // view: subject teacher assigned to this class (core subject or elective).
+  if (teacher?.id) {
+    const hasAssignment =
+      (await prisma.classSubjectTeacher.findFirst({
+        where: { classId, teacherId: teacher.id },
+        select: { classId: true },
+      })) ??
+      (await prisma.classElectiveGroupTeacher.findFirst({
+        where: { classId, teacherId: teacher.id },
+        select: { classId: true },
+      }));
+    if (hasAssignment) return { user, teacher, allowed: true as const };
+  }
+
+  return { user, teacher, allowed: false as const };
 }
 
 /// One GET route, four modes selected by query params (keeps the whole
@@ -56,6 +86,52 @@ export async function GET(req: NextRequest) {
   const classId   = params.get("classId");
   const studentId = params.get("studentId");
   const dateParam = params.get("date");
+
+  // ── Class trend mode ─────────────────────────────────────────────────────
+  // ?classId=&from=&to=&trend=1  → per-day attendance % for one class
+  if (params.get("trend") && classId) {
+    const { user, allowed } = await requireAttendanceAccess(classId, "view");
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+    const to = params.get("to")
+      ? parseDateOnly(params.get("to")!)
+      : parseDateOnly(isoDay(new Date()));
+    const from = params.get("from")
+      ? parseDateOnly(params.get("from")!)
+      : to && new Date(to.getTime() - 13 * 86400000);
+    if (!from || !to || from > to) {
+      return NextResponse.json({ error: "Invalid date range. Use YYYY-MM-DD." }, { status: 400 });
+    }
+
+    type DayRow = { day: string; present_count: bigint; total_count: bigint };
+    const rows = await prisma.$queryRawUnsafe<DayRow[]>(
+      `SELECT   TO_CHAR(a.date, 'YYYY-MM-DD') AS day,
+                COUNT(*) FILTER (WHERE a.status = 'PRESENT')::bigint AS present_count,
+                COUNT(*)::bigint AS total_count
+       FROM     "Attendance" a
+       WHERE    a."schoolId" = $1 AND a."classId" = $2
+         AND    a.date >= $3 AND a.date <= $4
+       GROUP BY a.date
+       ORDER BY a.date ASC`,
+      user.schoolId,
+      classId,
+      from,
+      to,
+    );
+
+    return NextResponse.json(
+      rows.map((r) => ({
+        date: r.day,
+        present: Number(r.present_count),
+        total: Number(r.total_count),
+        rate:
+          Number(r.total_count) > 0
+            ? Math.round((Number(r.present_count) / Number(r.total_count)) * 100)
+            : 0,
+      })),
+    );
+  }
 
   // ── Roster mode ─────────────────────────────────────────────────────────
   if (classId) {
@@ -110,8 +186,7 @@ export async function GET(req: NextRequest) {
   if (studentId) {
     const user =
       (await requireRole("PRINCIPAL")) ??
-      (await requirePermission("ATTENDANCE", "view")) ??
-      (await requireRole("TEACHER"));
+      (await requirePermission("ATTENDANCE", "view"));
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const student = await prisma.student.findFirst({
@@ -123,10 +198,26 @@ export async function GET(req: NextRequest) {
     if (user.role === "TEACHER") {
       const teacher = await prisma.teacher.findUnique({
         where: { userId: user.id },
-        select: { classTeacherOf: { select: { id: true } } },
+        select: {
+          id: true,
+          classTeacherOf: { select: { id: true } },
+        },
       });
-      if (teacher?.classTeacherOf?.id !== student.classId) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      if (!teacher) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+      // Class teacher of the student's class: allowed.
+      if (teacher.classTeacherOf?.id !== student.classId) {
+        // Not class teacher — must be a subject/elective teacher of that class.
+        const hasAssignment =
+          (await prisma.classSubjectTeacher.findFirst({
+            where: { classId: student.classId, teacherId: teacher.id },
+            select: { classId: true },
+          })) ??
+          (await prisma.classElectiveGroupTeacher.findFirst({
+            where: { classId: student.classId, teacherId: teacher.id },
+            select: { classId: true },
+          }));
+        if (!hasAssignment) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
     }
 

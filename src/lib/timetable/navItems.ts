@@ -1,12 +1,19 @@
 /**
  * Shared navigation items for every timetable sub-page.
  *
- * Day Template, Requirements, Preferences, and Versions are intentionally
- * excluded here — they are only accessible via the Settings hub page.
+ * getTimetableNav(basePath) is the primary export — use it when the nav
+ * must point to a different route root (e.g. /staff/timetable vs
+ * /principal/timetable). The TIMETABLE_NAV constant is kept for
+ * backward compatibility; existing principal pages use it unchanged.
  */
-export const TIMETABLE_NAV = [
-  { href: "/principal/timetable",          label: "Overview", exact: true },
-  { href: "/principal/timetable/generate", label: "Generate"             },
-  { href: "/principal/timetable/builder",  label: "Builder"              },
-  { href: "/principal/timetable/settings", label: "Settings"             },
-];
+export function getTimetableNav(basePath: string) {
+  return [
+    { href: `${basePath}`,           label: "Overview", exact: true },
+    { href: `${basePath}/generate`,  label: "Generate"              },
+    { href: `${basePath}/builder`,   label: "Builder"               },
+    { href: `${basePath}/settings`,  label: "Settings"              },
+  ];
+}
+
+// Backward-compat constant — principal pages use this unchanged.
+export const TIMETABLE_NAV = getTimetableNav("/principal/timetable");

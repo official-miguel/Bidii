@@ -1,45 +1,113 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/auth";
-import { requirePermission } from "@/lib/permissions";
+import { requireRole, getCurrentUser } from "@/lib/auth";
+import { requirePermission, getTeacherEffectivePermissions } from "@/lib/permissions";
 
 // ---------------------------------------------------------------------------
 // GET /api/staff/[id] — single staff member detail for entity drawers
 // ---------------------------------------------------------------------------
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
-  const user =
-    (await requireRole("PRINCIPAL")) ?? (await requirePermission("STAFF", "view"));
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const teacher = await prisma.teacher.findFirst({
-    where: { id: params.id, schoolId: user.schoolId },
-    include: {
-      primaryDepartment: { select: { id: true, name: true } },
-      classTeacherOf: { select: { id: true, name: true } },
-      teacherSubjects: {
-        include: { subject: { select: { id: true, name: true, code: true } } },
-      },
-      user: {
-        select: {
-          id: true,
-          email: true,
-          isActive: true,
-          role: true,
-          mustChangePassword: true,
-          staffRole: { select: { id: true, name: true } },
-          userStaffRoles: {
-            select: {
-              staffRole: { select: { id: true, name: true, description: true } },
+  const principalUser = await requireRole("PRINCIPAL");
+  if (principalUser) {
+    const teacher = await prisma.teacher.findFirst({
+      where: { id: params.id, schoolId: principalUser.schoolId },
+      include: {
+        primaryDepartment: { select: { id: true, name: true } },
+        classTeacherOf: { select: { id: true, name: true } },
+        teacherSubjects: {
+          include: { subject: { select: { id: true, name: true, code: true } } },
+        },
+        user: {
+          select: {
+            id: true,
+            email: true,
+            isActive: true,
+            role: true,
+            mustChangePassword: true,
+            staffRole: { select: { id: true, name: true } },
+            userStaffRoles: {
+              select: {
+                staffRole: { select: { id: true, name: true, description: true } },
+              },
             },
           },
         },
       },
-    },
-  });
+    });
+    if (!teacher) return NextResponse.json({ error: "Staff member not found." }, { status: 404 });
+    return NextResponse.json(teacher);
+  }
 
-  if (!teacher) return NextResponse.json({ error: "Staff member not found." }, { status: 404 });
-  return NextResponse.json(teacher);
+  const staffUser = await requirePermission("STAFF", "view");
+  if (staffUser && staffUser.role === "ADMIN_STAFF") {
+    const teacher = await prisma.teacher.findFirst({
+      where: { id: params.id, schoolId: staffUser.schoolId },
+      include: {
+        primaryDepartment: { select: { id: true, name: true } },
+        classTeacherOf: { select: { id: true, name: true } },
+        teacherSubjects: {
+          include: { subject: { select: { id: true, name: true, code: true } } },
+        },
+        user: {
+          select: {
+            id: true,
+            email: true,
+            isActive: true,
+            role: true,
+            mustChangePassword: true,
+            staffRole: { select: { id: true, name: true } },
+            userStaffRoles: {
+              select: {
+                staffRole: { select: { id: true, name: true, description: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!teacher) return NextResponse.json({ error: "Staff member not found." }, { status: 404 });
+    return NextResponse.json(teacher);
+  }
+
+  // TEACHER: check if they have STAFF.canView via assigned roles
+  const user = await getCurrentUser();
+  if (user && user.role === "TEACHER") {
+    const perms = await getTeacherEffectivePermissions(user);
+    if (perms.STAFF?.canView) {
+      const teacher = await prisma.teacher.findFirst({
+        where: { id: params.id, schoolId: user.schoolId },
+        include: {
+          primaryDepartment: { select: { id: true, name: true } },
+          classTeacherOf: { select: { id: true, name: true } },
+          teacherSubjects: {
+            include: { subject: { select: { id: true, name: true, code: true } } },
+          },
+          user: {
+            select: {
+              id: true,
+              email: true,
+              isActive: true,
+              role: true,
+              mustChangePassword: true,
+              staffRole: { select: { id: true, name: true } },
+              userStaffRoles: {
+                select: {
+                  staffRole: { select: { id: true, name: true, description: true } },
+                },
+              },
+            },
+          },
+        },
+      });
+      if (!teacher) return NextResponse.json({ error: "Staff member not found." }, { status: 404 });
+      return NextResponse.json(teacher);
+    }
+    // Plain subject teacher — 403 for individual record
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 }
 
 const updateSchema = z.object({
