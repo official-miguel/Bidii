@@ -4,16 +4,6 @@ import StatCard from "@/components/dashboard/StatCard";
 import CountdownTimer from "@/components/dashboard/CountdownTimer";
 import type { ClassTeacherRole } from "@/lib/derivedRoles";
 
-interface SubjectTeacherRow {
-  subject: { name: string };
-  teacher: { fullName: string };
-}
-
-interface ClassData {
-  name: string; form: number;
-  subjectTeachers: SubjectTeacherRow[];
-}
-
 interface AssessmentPeriod {
   id: string; name: string; closingDate?: Date | string | null;
 }
@@ -25,14 +15,14 @@ interface Props {
   todayPresent:     number;
   todayAbsent:      number;
   openDiscipline:   number;
-  classData:        ClassData | null;
+  classData?:       ClassData | null;
   recentAbsentees:  { id: string; fullName: string }[];
   activePeriods:    AssessmentPeriod[];
 }
 
 export default function ClassTeacherSection({
   rolePrefix, derived, totalStudents, todayPresent, todayAbsent,
-  openDiscipline, classData, recentAbsentees, activePeriods,
+  openDiscipline, recentAbsentees, activePeriods,
 }: Props) {
   if (!derived) return null;
 
@@ -71,26 +61,6 @@ export default function ClassTeacherSection({
                 {s.fullName}
               </Link>
             ))}
-          </div>
-        </div>
-      )}
-
-      {classData && classData.subjectTeachers.length > 0 && (
-        <div className="bg-card border border-line rounded-xl p-5 shadow-xs dark:bg-dark-surface dark:border-dark-border">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-semibold text-ink dark:text-dark-text">Subjects in {derived.className}</p>
-            <span className="text-xs text-slate dark:text-dark-muted">{classData.subjectTeachers.length} subjects</span>
-          </div>
-          <div className="space-y-1.5">
-            {classData.subjectTeachers.slice(0, 8).map((st, i) => (
-              <div key={i} className="flex items-center justify-between text-sm">
-                <span className="text-ink dark:text-dark-text">{st.subject.name}</span>
-                <span className="text-xs text-slate dark:text-dark-muted">{st.teacher.fullName}</span>
-              </div>
-            ))}
-            {classData.subjectTeachers.length > 8 && (
-              <p className="text-xs text-teal mt-1">+{classData.subjectTeachers.length - 8} more subjects</p>
-            )}
           </div>
         </div>
       )}

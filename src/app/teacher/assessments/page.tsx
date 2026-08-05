@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import ContextNavigation from "@/components/ContextNavigation";
 import AssessmentsPageTabs from "@/components/assessment/AssessmentsPageTabs";
+import { TEACHER_ACADEMICS_NAV } from "@/lib/teacherAcademicsNav";
 
 export default async function TeacherAssessmentsPage() {
   const user = await getCurrentUser();
@@ -20,15 +22,18 @@ export default async function TeacherAssessmentsPage() {
   const hasSubjectAssignments =
     (teacher?.subjectAssignments.length ?? 0) > 0 ||
     (teacher?.classElectiveGroupTeachers.length ?? 0) > 0;
-  const departmentId = teacher?.departmentHeadOf?.id;
+  const departmentId   = teacher?.departmentHeadOf?.id;
   const departmentName = teacher?.departmentHeadOf?.name;
 
   return (
-    <AssessmentsPageTabs
-      isHod={isHod}
-      hasSubjectAssignments={hasSubjectAssignments}
-      departmentId={departmentId}
-      departmentName={departmentName}
-    />
+    <div>
+      <ContextNavigation items={TEACHER_ACADEMICS_NAV} />
+      <AssessmentsPageTabs
+        isHod={isHod}
+        hasSubjectAssignments={hasSubjectAssignments}
+        departmentId={departmentId}
+        departmentName={departmentName}
+      />
+    </div>
   );
 }

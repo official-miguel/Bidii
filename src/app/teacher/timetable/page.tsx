@@ -22,17 +22,9 @@ import {
 } from "lucide-react";
 import ContextNavigation from "@/components/ContextNavigation";
 import { PageHeader, EmptyState, ErrorBanner } from "@/components/ui";
+import { TEACHER_ACADEMICS_NAV as NAV_ITEMS } from "@/lib/teacherAcademicsNav";
 
-// ── Context nav (teacher) ──────────────────────────────────────────────────
-const NAV_ITEMS = [
-  { href: "/teacher",            label: "Home",      exact: true },
-  { href: "/teacher/academics",  label: "Academics"  },
-  { href: "/teacher/timetable",  label: "Timetable"  },
-  { href: "/teacher/attendance", label: "Attendance" },
-  { href: "/teacher/assessments",label: "Assessments"},
-  { href: "/teacher/results",    label: "Results"    },
-  { href: "/teacher/students",   label: "Students"   },
-];
+// NAV_ITEMS imported from @/lib/teacherAcademicsNav
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const DAY_FULL  = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
@@ -223,7 +215,7 @@ export default function TeacherTimetablePage() {
       <div className="space-y-5">
         {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
-        {/* ── No timetable yet ────────────────────────────────────────── */}
+        {/* ── Not published yet ───────────────────────────────────────── */}
         {!error && data && data.slots.length === 0 && (
           <EmptyState
             icon={<Calendar className="h-8 w-8 text-slate/40" />}
@@ -233,21 +225,26 @@ export default function TeacherTimetablePage() {
 
         {data && data.slots.length > 0 && (
           <>
-            {/* ── Stats strip ──────────────────────────────────────────── */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <StatPill icon={<BookOpen className="h-4 w-4" />}
-                label="Lessons / week" value={data.weeklyLessons} />
-              <StatPill icon={<Users className="h-4 w-4" />}
-                label="Classes taught"
-                value={new Set(data.slots.map((s) => s.classId)).size} />
-              <StatPill icon={<Zap className="h-4 w-4" />}
-                label="Subjects"
-                value={data.subjectBreakdown.length} />
-              <StatPill icon={<Clock className="h-4 w-4" />}
-                label="Active days" value={data.days.length} />
+            {/* ── Overview strip ───────────────────────────────────────── */}
+            <div>
+              <h2 className="text-base font-semibold text-ink mb-3">This week at a glance</h2>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <StatPill icon={<BookOpen className="h-4 w-4" />}
+                  label="Lessons / week" value={data.weeklyLessons} />
+                <StatPill icon={<Users className="h-4 w-4" />}
+                  label="Classes taught"
+                  value={new Set(data.slots.map((s) => s.classId)).size} />
+                <StatPill icon={<Zap className="h-4 w-4" />}
+                  label="Subjects"
+                  value={data.subjectBreakdown.length} />
+                <StatPill icon={<Clock className="h-4 w-4" />}
+                  label="Active days" value={data.days.length} />
+              </div>
             </div>
 
             {/* ── Today / selected-day panel ────────────────────────────── */}
+            <div>
+              <h2 className="text-base font-semibold text-ink mb-3">Your schedule</h2>
             <div className="bg-white border border-line rounded-xl overflow-hidden">
               {/* Day navigator header */}
               <div className="flex items-center justify-between px-5 py-3.5 border-b border-line">
@@ -387,7 +384,7 @@ export default function TeacherTimetablePage() {
                 })}
               </div>
             </div>
-
+            </div>{/* end schedule wrapper */}
             {/* ── Full week grid (desktop) ──────────────────────────────── */}
             <div className="hidden lg:block bg-white border border-line rounded-xl overflow-hidden shadow-sm">
               <div className="px-5 py-3.5 border-b border-line flex items-center justify-between">

@@ -1,7 +1,46 @@
+import React from "react";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import ContextNavigation, { type ContextNavItem } from "@/components/ContextNavigation";
+import ContextNavigation from "@/components/ContextNavigation";
+import { TEACHER_ACADEMICS_NAV } from "@/lib/teacherAcademicsNav";
+import {
+  BookOpen,
+  Building2,
+  Users,
+  CalendarDays,
+  ClipboardList,
+  BarChart3,
+} from "lucide-react";
+
+// TEACHER_ACADEMICS_NAV is imported from @/lib/teacherAcademicsNav
+
+const TILE_META: Record<string, { icon: React.ElementType; description: string }> = {
+  "/teacher/academics/departments": {
+    icon: Building2,
+    description: "View subject departments and department heads.",
+  },
+  "/teacher/academics/classes": {
+    icon: Users,
+    description: "Browse all classes. Your class is highlighted if you are a class teacher.",
+  },
+  "/teacher/academics/subjects": {
+    icon: BookOpen,
+    description: "View the master subject list — core and elective subjects offered.",
+  },
+  "/teacher/timetable": {
+    icon: CalendarDays,
+    description: "Your personal weekly timetable when published.",
+  },
+  "/teacher/attendance": {
+    icon: ClipboardList,
+    description: "Record and review attendance for your classes.",
+  },
+  "/teacher/assessments": {
+    icon: BarChart3,
+    description: "Exams setup, results entry, and performance analytics.",
+  },
+};
 
 export default async function TeacherAcademicsHub() {
   const user = await getCurrentUser();
@@ -9,44 +48,68 @@ export default async function TeacherAcademicsHub() {
 
   const teacher = await prisma.teacher.findUnique({
     where: { userId: user.id },
-    select: { classTeacherOf: { select: { id: true } } },
+    select: {
+      classTeacherOf: { select: { id: true, name: true } },
+    },
   });
 
-  const contextItems: ContextNavItem[] = [
-    { href: "/teacher/timetable",  label: "Timetable"       },
-    { href: "/teacher/results",    label: "Results Entry"   },
-    ...(teacher?.classTeacherOf
-      ? [{ href: "/teacher/results/slips", label: "Class Result Slips" }]
-      : []),
-    ...(teacher?.classTeacherOf
-      ? [{ href: "/teacher/attendance", label: "Attendance" }]
-      : []),
-    { href: "/teacher/assessments", label: "Exams & Analysis" },
-    { href: "/teacher/calendar",    label: "Calendar"         },
-  ];
+  const isClassTeacher = !!teacher?.classTeacherOf;
+
+  // Tiles shown on the hub overview.
+  // Class teachers don't need a Subjects tile — it's view-only and not part
+  // of their primary workflow. The nav strip still has it for reference.
+  const tilesToShow = TEACHER_ACADEMICS_NAV.filter((item) => {
+    if (isClassTeacher && item.href === "/teacher/academics/subjects") return false;
+    return true;
+  });
 
   return (
     <div>
       <h1 className="text-2xl font-semibold text-ink mb-1 dark:text-dark-text">Academics</h1>
       <p className="text-slate text-sm mb-6 dark:text-dark-muted">
-        Results, attendance, assessments, and the school calendar.
+        Departments, classes, subjects, timetable, attendance, and assessments.
+        {isClassTeacher && (
+          <span className="ml-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-teal/10 text-teal text-xs font-medium">
+            Class Teacher — {teacher?.classTeacherOf?.name}
+          </span>
+        )}
       </p>
-      <ContextNavigation items={contextItems} />
 
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 mt-8">
-        {contextItems.map((item) => (
-          <a
-            key={item.href}
-            href={item.href}
-            className="block bg-card border border-line rounded-xl p-6
-                       hover:border-teal/40 hover:shadow-sm transition-all duration-150
-                       dark:bg-dark-surface dark:border-dark-border dark:hover:border-teal/30"
-          >
-            <h2 className="text-base font-semibold text-ink dark:text-dark-text">
-              {item.label}
-            </h2>
-          </a>
-        ))}
+      <ContextNavigation items={TEACHER_ACADEMICS_NAV} />
+
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-8">
+        {tilesToShow.map((item) => {
+          const meta = TILE_META[item.href];
+          const Icon = meta?.icon;
+          return (
+            <a
+              key={item.href}
+              href={item.href}
+              className="group flex flex-col gap-3 bg-white border border-line rounded-xl p-5
+                         hover:border-teal/50 hover:shadow-md transition-all duration-150
+                         dark:bg-dark-surface dark:border-dark-border dark:hover:border-teal/40"
+            >
+              {Icon && (
+                <span
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg
+                             bg-teal/8 text-teal group-hover:bg-teal/15 transition-colors"
+                >
+                  <Icon className="h-5 w-5" />
+                </span>
+              )}
+              <div>
+                <h2 className="text-sm font-semibold text-ink dark:text-dark-text">
+                  {item.label}
+                </h2>
+                {meta?.description && (
+                  <p className="mt-0.5 text-xs text-slate leading-relaxed dark:text-dark-muted">
+                    {meta.description}
+                  </p>
+                )}
+              </div>
+            </a>
+          );
+        })}
       </div>
     </div>
   );
