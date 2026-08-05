@@ -25,11 +25,21 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   try {
     const note = await prisma.disciplineNote.create({
       data: { disciplineRecordId: record.id, body: parsed.data.body, createdById: user.id },
+      include: {
+        createdBy: {
+          select: { email: true, role: true, teacher: { select: { fullName: true } } },
+        },
+      },
     });
     await prisma.disciplineEvent.create({
       data: { disciplineRecordId: record.id, type: "NOTE", detail: "Note added", createdById: user.id },
     });
-    return NextResponse.json(note, { status: 201 });
+    return NextResponse.json({
+      id: note.id,
+      body: note.body,
+      createdAt: note.createdAt.toISOString(),
+      createdBy: note.createdBy,
+    }, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Couldn't add the note." }, { status: 500 });
   }
