@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { PageHeader, EmptyState } from "@/components/ui";
+import { PageHeader } from "@/components/ui";
 import ContextNavigation from "@/components/ContextNavigation";
 import AttendancePageTabs from "@/components/AttendancePageTabs";
 import TeacherAttendanceOverview from "@/components/TeacherAttendanceOverview";

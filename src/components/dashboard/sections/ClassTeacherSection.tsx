@@ -15,7 +15,6 @@ interface Props {
   todayPresent:     number;
   todayAbsent:      number;
   openDiscipline:   number;
-  classData?:       ClassData | null;
   recentAbsentees:  { id: string; fullName: string }[];
   activePeriods:    AssessmentPeriod[];
 }
