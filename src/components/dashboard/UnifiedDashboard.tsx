@@ -253,7 +253,6 @@ export default async function UnifiedDashboard({ user, rolePrefix }: Props) {
           todayPresent={classTeacherData.todayPresent}
           todayAbsent={classTeacherData.todayAbsent}
           openDiscipline={classTeacherData.openDiscipline}
-          classData={classTeacherData.classData}
           recentAbsentees={classTeacherData.recentAbsentees}
           activePeriods={assessmentPeriods}
         />
