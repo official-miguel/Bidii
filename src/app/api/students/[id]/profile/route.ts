@@ -18,7 +18,7 @@ const db = prisma as any;
  * last two exam results with delta, attendance summary,
  * discipline records, achievements.
  *
- * Access: PRINCIPAL, ADMIN_STAFF (any), TEACHER (own class only).
+ * Access: PRINCIPAL, ADMIN_STAFF (any), TEACHER (any teacher in the school).
  *
  * Optimisations applied:
  *  - All independent queries run in parallel via Promise.all.
@@ -55,13 +55,18 @@ export async function GET(
   if (!student) return NextResponse.json({ error: "Student not found." }, { status: 404 });
 
   // ── Teacher auth check (needs student.classId) ───────────────────────────
+  // All teachers in the same school can view student profile cards.
+  // (They need this for global search, people tile student lists, and
+  //  clicking a student name anywhere in the teacher portal.)
   if (user.role === "TEACHER") {
     const teacher = await prisma.teacher.findUnique({
       where: { userId: user.id },
-      select: { classTeacherOf: { select: { id: true } } },
+      select: { schoolId: true },
     });
-    if (teacher?.classTeacherOf?.id !== student.classId)
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    // Just ensure the teacher belongs to the same school — already guaranteed
+    // by the student lookup above (schoolId: user.schoolId), but verify the
+    // teacher record exists so we don't serve data to a misconfigured login.
+    if (!teacher) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   // ── Wave 2: all independent queries in parallel ──────────────────────────
