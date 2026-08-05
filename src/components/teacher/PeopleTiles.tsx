@@ -52,7 +52,7 @@ export default function PeopleTiles({ tiles }: { tiles: Tile[] }) {
             </div>
             <div className="flex gap-2 mt-auto pt-1">
               <Link
-                href={`/teacher/students?classId=${tile.classId}`}
+                href={`/teacher/people/${tile.id}?classId=${tile.classId}${tile.subjectId ? `&subjectId=${tile.subjectId}` : ""}${tile.isClassTeacher ? "&isClassTeacher=1" : ""}&title=${encodeURIComponent(tile.title)}&sub=${encodeURIComponent(tile.subTitle)}`}
                 className="flex-1 text-center text-xs font-medium px-3 py-2 rounded-lg border border-line
                            text-slate hover:border-teal hover:text-teal transition-colors
                            dark:border-dark-border dark:text-dark-muted dark:hover:border-teal dark:hover:text-teal"
