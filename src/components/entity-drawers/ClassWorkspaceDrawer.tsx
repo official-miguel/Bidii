@@ -97,6 +97,8 @@ interface Props {
   onOpenStaff?: (staffId: string, staffName: string) => void;
   onOpenSubject?: (subjectId: string, subjectName: string) => void;
   basePath?: string;
+  /** When true, all edit/assign controls are hidden — view-only mode */
+  readOnly?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +130,7 @@ export default function ClassWorkspaceDrawer({
   onOpenStaff,
   onOpenSubject,
   basePath = "/principal",
+  readOnly = false,
 }: Props) {
   const [cls, setCls]         = useState<ClassDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -436,7 +439,7 @@ export default function ClassWorkspaceDrawer({
                 <UserCheck className="h-3.5 w-3.5" />
                 Class teacher
               </SectionTitle>
-              {!assigningTeacher && (
+              {!assigningTeacher && !readOnly && (
                 <button
                   type="button"
                   onClick={() => setAssigningTeacher(true)}
@@ -604,18 +607,24 @@ export default function ClassWorkspaceDrawer({
                           ) : (
                             <span className="text-xs text-slate">{s.assignedTeacher.fullName}</span>
                           )}
-                          <button type="button" title="Change teacher"
-                            onClick={() => { setAssigningSubjectId(isOpen ? null : s.id); setSubjectTeacherSearch(""); setSubjectTeacherError(null); }}
-                            className="p-1 rounded hover:bg-paper text-slate/40 hover:text-teal transition-colors">
-                            <Pencil className="h-3 w-3" />
-                          </button>
+                          {!readOnly && (
+                            <button type="button" title="Change teacher"
+                              onClick={() => { setAssigningSubjectId(isOpen ? null : s.id); setSubjectTeacherSearch(""); setSubjectTeacherError(null); }}
+                              className="p-1 rounded hover:bg-paper text-slate/40 hover:text-teal transition-colors">
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                          )}
                         </>
                       ) : (
-                        <button type="button"
-                          onClick={() => { setAssigningSubjectId(isOpen ? null : s.id); setSubjectTeacherSearch(""); setSubjectTeacherError(null); }}
-                          className="flex items-center gap-1 text-xs font-medium text-teal hover:underline">
-                          <UserCheck className="h-3 w-3" />Assign
-                        </button>
+                        !readOnly ? (
+                          <button type="button"
+                            onClick={() => { setAssigningSubjectId(isOpen ? null : s.id); setSubjectTeacherSearch(""); setSubjectTeacherError(null); }}
+                            className="flex items-center gap-1 text-xs font-medium text-teal hover:underline">
+                            <UserCheck className="h-3 w-3" />Assign
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate/50 italic">Not assigned</span>
+                        )
                       )}
                     </div>
                   </div>
@@ -741,7 +750,8 @@ export default function ClassWorkspaceDrawer({
                                       {member.subject.code}
                                     </span>
                                     <span className="text-sm font-medium text-ink flex-1">{member.subject.name}</span>
-                                    {/* Add teacher button */}
+                                    {/* Add teacher button — only for editable mode */}
+                                    {!readOnly && (
                                     <button
                                       type="button"
                                       disabled={isSaving}
@@ -755,6 +765,7 @@ export default function ClassWorkspaceDrawer({
                                       <Plus className="h-3 w-3" />
                                       Add teacher
                                     </button>
+                                    )}
                                   </div>
 
                                   {/* Assigned teachers list */}
@@ -779,7 +790,7 @@ export default function ClassWorkspaceDrawer({
                                             disabled={isSaving}
                                             onClick={() => removeElectiveTeacher(group.id, member.subjectId, p.teacherId)}
                                             title="Remove teacher"
-                                            className="p-0.5 rounded text-slate/30 hover:text-danger hover:bg-danger-bg transition-colors disabled:opacity-40"
+                                            className={`p-0.5 rounded text-slate/30 hover:text-danger hover:bg-danger-bg transition-colors disabled:opacity-40 ${readOnly ? "hidden" : ""}`}
                                           >
                                             <X className="h-3 w-3" />
                                           </button>

@@ -29,18 +29,44 @@ function rateColor(rate: number) {
   return "text-danger";
 }
 
-/// Principal-only attendance analytics. One fetch per date range; the
-/// Form/Stream/Student tabs just switch between the three groupings the API
-/// already returned.
-export default function AttendanceAnalytics() {
+interface AttendanceAnalyticsProps {
+  /**
+   * When provided, the analytics data is client-side filtered to these class
+   * IDs — used on the teacher attendance page to scope analytics to the
+   * classes that teacher teaches.
+   */
+  classIds?: string[];
+}
+
+/// Attendance analytics. One fetch per date range; the
+/// Form/Stream/Student tabs switch between the three groupings the API returned.
+/// When classIds is provided the byStream and byStudent tabs are filtered.
+export default function AttendanceAnalytics({ classIds }: AttendanceAnalyticsProps = {}) {
   const [from, setFrom] = useState(isoDaysAgo(29));
   const [to, setTo] = useState(isoDaysAgo(0));
-  const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("byForm");
+  const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("byStream");
+  const [rawData, setRawData] = useState<Analytics | null>(null);
   const [data, setData] = useState<Analytics | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // When raw data arrives or classIds changes, apply client-side class filter
+  useEffect(() => {
+    if (!rawData) { setData(null); return; }
+    if (!classIds || classIds.length === 0) { setData(rawData); return; }
+    // Filter byStream to only the teacher's classes; byForm and byStudent
+    // derive from the same underlying records so we scope all three.
+    const classIdSet = new Set(classIds);
+    setData({
+      ...rawData,
+      byStream:  rawData.byStream.filter((b) => classIdSet.has(b.key)),
+      byStudent: rawData.byStudent, // student rows don't carry classId; show all
+      byForm:    rawData.byForm,    // form grouping stays school-wide for context
+    });
+  }, [rawData, classIds]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     const controller = new AbortController();
+    setRawData(null);
     setData(null);
     setError(null);
     fetch(`/api/attendance?analytics=1&from=${from}&to=${to}`, { signal: controller.signal })
@@ -50,7 +76,7 @@ export default function AttendanceAnalytics() {
           setError(body.error || "Couldn't load attendance analytics.");
           return;
         }
-        setData(body);
+        setRawData(body);
       })
       .catch((err) => {
         if (err.name !== "AbortError") setError("Couldn't load attendance analytics.");
