@@ -1,20 +1,34 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
-import TeacherHome from "@/components/assessment/TeacherHome";
+import { prisma } from "@/lib/prisma";
+import AssessmentsPageTabs from "@/components/assessment/AssessmentsPageTabs";
 
 export default async function TeacherAssessmentsPage() {
   const user = await getCurrentUser();
   if (!user || user.role !== "TEACHER") redirect("/login");
 
+  const teacher = await prisma.teacher.findUnique({
+    where: { userId: user.id },
+    select: {
+      departmentHeadOf: { select: { id: true, name: true } },
+      subjectAssignments: { select: { classId: true }, take: 1 },
+      classElectiveGroupTeachers: { select: { classId: true }, take: 1 },
+    },
+  });
+
+  const isHod = !!teacher?.departmentHeadOf;
+  const hasSubjectAssignments =
+    (teacher?.subjectAssignments.length ?? 0) > 0 ||
+    (teacher?.classElectiveGroupTeachers.length ?? 0) > 0;
+  const departmentId = teacher?.departmentHeadOf?.id;
+  const departmentName = teacher?.departmentHeadOf?.name;
+
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-semibold text-ink dark:text-dark-text">Exams &amp; Analysis</h1>
-        <p className="text-sm text-slate mt-0.5 dark:text-dark-muted">
-          Your assignments, marks progress, and class performance for the current period.
-        </p>
-      </div>
-      <TeacherHome />
-    </div>
+    <AssessmentsPageTabs
+      isHod={isHod}
+      hasSubjectAssignments={hasSubjectAssignments}
+      departmentId={departmentId}
+      departmentName={departmentName}
+    />
   );
 }

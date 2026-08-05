@@ -16,6 +16,23 @@ export async function GET() {
           schoolClass: { select: { id: true, name: true } },
         },
       },
+      // For the View tab — direct assignment tables
+      subjectAssignments: {
+        select: {
+          classId: true,
+          subjectId: true,
+          schoolClass: { select: { id: true, name: true } },
+          subject: { select: { id: true, name: true, code: true } },
+        },
+      },
+      classElectiveGroupTeachers: {
+        select: {
+          classId: true,
+          subjectId: true,
+          schoolClass: { select: { id: true, name: true } },
+          subject: { select: { id: true, name: true, code: true } },
+        },
+      },
     },
   });
 
@@ -37,9 +54,18 @@ export async function GET() {
     bySubject.set(slot.subject.id, entry);
   }
 
+  // Build a deduped list of taught classes (for the View tab).
+  // classTeacherOf is pinned first if present.
+  const classSet = new Map<string, { id: string; name: string }>();
+  if (teacher.classTeacherOf) classSet.set(teacher.classTeacherOf.id, teacher.classTeacherOf);
+  for (const a of teacher.subjectAssignments) classSet.set(a.schoolClass.id, a.schoolClass);
+  for (const e of teacher.classElectiveGroupTeachers) classSet.set(e.schoolClass.id, e.schoolClass);
+  const taughtClasses = Array.from(classSet.values());
+
   return NextResponse.json({
     fullName: teacher.fullName,
     classTeacherOf: teacher.classTeacherOf,
     assignments: Array.from(bySubject.values()),
+    taughtClasses,
   });
 }

@@ -32,8 +32,32 @@ const updateSchema = z.object({
 });
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
-  const user = await requireRole("PRINCIPAL");
+  // Allow PRINCIPAL unconditionally; also allow a class teacher but only for
+  // students in their own class (R4.7, R4.8).
+  const user = await requireRole("PRINCIPAL", "TEACHER");
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // For TEACHER callers, enforce class-teacher scope.
+  if (user.role === "TEACHER") {
+    // Look up the student to get its classId.
+    const studentForCheck = await prisma.student.findFirst({
+      where: { id: params.id, schoolId: user.schoolId },
+      select: { classId: true },
+    });
+    if (!studentForCheck) return NextResponse.json({ error: "Student not found." }, { status: 404 });
+
+    // Teacher must be the class teacher of that class.
+    const teacher = await prisma.teacher.findUnique({
+      where: { userId: user.id },
+      select: { classTeacherOf: { select: { id: true } } },
+    });
+    if (!teacher?.classTeacherOf?.id || teacher.classTeacherOf.id !== studentForCheck.classId) {
+      return NextResponse.json(
+        { error: "You can only edit students in your own class." },
+        { status: 403 }
+      );
+    }
+  }
 
   const parsed = updateSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
