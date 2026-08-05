@@ -13,7 +13,7 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, ChevronRight, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { ArrowLeft, ChevronRight } from "lucide-react";
 import { Avatar, EmptyState } from "@/components/ui";
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -64,71 +64,49 @@ function TrendZigzag({
   trend: Trend;
   delta: number | null;
 }) {
+  // Flat / no data — simple grey dash
   if (!trend || trend === "FLAT" || delta === null) {
     return (
-      <div className="flex items-center gap-1 min-w-[72px]" title="No change">
-        <Minus className="h-3.5 w-3.5 text-slate/40" />
-        <span className="text-[11px] text-slate/50 tabular-nums">—</span>
+      <div className="flex items-center gap-1">
+        <svg width={24} height={14} viewBox="0 0 24 14" fill="none">
+          <line x1={2} y1={7} x2={22} y2={7} stroke="#94a3b8" strokeWidth={1.5} strokeLinecap="round" />
+        </svg>
       </div>
     );
   }
 
-  const isUp    = trend === "UP";
-  const colour  = isUp ? "#16a34a" : "#dc2626";
-  const bgClass = isUp ? "bg-success-bg" : "bg-danger-bg";
-  const label   = `${isUp ? "+" : ""}${delta.toFixed(2)}`;
+  const isUp   = trend === "UP";
+  const colour = isUp ? "#16a34a" : "#dc2626";
+  const label  = `${isUp ? "+" : ""}${delta.toFixed(2)}`;
 
-  // Two-point zigzag: prev on left, last on right
-  const y1 = isUp ? 22 : 6;
-  const y2 = isUp ? 6  : 22;
+  // Zigzag: two segments making a "Z" shape — goes opposite direction to the trend
+  // then corrects to match the trend, giving a visual spike effect.
+  // Points: (2,10) → (8,4) → (14,10) → (22,4)  for UP
+  //         (2,4)  → (8,10) → (14,4) → (22,10)  for DOWN
+  const pts = isUp
+    ? "2,10 8,4 14,10 22,4"
+    : "2,4 8,10 14,4 22,10";
 
   return (
-    <div
-      className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full ${bgClass} shrink-0`}
-      title={`${isUp ? "Improved" : "Declined"} by ${Math.abs(delta).toFixed(2)} pts`}
-    >
-      {/* Zigzag SVG */}
-      <svg width={28} height={28} viewBox="0 0 28 28" fill="none" className="shrink-0">
-        {/* Background dots */}
-        <circle cx={4}  cy={y1} r={2.5} fill={colour} opacity={0.35} />
-        <circle cx={24} cy={y2} r={2.5} fill={colour} opacity={0.35} />
-        {/* Line */}
-        <line
-          x1={4}  y1={y1}
-          x2={24} y2={y2}
+    <div className="flex items-center gap-1.5">
+      {/* Compact zigzag SVG */}
+      <svg width={24} height={14} viewBox="0 0 24 14" fill="none" className="shrink-0">
+        <polyline
+          points={pts}
           stroke={colour}
-          strokeWidth={2}
+          strokeWidth={1.8}
           strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
         />
-        {/* End dot */}
-        <circle cx={24} cy={y2} r={3} fill={colour} />
-        {/* Arrow head */}
-        {isUp ? (
-          <>
-            <line x1={24} y1={y2} x2={19} y2={y2 + 4} stroke={colour} strokeWidth={2} strokeLinecap="round" />
-            <line x1={24} y1={y2} x2={24} y2={y2 + 5} stroke={colour} strokeWidth={2} strokeLinecap="round" />
-          </>
-        ) : (
-          <>
-            <line x1={24} y1={y2} x2={19} y2={y2 - 4} stroke={colour} strokeWidth={2} strokeLinecap="round" />
-            <line x1={24} y1={y2} x2={24} y2={y2 - 5} stroke={colour} strokeWidth={2} strokeLinecap="round" />
-          </>
-        )}
       </svg>
 
-      {/* Delta label */}
+      {/* Delta number */}
       <span
-        className={`text-[11px] font-semibold tabular-nums ${isUp ? "text-success" : "text-danger"}`}
+        className={`text-xs font-semibold tabular-nums ${isUp ? "text-success" : "text-danger"}`}
       >
         {label}
       </span>
-
-      {/* Arrow icon */}
-      {isUp ? (
-        <TrendingUp className="h-3 w-3 text-success shrink-0" />
-      ) : (
-        <TrendingDown className="h-3 w-3 text-danger shrink-0" />
-      )}
     </div>
   );
 }
@@ -149,15 +127,19 @@ function Legend() {
         <span className="inline-block w-2 h-2 rounded-full bg-slate/30" />
         Not recorded
       </span>
-      <span className="flex items-center gap-1.5 ml-2 pl-2 border-l border-line">
-        <TrendingUp className="h-3 w-3 text-success" />
-        <span className="text-success font-medium">+pts</span>
-        &nbsp;= improved vs last exam
+      <span className="flex items-center gap-2 ml-2 pl-2 border-l border-line">
+        <svg width={24} height={14} viewBox="0 0 24 14" fill="none">
+          <polyline points="2,10 8,4 14,10 22,4" stroke="#16a34a" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        </svg>
+        <span className="text-success font-semibold">+pts</span>
+        <span>improved</span>
       </span>
-      <span className="flex items-center gap-1.5">
-        <TrendingDown className="h-3 w-3 text-danger" />
-        <span className="text-danger font-medium">−pts</span>
-        &nbsp;= declined
+      <span className="flex items-center gap-2">
+        <svg width={24} height={14} viewBox="0 0 24 14" fill="none">
+          <polyline points="2,4 8,10 14,4 22,10" stroke="#dc2626" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        </svg>
+        <span className="text-danger font-semibold">−pts</span>
+        <span>declined</span>
       </span>
     </div>
   );
