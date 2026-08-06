@@ -80,7 +80,7 @@ export default async function TeacherAttendancePage() {
         {/* ── Attendance submission / review tabs ───────────────────── */}
         <div>
           <h2 className="text-base font-semibold text-ink mb-3 dark:text-dark-text">
-            {isClassTeacher ? "Take or review attendance" : "Review attendance"}
+            {isClassTeacher ? "Take or receive attendance" : "Review attendance"}
           </h2>
           <AttendancePageTabs
             isClassTeacher={isClassTeacher}
