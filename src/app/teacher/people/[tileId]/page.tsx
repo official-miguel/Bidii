@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useState, useMemo, useCallback } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { Avatar, EmptyState } from "@/components/ui";

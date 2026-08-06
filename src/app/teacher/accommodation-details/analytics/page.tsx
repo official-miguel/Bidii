@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import {
   BarChart2, Users, BedDouble,
   AlertTriangle, Award, Shield, Calendar,
