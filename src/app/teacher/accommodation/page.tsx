@@ -18,7 +18,7 @@ export default function TeacherStudentLifePage() {
       color: "teal",
     },
     {
-      href: "/teacher/records/accommodation",
+      href: "/teacher/accommodation-details",
       icon: Building2,
       title: "Accommodation",
       description: "Browse dormitories, room assignments, and boarding student details.",
