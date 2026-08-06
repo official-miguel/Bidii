@@ -17,8 +17,6 @@ export default async function TeacherStudentProfilePage({ params }: { params: { 
     <StudentProfile
       studentId={student.id}
       role="teacher"
-      backHref="/teacher"
-      backLabel="Back"
     />
   );
 }

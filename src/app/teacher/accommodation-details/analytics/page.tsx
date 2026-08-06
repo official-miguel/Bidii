@@ -2,12 +2,11 @@
 
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import Link from "next/link";
 import {
   BarChart2, Users, BedDouble,
   AlertTriangle, Award, Shield, Calendar,
   RefreshCw, ChevronRight, Star, Flame,
-  BookOpen, ClipboardList, ArrowLeft,
+  BookOpen, ClipboardList,
 } from "lucide-react";
 import { PageHeader, ErrorBanner } from "@/components/ui";
 
@@ -540,15 +539,6 @@ function AnalyticsInner() {
 export default function TeacherAccommodationAnalyticsPage() {
   return (
     <div>
-      {/* Back to accommodation overview */}
-      <div className="mb-4">
-        <Link
-          href="/teacher/accommodation-details"
-          className="inline-flex items-center gap-1.5 text-sm text-slate hover:text-teal transition-colors dark:text-dark-muted dark:hover:text-teal"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" /> Back to accommodation
-        </Link>
-      </div>
       <Suspense fallback={
         <div className="space-y-4">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, FormEvent } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
-  ArrowLeft, BedDouble, LayoutGrid, Plus,
+  BedDouble, LayoutGrid, Plus,
   UserCheck, ChevronDown, ChevronUp, Pencil, Info, Trash2,
 } from "lucide-react";
 import {
@@ -781,14 +781,6 @@ export default function DormDetailPage() {
   return (
     <div>
       <ContextNavigation items={NAV_ITEMS} />
-
-      {/* Back */}
-      <div className="mb-4">
-        <Link href="/principal/accommodation/dormitories"
-          className="inline-flex items-center gap-1.5 text-sm text-slate hover:text-teal transition-colors dark:text-dark-muted dark:hover:text-teal">
-          <ArrowLeft className="h-3.5 w-3.5" /> All dormitories
-        </Link>
-      </div>
 
       {successMsg && <div className="mb-4"><SuccessBanner message={successMsg} onDismiss={() => setSuccessMsg(null)} /></div>}
       {error && <div className="mb-4"><ErrorBanner message={error} onDismiss={() => setError(null)} /></div>}

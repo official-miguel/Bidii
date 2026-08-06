@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveAssessmentActor, canGenerateReportCard } from "@/lib/assessment/auth844";
@@ -36,15 +35,6 @@ export default async function StudentReportPage({
 
   return (
     <div className="space-y-4">
-      {/* Back link + student header */}
-      <div className="flex items-center gap-3">
-        <Link
-          href={`/principal/assessments/report-cards?classId=${student.classId}&periodId=${periodId}`}
-          className="text-sm text-slate hover:text-ink"
-        >
-          ← Back to class list
-        </Link>
-      </div>
       <div>
         <h1 className="font-display text-xl font-semibold text-ink">{student.fullName}</h1>
         <p className="text-sm text-slate mt-0.5">

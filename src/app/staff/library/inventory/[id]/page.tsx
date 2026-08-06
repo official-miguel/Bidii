@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import Link from "next/link";
 import {
   BookOpen, TrendingUp, Users, Clock, RefreshCw, AlertTriangle,
-  ChevronDown, ChevronRight, ArrowLeft, Lightbulb, BarChart3,
+  ChevronDown, ChevronRight, Lightbulb, BarChart3,
 } from "lucide-react";
 import { Badge, PageHeader, Spinner } from "@/components/ui";
 import ContextNavigation from "@/components/ContextNavigation";
@@ -73,7 +72,6 @@ export default function BookIntelligencePage() {
   return (
     <div>
       <ContextNavigation items={navItems} />
-      <Link href="/staff/library/inventory" className="inline-flex items-center gap-1.5 text-sm text-slate hover:text-ink mb-4"><ArrowLeft className="h-4 w-4" />Back to Inventory</Link>
 
       <PageHeader title={catalogue.title} description={[catalogue.author, catalogue.subject, catalogue.form ? `Form ${catalogue.form}` : null, catalogue.bookNumber].filter(Boolean).join(" · ")} />
 
