@@ -38,7 +38,7 @@ export default function SchoolOverviewSection({
     alerts.push({ id: "cf",  type: "warn",   href: `${base}/timetable`,
       message: `${timetableConflicts} timetable conflict${timetableConflicts !== 1 ? "s" : ""} detected.` });
   if (todayAbsences > 10)
-    alerts.push({ id: "abs", type: "warn",   href: `${base}/attendance`,
+    alerts.push({ id: "abs", type: "warn",   href: `${base}/attendance/absent-today`,
       message: `${todayAbsences} student absences recorded today — higher than usual.` });
 
   return (
@@ -60,7 +60,7 @@ export default function SchoolOverviewSection({
         <StatCard label="Staff"        value={totalTeachers}  href={`${base}/staff`}        icon={GraduationCap} color="teal" />
         <StatCard label="Classes"      value={totalClasses}   href={`${base}/classes`}      icon={BookOpen}      color="teal" />
         <StatCard label="Departments"  value={totalDepts}     href={`${base}/departments`}  icon={CheckCircle}   color="teal" />
-        <StatCard label="Today absences" value={todayAbsences} href={`${base}/attendance`}  icon={Clock}
+        <StatCard label="Today absences" value={todayAbsences} href={`${base}/attendance/absent-today`} icon={Clock}
                   color={todayAbsences > 10 ? "warn" : "teal"} />
         <StatCard label="Discipline"   value={unresolvedDiscipline} href={`${base}/records`} icon={AlertTriangle}
                   color={unresolvedDiscipline > 0 ? "warn" : "success"}
