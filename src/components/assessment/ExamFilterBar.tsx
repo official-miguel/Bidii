@@ -164,7 +164,8 @@ export default function ExamFilterBar({
             const match = classes.find((c) => c.id === defaultClassId);
             if (match) initialForm = match.form;
           }
-          if (initialForm === "" && forms.length > 0) initialForm = forms[0];
+          // Do NOT auto-select a form — default to "All forms" unless a
+          // specific class was pre-selected (drill-down from a tile).
           setForm(initialForm);
           if (defaultClassId && initialForm !== "") {
             const match = classes.find((c) => c.id === defaultClassId && c.form === initialForm);
@@ -218,9 +219,10 @@ export default function ExamFilterBar({
     [...new Set(classes.map((c) => c.form))].sort((a, b) => a - b),
   [classes]);
 
-  const formOptions = useMemo(() =>
-    availableForms.map((f) => ({ id: String(f), label: `Form ${f}` })),
-  [availableForms]);
+  const formOptions = useMemo(() => [
+    { id: "", label: "All forms" },
+    ...availableForms.map((f) => ({ id: String(f), label: `Form ${f}` })),
+  ], [availableForms]);
 
   const availableStreams = useMemo(() => {
     if (form === "") return [];
@@ -250,9 +252,8 @@ export default function ExamFilterBar({
   [availableSubjects]);
 
   // ── Fire onChange when selection is complete ───────────────────────────────
-  // This is the ONLY effect — no cascading auto-selects.
   useEffect(() => {
-    if (!periodId || form === "") return;
+    if (!periodId) return;
     const subjectReady = hideSubject || subjectId !== "";
     if (!subjectReady) return;
 
@@ -260,9 +261,7 @@ export default function ExamFilterBar({
     if (key === prevKey.current) return;
     prevKey.current = key;
 
-    onChange({ periodId, classId, subjectId, form: form as number });
-  // onChange excluded intentionally — stable useCallback in parents; including
-  // it causes re-render loops. prevKey deduplicates.
+    onChange({ periodId, classId, subjectId, form: form === "" ? 0 : (form as number) });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodId, form, classId, subjectId, hideSubject]);
 
@@ -279,9 +278,7 @@ export default function ExamFilterBar({
     prevKey.current = "";
     const newForm = id === "" ? "" : parseInt(id, 10);
     setForm(newForm);
-    // Reset stream when form changes — streams are form-specific.
     setClassId("");
-    // Auto-select the first subject applicable to the new form.
     if (!hideSubject && typeof newForm === "number") {
       const first = subjects.find((s) => s.applicableForms.includes(newForm));
       setSubjectId(first?.id ?? "");
@@ -303,7 +300,7 @@ export default function ExamFilterBar({
 
   // ── Disabled states ────────────────────────────────────────────────────────
   const formDisabled    = periodsLoading || !periodId;
-  const streamDisabled  = formDisabled || form === "";
+  const streamDisabled  = periodsLoading || !periodId || form === "";
   const subjectDisabled = streamDisabled;
   const showStream      = !lockClass || availableStreams.length > 1;
 
