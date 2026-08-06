@@ -11,9 +11,9 @@
  */
 
 import { useEffect, useState, useMemo, useCallback } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { Avatar, EmptyState } from "@/components/ui";
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -224,15 +224,6 @@ export default function TileStudentsPage() {
     <div>
       {/* ── Page header ────────────────────────────────────────────────── */}
       <div className="mb-5">
-        <button
-          type="button"
-          onClick={() => router.back()}
-          className="flex items-center gap-1.5 text-sm text-slate hover:text-teal transition-colors mb-3"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to People
-        </button>
-
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-xl sm:text-2xl font-semibold text-ink dark:text-dark-text leading-tight">

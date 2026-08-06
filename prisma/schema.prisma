@@ -114,6 +114,8 @@ model School {
   /// Elective groups
   electiveGroups           ElectiveGroup[]
   electiveGroupTeachers    ElectiveGroupTeacher[]
+  /// HOD formula configs
+  departmentFormulaConfigs DepartmentFormulaConfig[]
 }
 
 /// One row per login. Role determines which dashboard the user lands on.
@@ -196,8 +198,9 @@ model Department {
   schoolId      String
   headTeacher   Teacher?  @relation("DepartmentHead", fields: [headTeacherId], references: [id])
   school        School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  subjects      Subject[]
-  teachers      Teacher[] @relation("TeacherPrimaryDepartment")
+  subjects        Subject[]
+  teachers        Teacher[] @relation("TeacherPrimaryDepartment")
+  formulaConfigs  DepartmentFormulaConfig[]
 
   @@unique([schoolId, name])
   @@index([schoolId])
@@ -242,6 +245,8 @@ model Subject {
   lessonRequirements  SubjectLessonRequirement[]
   /// Per-class subject type overrides (class profile)
   classSubjectProfiles ClassSubjectProfile[]
+  /// HOD formula overrides for this subject
+  formulaConfigs       DepartmentFormulaConfig[]
 
   @@unique([schoolId, code])
   @@unique([schoolId, internalCode])
@@ -2011,6 +2016,38 @@ model Paper {
   @@index([subjectId])
   /// Supports marksheet/report-card paper lookup: WHERE frameworkId=? AND subjectId=?
   @@index([frameworkId, subjectId])
+}
+
+/// HOD-configurable % formula override for a specific subject, form, and
+/// assessment framework. When a marksheet loads for a matching
+/// (subjectId, form, frameworkId) the stored formula is pre-loaded into the
+/// FormulaCalculator instead of a blank default.
+///
+/// formula is a plain string using paper names, e.g.:
+///   (Paper 1 / 80) * 40 + (Paper 2 / 100) * 60
+/// An empty formula ("") means "use the raw score as-is" (default behaviour).
+model DepartmentFormulaConfig {
+  id           String   @id @default(cuid())
+  schoolId     String
+  departmentId String
+  subjectId    String
+  /// Form / year group this formula applies to, e.g. 3 or 4.
+  form         Int
+  frameworkId  String
+  /// The formula expression, built with the marksheet calculator keyboard.
+  formula      String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  school       School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  subject      Subject    @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  /// One formula per (subject, form, framework) in a department.
+  @@unique([departmentId, subjectId, form, frameworkId])
+  @@index([schoolId])
+  @@index([departmentId])
+  @@index([subjectId, form, frameworkId])
 }
 
 // ---------------------------------------------------------------------------

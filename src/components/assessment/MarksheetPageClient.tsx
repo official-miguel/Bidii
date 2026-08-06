@@ -8,6 +8,7 @@
  * Two modes:
  *   Landing (no classId + subjectId in URL):
  *     Shows TeacherMarksheetCards — the period selector + assignment card grid.
+ *     For HOD users: shows a tab switch between "My Classes" and "My Department"
  *
  *   Grid (classId + subjectId present in URL):
  *     Shows a "← Back to mark sheets" breadcrumb, then the MarksheetGrid /
@@ -15,9 +16,11 @@
  *     picks the period on the landing screen before opening a card.
  */
 
+import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Users, Building2 } from "lucide-react";
 import TeacherMarksheetCards from "@/components/assessment/TeacherMarksheetCards";
+import HODDepartmentMarksheetCards from "@/components/assessment/HODDepartmentMarksheetCards";
 
 interface PeriodOption {
   id: string;
@@ -32,16 +35,25 @@ interface MarksheetPageClientProps {
   periods: PeriodOption[];
   activePeriodId: string;
   isGridMode: boolean;
+  /** Whether this user is an HOD — if true, show My Classes / My Department tabs */
+  isHOD?: boolean;
+  /** HOD's department name for display */
+  departmentName?: string;
 }
+
+type LandingTab = "my_classes" | "my_department";
 
 export default function MarksheetPageClient({
   children,
   periods,
   activePeriodId,
   isGridMode,
+  isHOD = false,
+  departmentName,
 }: MarksheetPageClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [landingTab, setLandingTab] = useState<LandingTab>("my_classes");
 
   // ── Landing mode: period selector + assignment cards ──────────────────────
   if (!isGridMode) {
@@ -52,13 +64,60 @@ export default function MarksheetPageClient({
             Mark Sheets
           </h1>
           <p className="text-sm text-slate mt-0.5 dark:text-dark-muted">
-            Select an assignment below to open its mark sheet.
+            {isHOD
+              ? "Select an assignment from your classes or manage your department's mark sheets."
+              : "Select an assignment below to open its mark sheet."}
           </p>
         </div>
-        <TeacherMarksheetCards
-          periods={periods}
-          initialPeriodId={activePeriodId}
-        />
+
+        {/* HOD Tab Switch */}
+        {isHOD && (
+          <div className="flex gap-0.5 rounded-xl border border-line bg-paper p-1 w-fit">
+            <button
+              type="button"
+              onClick={() => setLandingTab("my_classes")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                landingTab === "my_classes"
+                  ? "bg-white shadow-sm text-ink dark:bg-dark-surface dark:text-dark-text"
+                  : "text-slate hover:text-ink dark:text-dark-muted dark:hover:text-dark-text"
+              }`}
+            >
+              <Users className="w-4 h-4 shrink-0" />
+              My Classes
+            </button>
+            <button
+              type="button"
+              onClick={() => setLandingTab("my_department")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                landingTab === "my_department"
+                  ? "bg-white shadow-sm text-ink dark:bg-dark-surface dark:text-dark-text"
+                  : "text-slate hover:text-ink dark:text-dark-muted dark:hover:text-dark-text"
+              }`}
+            >
+              <Building2 className="w-4 h-4 shrink-0" />
+              My Department
+              {departmentName && (
+                <span className="text-xs opacity-60">({departmentName})</span>
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* Cards Display */}
+        {(!isHOD || landingTab === "my_classes") && (
+          <TeacherMarksheetCards
+            periods={periods}
+            initialPeriodId={activePeriodId}
+          />
+        )}
+
+        {isHOD && landingTab === "my_department" && (
+          <HODDepartmentMarksheetCards
+            periods={periods}
+            initialPeriodId={activePeriodId}
+            departmentName={departmentName ?? ""}
+          />
+        )}
       </div>
     );
   }
@@ -76,7 +135,7 @@ export default function MarksheetPageClient({
           params.delete("subjectId");
           router.push(`/teacher/assessments/marksheet?${params.toString()}`);
         }}
-        className="inline-flex items-center gap-1 text-sm text-teal hover:text-teal/80 transition-colors"
+        className="inline-flex items-center gap-1 text-sm text-teal hover:text-teal/80 transition-colors dark:text-teal dark:hover:text-teal/80"
       >
         <ChevronLeft className="w-4 h-4" />
         Back to mark sheets

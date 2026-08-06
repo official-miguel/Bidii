@@ -28,6 +28,7 @@ export default async function TeacherAssessmentsLayout({
   const teacher = await prisma.teacher.findUnique({
     where: { userId: user.id },
     select: {
+      id: true,
       primaryDepartmentId: true,
       classTeacherOf: { select: { id: true } },
     },
@@ -38,6 +39,17 @@ export default async function TeacherAssessmentsLayout({
   const hasDept = !!teacher?.primaryDepartmentId;
   const isClassTeacher = !!teacher?.classTeacherOf;
 
+  // Check if this teacher is an HOD — head of any department in this school.
+  // headTeacherId on Department points to teacher.id, not teacher.userId.
+  let isHOD = false;
+  if (teacher?.id) {
+    const hodDept = await prisma.department.findFirst({
+      where: { schoolId: user.schoolId, headTeacherId: teacher.id },
+      select: { id: true },
+    });
+    isHOD = !!hodDept;
+  }
+
   const navItems: AssessmentNavItem[] = [
     { href: "/teacher/assessments",                    label: "Overview",          icon: "overview",         exact: true },
     { href: "/teacher/assessments/marksheet",           label: "Mark Sheets",       icon: "marksheet" },
@@ -47,6 +59,9 @@ export default async function TeacherAssessmentsLayout({
       : []),
     { href: "/teacher/assessments/ranking",             label: "Staff Performance", icon: "performance" },
     { href: "/teacher/assessments/report-cards",        label: "Report Cards",      icon: "report-cards" },
+    ...(isHOD
+      ? [{ href: "/teacher/assessments/settings",       label: "Settings",          icon: "exam-setup" as const }]
+      : []),
   ];
 
   // Mirror the academics-hub context nav (same items, same order) so the top

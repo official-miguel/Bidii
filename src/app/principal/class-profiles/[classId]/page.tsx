@@ -585,14 +585,6 @@ export default function ClassProfilePage({
         ]}
       />
 
-      <Link
-        href={data ? `/principal/class-profiles/form/${data.class.form}` : "/principal/class-profiles"}
-        className="inline-flex items-center gap-1.5 text-sm text-slate hover:text-teal transition-colors mb-4"
-      >
-        <ArrowLeft className="h-3.5 w-3.5" />
-        {data ? `Form ${data.class.form}` : "All forms"}
-      </Link>
-
       {loadError ? (
         <div className="rounded-xl bg-danger-bg border border-danger/20 text-danger text-sm px-4 py-3">
           {loadError}

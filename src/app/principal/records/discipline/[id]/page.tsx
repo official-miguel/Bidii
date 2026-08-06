@@ -1,5 +1,4 @@
 import { notFound, redirect } from "next/navigation";
-import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui";
@@ -52,11 +51,6 @@ export default async function DisciplineCasePage({ params }: { params: { id: str
       <PageHeader
         title={`Discipline Case: ${record.offence}`}
         description={`${record.student.fullName} (${record.student.admissionNumber}) — ${record.student.schoolClass.name}`}
-        action={
-          <Link href="/principal/records/discipline" className="text-sm text-royal hover:underline">
-            ← Back to Discipline
-          </Link>
-        }
       />
 
       <DisciplineCaseClient

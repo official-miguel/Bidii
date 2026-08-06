@@ -20,8 +20,6 @@ export default async function StaffStudentProfilePage({ params }: { params: { id
     <StudentProfile
       studentId={student.id}
       role="staff"
-      backHref="/staff/students"
-      backLabel="Back to students"
     />
   );
 }

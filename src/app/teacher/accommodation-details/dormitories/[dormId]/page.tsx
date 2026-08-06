@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
-  ArrowLeft, BedDouble, LayoutGrid,
+  BedDouble, LayoutGrid,
   ChevronDown, ChevronUp, BarChart2,
 } from "lucide-react";
 import { ErrorBanner } from "@/components/ui";
@@ -256,14 +256,6 @@ export default function TeacherDormDetailPage() {
     return (
       <div className="py-12">
         <ErrorBanner message={error ?? "Dormitory not found."} />
-        <div className="mt-4">
-          <Link
-            href="/teacher/accommodation-details"
-            className="inline-flex items-center gap-1.5 text-sm text-teal hover:underline"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" /> Back to accommodation
-          </Link>
-        </div>
       </div>
     );
   }
@@ -279,16 +271,6 @@ export default function TeacherDormDetailPage() {
 
   return (
     <div>
-      {/* Back */}
-      <div className="mb-4">
-        <Link
-          href="/teacher/accommodation-details"
-          className="inline-flex items-center gap-1.5 text-sm text-slate hover:text-teal transition-colors dark:text-dark-muted dark:hover:text-teal"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" /> All dormitories
-        </Link>
-      </div>
-
       {/* Header card */}
       <div className="rounded-xl border border-line bg-card dark:bg-dark-surface dark:border-dark-border p-5 mb-6">
         <div className="flex flex-col sm:flex-row sm:items-start gap-4">

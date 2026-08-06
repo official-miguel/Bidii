@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import {
   CATEGORY_META,
   STATUS_BADGE,
@@ -120,13 +119,9 @@ function TrendLine({ points }: { points: ExamPoint[] }) {
 
 export default function StudentProfile({
   studentId,
-  backHref,
-  backLabel,
   role = "principal",
 }: {
   studentId: string;
-  backHref: string;
-  backLabel: string;
   role?: "principal" | "teacher" | "staff";
 }) {
   const [data, setData]       = useState<ProfileData | null>(null);
@@ -179,11 +174,8 @@ export default function StudentProfile({
       {/* ── Profile header card ────────────────────────────────────────── */}
       <div className="bg-white border border-line rounded-xl p-5">
 
-        {/* Back link + today badge row */}
-        <div className="flex items-center justify-between mb-4">
-          <Link href={backHref} className="text-sm text-royal hover:underline">
-            ← {backLabel}
-          </Link>
+        {/* Today badge */}
+        <div className="flex justify-end mb-4">
           <TodayBadge status={todayAttendance} />
         </div>
 

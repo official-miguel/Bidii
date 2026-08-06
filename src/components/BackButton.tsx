@@ -18,6 +18,9 @@ import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
+// Dashboard/home routes where the back button should never appear
+const DASHBOARD_ROUTES = ["/principal", "/staff", "/teacher", "/parent"];
+
 export default function BackButton() {
   const router   = useRouter();
   const pathname = usePathname();
@@ -41,7 +44,9 @@ export default function BackButton() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  if (!canGoBack) return null;
+  // Hide on dashboard/home routes
+  const isDashboard = DASHBOARD_ROUTES.some((route) => pathname === route);
+  if (!canGoBack || isDashboard) return null;
 
   return (
     <button

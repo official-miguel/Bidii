@@ -17,8 +17,6 @@ export default async function StudentProfilePage({ params }: { params: { id: str
     <StudentProfile
       studentId={student.id}
       role="principal"
-      backHref="/principal/students"
-      backLabel="Back to students"
     />
   );
 }

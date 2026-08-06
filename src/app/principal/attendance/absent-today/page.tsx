@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
-import { ArrowLeft, UserX, TrendingDown, TrendingUp, Minus, Search } from "lucide-react";
+import { UserX, TrendingDown, TrendingUp, Minus, Search } from "lucide-react";
 import {
   PageHeader,
   EmptyState,
@@ -235,7 +235,6 @@ export default function AbsentTodayPage() {
   if (error) {
     return (
       <div className="space-y-4">
-        <BackLink />
         <div className="rounded-lg bg-danger-bg border border-danger/20 text-danger text-sm px-4 py-3">
           {error}
         </div>
@@ -246,7 +245,6 @@ export default function AbsentTodayPage() {
   if (!data) {
     return (
       <div className="space-y-4">
-        <BackLink />
         <div className="animate-pulse space-y-3">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[...Array(4)].map((_, i) => (
@@ -261,8 +259,6 @@ export default function AbsentTodayPage() {
 
   return (
     <div className="space-y-5">
-      <BackLink />
-
       <PageHeader
         title="Absent Today"
         description={`Students marked absent on ${formatDate(data.date)}.`}
@@ -377,18 +373,6 @@ export default function AbsentTodayPage() {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
-
-function BackLink() {
-  return (
-    <Link
-      href="/principal/dashboard"
-      className="inline-flex items-center gap-1.5 text-sm text-slate hover:text-teal transition-colors"
-    >
-      <ArrowLeft className="h-4 w-4" />
-      Back to dashboard
-    </Link>
-  );
-}
 
 function StudentRow({
   student: s,

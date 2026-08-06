@@ -50,11 +50,35 @@ export default async function TeacherMarksheetPage({
     // Landing — just render the card grid via MarksheetPageClient.
     // No need to resolve classes/subjects on the server; TeacherMarksheetCards
     // fetches the assignments client-side.
+
+    // ── HOD detection: resolve department name for the tab label ────────────
+    const isHOD = actor.roles.some((r) => r.role === "HOD");
+    let hodDepartmentName: string | undefined;
+    if (isHOD && actor.teacher?.id) {
+      const hodDept = await prisma.department.findFirst({
+        where: { schoolId: user.schoolId, headTeacherId: actor.teacher.id },
+        select: { name: true },
+      });
+      if (hodDept) {
+        hodDepartmentName = hodDept.name;
+      } else {
+        // Fall back to primary department
+        const teacherRow = await prisma.teacher.findUnique({
+          where: { id: actor.teacher.id },
+          select: { primaryDepartment: { select: { name: true } } },
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        hodDepartmentName = (teacherRow as any)?.primaryDepartment?.name;
+      }
+    }
+
     return (
       <MarksheetPageClient
         periods={allPeriods}
         activePeriodId={activePeriodId}
         isGridMode={false}
+        isHOD={isHOD}
+        departmentName={hodDepartmentName}
       >
         {/* children unused in landing mode */}
         <></>
