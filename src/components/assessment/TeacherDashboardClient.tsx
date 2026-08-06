@@ -213,6 +213,7 @@ export default function TeacherDashboardClient({
                   subjects={subjects}
                   defaultClassId={drill.classId}
                   defaultSubjectId={drill.subjectId ?? undefined}
+                  hideFilters={true}
                 />
               )}
             </div>

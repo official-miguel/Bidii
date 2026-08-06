@@ -100,6 +100,8 @@ type Props = {
   defaultClassId?: string;
   /** Pre-select a subject in ExamFilterBar on first render (used by tile drill-down). */
   defaultSubjectId?: string;
+  /** Hide the filter bar entirely — used when drilling from tiles where filters are already determined. */
+  hideFilters?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -202,7 +204,7 @@ function heatColourPts(pts: number | null): string {
 // Main component
 // ---------------------------------------------------------------------------
 
-export default function DashboardCharts({ classes, subjects, defaultClassId, defaultSubjectId }: Props) {
+export default function DashboardCharts({ classes, subjects, defaultClassId, defaultSubjectId, hideFilters = false }: Props) {
   // ── Filter state — driven entirely by ExamFilterBar ───────────────────────
   const [periodId,  setPeriodId]  = useState("");
   const [classId,   setClassId]   = useState("");
@@ -371,15 +373,17 @@ export default function DashboardCharts({ classes, subjects, defaultClassId, def
 
   return (
     <div>
-      {/* ---- Filter bar ---- */}
-      <ExamFilterBar
-        classes={classes}
-        subjects={subjects}
-        hideSubject={true}
-        onChange={handleFilterChange}
-        defaultClassId={defaultClassId}
-        defaultSubjectId={defaultSubjectId}
-      />
+      {/* ---- Filter bar — hidden when drilling from a tile ---- */}
+      {!hideFilters && (
+        <ExamFilterBar
+          classes={classes}
+          subjects={subjects}
+          hideSubject={true}
+          onChange={handleFilterChange}
+          defaultClassId={defaultClassId}
+          defaultSubjectId={defaultSubjectId}
+        />
+      )}
 
       {error && <ErrorBanner message={error} />}
 

@@ -181,6 +181,8 @@ export function canAccessDashboard(actor: AssessmentActor): boolean {
   if (actor.user.role === "ADMIN_STAFF") return actor.adminCanView || actor.adminCanManage;
   if (actor.isPrincipal) return true;
   if (hasRole(actor, "DIRECTOR", "EXAM_OFFICER", "HOD")) return true;
+  // Teachers can access dashboard analytics for their assigned classes/subjects.
+  if (actor.teacher !== null) return true;
   return false;
 }
 
