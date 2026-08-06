@@ -80,54 +80,6 @@ export default function TeacherAttendanceOverview({ classIds, classTeacherOfId }
         ))}
       </div>
 
-      {/* Per-class breakdown — shown when teacher teaches >1 class */}
-      {stats.byClass.length > 1 && (
-        <div className="bg-white border border-line rounded-xl overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[400px]">
-              <thead>
-                <tr className="border-b border-line bg-slate-50/80 text-left text-xs font-semibold text-slate uppercase tracking-wide">
-                  <th className="px-5 py-3">Class</th>
-                  <th className="px-5 py-3 w-[100px]">Present</th>
-                  <th className="px-5 py-3 w-[100px]">Absent</th>
-                  <th className="px-5 py-3 w-[140px]">Recorded / Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stats.byClass.map((c) => {
-                  const isMyClass = c.classId === classTeacherOfId;
-                  return (
-                    <tr
-                      key={c.classId}
-                      className={`border-b border-line last:border-0 transition-colors
-                        ${isMyClass ? "bg-teal-50/40" : "hover:bg-slate-50/50"}`}
-                    >
-                      <td className="px-5 py-3">
-                        <div className="flex items-center gap-2">
-                          <span className={`font-medium ${isMyClass ? "text-teal" : "text-ink"}`}>
-                            {c.className}
-                          </span>
-                          {isMyClass && (
-                            <span className="text-[10px] font-semibold text-teal bg-teal/10 px-1.5 py-0.5 rounded-full uppercase tracking-wide">
-                              Your class
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-5 py-3 text-success font-semibold">{c.present}</td>
-                      <td className="px-5 py-3 text-danger font-semibold">{c.absent}</td>
-                      <td className="px-5 py-3 text-slate tabular-nums">
-                        {c.recorded} / {c.totalStudents}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
       {stats.recorded === 0 && (
         <p className="text-xs text-slate">
           No attendance has been recorded for your classes today yet.
