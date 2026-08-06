@@ -4,6 +4,7 @@ import { memo, useMemo, useState } from "react";
 import type { TeacherRankResult } from "@/lib/assessment/teacherRanking";
 import { Chip, ProgressBar } from "@/components/ui";
 import { ArrowUp, ArrowDown, Minus, ArrowUpDown } from "lucide-react";
+import { RankIconSmall } from "./RankIcon";
 
 interface StaffRankTableProps {
   rows: TeacherRankResult[];
@@ -15,23 +16,8 @@ interface StaffRankTableProps {
 type SortKey = "rank" | "subject" | "department" | "trend" | "completion";
 
 // ── Medal for top 3 ───────────────────────────────────────────────────────────
-const MEDALS: Record<number, { emoji: string; bg: string; text: string }> = {
-  1: { emoji: "🥇", bg: "bg-amber-50",   text: "text-amber-700" },
-  2: { emoji: "🥈", bg: "bg-slate-50",   text: "text-slate-600" },
-  3: { emoji: "🥉", bg: "bg-orange-50",  text: "text-orange-700" },
-};
-
 const RankCell = memo(function RankCell({ rank }: { rank: number }) {
-  const medal = MEDALS[rank];
-  if (medal) {
-    return (
-      <div className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs font-semibold ${medal.bg} ${medal.text}`}>
-        <span>{medal.emoji}</span>
-        <span>#{rank}</span>
-      </div>
-    );
-  }
-  return <span className="text-sm tabular-nums text-slate">#{rank}</span>;
+  return <RankIconSmall rank={rank} />;
 });
 
 // ── Trend arrow ───────────────────────────────────────────────────────────────

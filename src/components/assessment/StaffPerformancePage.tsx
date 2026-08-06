@@ -5,6 +5,8 @@ import type { TeacherRankResult } from "@/lib/assessment/teacherRanking";
 import Top3Leaderboard from "./Top3Leaderboard";
 import DeptTop3Leaderboard from "./DeptTop3Leaderboard";
 import StaffRankTable from "./StaffRankTable";
+import RankIcon from "./RankIcon";
+import { ChevronDown, TrendingUp, TrendingDown, Minus } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,56 +29,92 @@ interface RankingResponse {
 
 interface StaffPerformancePageProps {
   /**
-   * "teacher"  — sees own rank card + school top3 + dept leaderboard for own dept
+   * "teacher"  — sees own rank card + school view + dept view
    * "hod"      — sees dept leaderboard (own dept only) + full dept table
    * "director" — sees all-school view with dept tabs + full table per tab
    */
   viewMode: "teacher" | "hod" | "director";
   periodId: string;
-  /** Pre-resolved dept id (HOD's own dept, or teacher's dept). */
+  /** Pre-resolved primary dept id. */
   departmentId?: string;
+  /**
+   * All departments this teacher belongs to (primary + HOD roles).
+   * When length > 1 a filter dropdown appears in "My Department" view.
+   */
+  teacherDepartments?: DeptStub[];
   /** For row highlight in the table. */
   currentTeacherId?: string;
   periods: Array<{ id: string; name: string; academicYear: string; term: number | null }>;
-  /** Pre-loaded department list (director/principal only — fetched server-side). */
+  /** Pre-loaded department list (director/principal only). */
   initialDepartments?: DeptStub[];
 }
 
 // ---------------------------------------------------------------------------
-// OwnRankCard
+// OwnRankCard — shown in both School and Dept views
 // ---------------------------------------------------------------------------
 
-function OwnRankCard({ row }: { row: TeacherRankResult }) {
+function OwnRankCard({ row, context }: { row: TeacherRankResult; context: "school" | "dept" }) {
+  const trendIcon =
+    row.trendDirection === 1  ? <TrendingUp  className="w-4 h-4 text-green-600" /> :
+    row.trendDirection === -1 ? <TrendingDown className="w-4 h-4 text-danger"   /> :
+                                <Minus        className="w-4 h-4 text-slate"    />;
   const trendLabel =
-    row.trendDirection === 1  ? "↑ Improved from last period" :
-    row.trendDirection === -1 ? "↓ Declined from last period" :
-                                "— Stable";
-  const trendColor =
+    row.trendDirection === 1  ? "Improved from last period" :
+    row.trendDirection === -1 ? "Declined from last period" :
+                                "Stable this period";
+  const trendColour =
     row.trendDirection === 1  ? "text-green-600" :
-    row.trendDirection === -1 ? "text-red-500"   : "text-slate";
+    row.trendDirection === -1 ? "text-danger"    : "text-slate";
 
   return (
-    <div className="bg-white border border-royal/30 rounded-xl p-5 shadow-sm flex flex-col gap-2 max-w-sm">
-      <p className="text-xs text-slate font-medium uppercase tracking-wide">Your Ranking</p>
-      <div className="flex items-baseline gap-2">
-        <span className="text-4xl font-bold text-royal">#{row.rank}</span>
-        <span className="text-sm text-slate">
-          composite score {(row.compositeScore * 100).toFixed(1)}
-        </span>
+    <div className="bg-white border border-royal/20 rounded-xl p-5 shadow-sm flex items-start gap-5">
+      {/* Rank icon */}
+      <div className="shrink-0 flex flex-col items-center gap-1">
+        <RankIcon rank={row.rank} size={48} />
+        <span className="text-[11px] font-bold text-slate tabular-nums">#{row.rank}</span>
       </div>
-      <p className={`text-sm font-medium ${trendColor}`}>{trendLabel}</p>
-      <div className="grid grid-cols-3 gap-2 mt-1 text-xs text-slate">
+
+      {/* Stats */}
+      <div className="flex-1 min-w-0 space-y-2">
         <div>
-          <p className="font-medium text-ink">Entry</p>
-          <p>{Math.round(row.completionScore * 100)}%</p>
+          <p className="text-xs text-slate font-medium uppercase tracking-wide">
+            Your Ranking
+            {context === "dept" && row.departmentName && (
+              <span className="ml-1.5 normal-case font-normal">— {row.departmentName}</span>
+            )}
+          </p>
+          <div className="flex items-baseline gap-2 mt-0.5">
+            <span className="text-2xl font-bold text-royal">#{row.rank}</span>
+            <span className="text-sm text-slate">
+              · {(row.compositeScore * 100).toFixed(1)} composite pts
+            </span>
+          </div>
         </div>
-        <div>
-          <p className="font-medium text-ink">Mean pts</p>
-          <p>{row.absoluteMean?.toFixed(1) ?? "—"}</p>
+
+        <div className={`flex items-center gap-1.5 text-sm font-medium ${trendColour}`}>
+          {trendIcon}
+          {trendLabel}
         </div>
-        <div>
-          <p className="font-medium text-ink">Prev pts</p>
-          <p>{row.prevMean?.toFixed(1) ?? "—"}</p>
+
+        <div className="grid grid-cols-3 gap-3 text-xs text-slate pt-1">
+          <div className="rounded-lg border border-line bg-paper/60 p-2 text-center">
+            <p className="font-semibold text-ink text-sm tabular-nums">
+              {Math.round(row.completionScore * 100)}%
+            </p>
+            <p className="mt-0.5">Mark entry</p>
+          </div>
+          <div className="rounded-lg border border-line bg-paper/60 p-2 text-center">
+            <p className="font-semibold text-ink text-sm tabular-nums">
+              {row.absoluteMean?.toFixed(1) ?? "—"}
+            </p>
+            <p className="mt-0.5">Mean pts</p>
+          </div>
+          <div className="rounded-lg border border-line bg-paper/60 p-2 text-center">
+            <p className="font-semibold text-ink text-sm tabular-nums">
+              {row.prevMean?.toFixed(1) ?? "—"}
+            </p>
+            <p className="mt-0.5">Prev period</p>
+          </div>
         </div>
       </div>
     </div>
@@ -84,7 +122,7 @@ function OwnRankCard({ row }: { row: TeacherRankResult }) {
 }
 
 // ---------------------------------------------------------------------------
-// Tab bar (used by director for dept switching)
+// Director tab bar
 // ---------------------------------------------------------------------------
 
 interface TabBarProps {
@@ -121,26 +159,41 @@ export default function StaffPerformancePage({
   viewMode,
   periodId: defaultPeriodId,
   departmentId: propDeptId,
+  teacherDepartments = [],
   currentTeacherId,
   periods,
   initialDepartments = [],
 }: StaffPerformancePageProps) {
+  // ── State ──────────────────────────────────────────────────────────────────
   const [periodId,     setPeriodId]     = useState(defaultPeriodId);
-  const [activeDeptId, setActiveDeptId] = useState<string | null>(propDeptId ?? null);
   const [data,         setData]         = useState<RankingResponse | null>(null);
   const [loading,      setLoading]      = useState(false);
   const [error,        setError]        = useState<string | null>(null);
 
-  // departments available for tabs — initially from server, merged with API response
+  // For teacher/hod: which top-level view ("school" | "dept")
+  const [view, setView] = useState<"school" | "dept">(propDeptId ? "school" : "school");
+
+  // For teacher with multiple depts: which dept is selected
+  const [selectedDeptId, setSelectedDeptId] = useState<string>(
+    teacherDepartments[0]?.id ?? propDeptId ?? ""
+  );
+
+  // For director: which dept tab is active (null = all school)
+  const [activeDeptId, setActiveDeptId] = useState<string | null>(null);
+
+  // Director department list — merges server list + API response
   const [departments, setDepartments] = useState<DeptStub[]>(initialDepartments);
 
-  const fetchRanking = useCallback(async (pid: string, deptId: string | null) => {
+  const hasMultipleDepts = teacherDepartments.length > 1;
+
+  // ── Data fetch ─────────────────────────────────────────────────────────────
+  const fetchRanking = useCallback(async (pid: string, scope: "school" | "department", deptId?: string) => {
     if (!pid) return;
     setLoading(true);
     setError(null);
 
     const qs = new URLSearchParams({ periodId: pid });
-    if (deptId) {
+    if (scope === "department" && deptId) {
       qs.set("scope", "department");
       qs.set("departmentId", deptId);
     } else {
@@ -154,98 +207,130 @@ export default function StaffPerformancePage({
         setError((d as { error: string }).error);
       } else {
         setData(d);
-        // Merge department list if the API returned one (director/principal view)
         if (d.departments.length > 0) setDepartments(d.departments);
-        // Auto-select own dept on first load for teacher/hod
-        if (!activeDeptId && d.ownDepartmentId) {
-          setActiveDeptId(d.ownDepartmentId);
-        }
       }
     } catch {
       setError("Failed to load ranking data.");
     } finally {
       setLoading(false);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
+  // Determine what to fetch based on current state
   useEffect(() => {
-    fetchRanking(periodId, activeDeptId);
-  }, [periodId, activeDeptId]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (viewMode === "director") {
+      // Director: fetch school or dept scope based on active tab
+      fetchRanking(periodId, activeDeptId ? "department" : "school", activeDeptId ?? undefined);
+    } else if (viewMode === "teacher" || viewMode === "hod") {
+      if (view === "dept") {
+        fetchRanking(periodId, "department", selectedDeptId || propDeptId);
+      } else {
+        fetchRanking(periodId, "school");
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodId, view, selectedDeptId, activeDeptId, viewMode]);
 
-  // Build tab list for director/principal
-  const isDirector = viewMode === "director";
-  const tabs = isDirector
+  // ── Derived ────────────────────────────────────────────────────────────────
+  const isDirector     = viewMode === "director";
+  const isTeacherOrHod = viewMode === "teacher" || viewMode === "hod";
+
+  const activeDeptName =
+    departments.find((d) => d.id === activeDeptId)?.name ??
+    teacherDepartments.find((d) => d.id === selectedDeptId)?.name ??
+    data?.top3[0]?.departmentName ??
+    "Department";
+
+  const directorTabs = isDirector
     ? [
-        { id: null,  label: "All School" },
+        { id: null,  label: "School" },
         ...departments.map((d) => ({ id: d.id, label: d.name })),
       ]
     : [];
 
-  // For teacher/hod: are we currently viewing a dept scope?
-  const isViewingDept = activeDeptId !== null;
-  const activeDeptName =
-    departments.find((d) => d.id === activeDeptId)?.name ??
-    data?.top3[0]?.departmentName ??
-    "Department";
-
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-      {/* ---- Controls row -------------------------------------------------- */}
+
+      {/* ── Controls row ─────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-end gap-4">
+
         {/* Period picker */}
         <div>
           <label className="block text-xs font-medium text-slate mb-1">Period</label>
-          <select
-            value={periodId}
-            onChange={(e) => setPeriodId(e.target.value)}
-            className="rounded-md border border-line bg-white px-3 py-2 text-sm text-ink focus:border-royal"
-          >
-            {periods.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.term ? `Term ${p.term} — ${p.academicYear}` : `${p.name} — ${p.academicYear}`}
-              </option>
-            ))}
-          </select>
+          <div className="relative">
+            <select
+              value={periodId}
+              onChange={(e) => setPeriodId(e.target.value)}
+              className="appearance-none rounded-lg border border-line bg-white pl-3 pr-8 py-2 text-sm text-ink focus:border-royal focus:outline-none focus:ring-2 focus:ring-royal/15 transition-colors"
+            >
+              {periods.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.term ? `Term ${p.term} — ${p.academicYear}` : `${p.name} — ${p.academicYear}`}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate" />
+          </div>
         </div>
 
-        {/* Teacher / HOD: toggle between school view and dept view */}
-        {(viewMode === "teacher" || viewMode === "hod") && propDeptId && (
-          <div className="flex rounded-md border border-line overflow-hidden text-sm">
+        {/* Teacher / HOD: School | My Department toggle */}
+        {isTeacherOrHod && propDeptId && (
+          <div className="flex rounded-lg border border-line overflow-hidden text-sm">
             <button
-              onClick={() => setActiveDeptId(null)}
-              className={`px-3 py-2 transition-colors ${
-                !isViewingDept
-                  ? "bg-royal text-white font-medium"
-                  : "text-slate hover:bg-paper"
+              onClick={() => setView("school")}
+              className={`px-4 py-2 transition-colors font-medium ${
+                view === "school"
+                  ? "bg-royal text-white"
+                  : "text-slate hover:bg-paper hover:text-ink"
               }`}
             >
-              School Top 3
+              School
             </button>
             <button
-              onClick={() => setActiveDeptId(propDeptId)}
-              className={`px-3 py-2 transition-colors ${
-                isViewingDept
-                  ? "bg-royal text-white font-medium"
-                  : "text-slate hover:bg-paper"
+              onClick={() => setView("dept")}
+              className={`px-4 py-2 transition-colors font-medium ${
+                view === "dept"
+                  ? "bg-royal text-white"
+                  : "text-slate hover:bg-paper hover:text-ink"
               }`}
             >
               My Department
             </button>
           </div>
         )}
+
+        {/* Multi-dept selector — only shown when viewing dept and has multiple depts */}
+        {isTeacherOrHod && view === "dept" && hasMultipleDepts && (
+          <div>
+            <label className="block text-xs font-medium text-slate mb-1">Department</label>
+            <div className="relative">
+              <select
+                value={selectedDeptId}
+                onChange={(e) => setSelectedDeptId(e.target.value)}
+                className="appearance-none rounded-lg border border-line bg-white pl-3 pr-8 py-2 text-sm text-ink focus:border-royal focus:outline-none focus:ring-2 focus:ring-royal/15 transition-colors"
+              >
+                {teacherDepartments.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate" />
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* ---- Director dept tab bar ----------------------------------------- */}
-      {isDirector && tabs.length > 1 && (
-        <TabBar tabs={tabs} active={activeDeptId} onChange={setActiveDeptId} />
+      {/* ── Director dept tab bar ─────────────────────────────────────────── */}
+      {isDirector && directorTabs.length > 1 && (
+        <TabBar tabs={directorTabs} active={activeDeptId} onChange={setActiveDeptId} />
       )}
 
-      {/* ---- Error --------------------------------------------------------- */}
+      {/* ── Error ─────────────────────────────────────────────────────────── */}
       {error && (
         <div className="rounded-md bg-danger-bg text-danger text-sm px-3 py-2">{error}</div>
       )}
 
-      {/* ---- Skeleton ------------------------------------------------------ */}
+      {/* ── Skeleton ──────────────────────────────────────────────────────── */}
       {loading && (
         <div className="space-y-4">
           <div className="h-28 rounded-xl bg-line/40 animate-pulse" />
@@ -253,51 +338,87 @@ export default function StaffPerformancePage({
         </div>
       )}
 
-      {/* ---- Content ------------------------------------------------------- */}
+      {/* ── Content ───────────────────────────────────────────────────────── */}
       {!loading && data && (
         <div className="space-y-8">
-          {/* Recognition copy */}
+
+          {/* Recognition note */}
           <p className="text-sm text-slate">
             Rankings recognise consistent mark entry, student improvement, and overall
             performance. Use this as a coaching guide, not a judgment.
           </p>
 
-          {/* ================================================================
+          {/* ==============================================================
               TEACHER VIEW
-              — School scope: own rank card + school top 3
-              — Dept scope:   own rank card + dept top 3 podium + full dept table
-          ================================================================ */}
+              School: School Top Performers → Your Ranking → Full School Ranking
+              Dept:   Top Performers This Period → Your Ranking → Full Dept Ranking
+          ============================================================== */}
           {viewMode === "teacher" && (
-            <div className="space-y-6">
-              {/* Own rank card always visible */}
-              {data.ownRow ? (
-                <OwnRankCard row={data.ownRow} />
-              ) : (
-                <p className="text-sm text-slate italic">
-                  No ranking data for you this period.
-                </p>
-              )}
+            <div className="space-y-8">
 
-              {!isViewingDept && (
-                <div>
-                  <h3 className="text-sm font-semibold text-ink mb-3">
-                    School Top Performers
-                  </h3>
-                  <Top3Leaderboard top3={data.top3} />
-                </div>
-              )}
-
-              {isViewingDept && (
+              {/* ── SCHOOL VIEW ── */}
+              {view === "school" && (
                 <>
-                  <DeptTop3Leaderboard
-                    top3={data.top3}
-                    departmentName={activeDeptName}
-                    highlightTeacherId={currentTeacherId}
-                  />
+                  {/* School top performers */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-ink mb-3">School Top Performers</h3>
+                    <Top3Leaderboard
+                      top3={data.top3}
+                      highlightTeacherId={currentTeacherId}
+                    />
+                  </div>
+
+                  {/* Your ranking */}
+                  {data.ownRow ? (
+                    <div>
+                      <h3 className="text-sm font-semibold text-ink mb-3">Your Ranking</h3>
+                      <OwnRankCard row={data.ownRow} context="school" />
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate italic">No ranking data for you this period.</p>
+                  )}
+
+                  {/* Full school ranking */}
+                  {data.fullList.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-ink mb-3">Full School Ranking</h3>
+                      <StaffRankTable
+                        rows={data.fullList}
+                        highlightTeacherId={currentTeacherId}
+                        showDepartmentColumn={true}
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* ── DEPT VIEW ── */}
+              {view === "dept" && (
+                <>
+                  {/* Top performers this period */}
+                  <div>
+                    <DeptTop3Leaderboard
+                      top3={data.top3}
+                      departmentName={activeDeptName}
+                      highlightTeacherId={currentTeacherId}
+                    />
+                  </div>
+
+                  {/* Your ranking */}
+                  {data.ownRow ? (
+                    <div>
+                      <h3 className="text-sm font-semibold text-ink mb-3">Your Ranking</h3>
+                      <OwnRankCard row={data.ownRow} context="dept" />
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate italic">No ranking data for you this period.</p>
+                  )}
+
+                  {/* Full department ranking */}
                   {data.fullList.length > 0 && (
                     <div>
                       <h3 className="text-sm font-semibold text-ink mb-3">
-                        Full {activeDeptName} Rankings
+                        Full {activeDeptName} Ranking
                       </h3>
                       <StaffRankTable
                         rows={data.fullList}
@@ -311,19 +432,34 @@ export default function StaffPerformancePage({
             </div>
           )}
 
-          {/* ================================================================
-              HOD VIEW
-              — Always dept-scoped
-              — Dept top 3 podium + full dept table
-          ================================================================ */}
+          {/* ==============================================================
+              HOD VIEW — same structure as teacher
+          ============================================================== */}
           {viewMode === "hod" && (
-            <div className="space-y-6">
-              {!isViewingDept ? (
-                // School scope: show school top3 only (HOD requested school view)
-                <div>
-                  <h3 className="text-sm font-semibold text-ink mb-3">School Top Performers</h3>
-                  <Top3Leaderboard top3={data.top3} />
-                </div>
+            <div className="space-y-8">
+              {view === "school" ? (
+                <>
+                  <div>
+                    <h3 className="text-sm font-semibold text-ink mb-3">School Top Performers</h3>
+                    <Top3Leaderboard top3={data.top3} highlightTeacherId={currentTeacherId} />
+                  </div>
+                  {data.ownRow && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-ink mb-3">Your Ranking</h3>
+                      <OwnRankCard row={data.ownRow} context="school" />
+                    </div>
+                  )}
+                  {data.fullList.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-ink mb-3">Full School Ranking</h3>
+                      <StaffRankTable
+                        rows={data.fullList}
+                        highlightTeacherId={currentTeacherId}
+                        showDepartmentColumn={true}
+                      />
+                    </div>
+                  )}
+                </>
               ) : (
                 <>
                   <DeptTop3Leaderboard
@@ -331,46 +467,59 @@ export default function StaffPerformancePage({
                     departmentName={activeDeptName}
                     highlightTeacherId={currentTeacherId}
                   />
-                  <div>
-                    <h3 className="text-sm font-semibold text-ink mb-3">
-                      {activeDeptName} Department Rankings
-                    </h3>
-                    <StaffRankTable
-                      rows={data.fullList}
-                      highlightTeacherId={currentTeacherId}
-                      showDepartmentColumn={false}
-                    />
-                  </div>
+                  {data.ownRow && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-ink mb-3">Your Ranking</h3>
+                      <OwnRankCard row={data.ownRow} context="dept" />
+                    </div>
+                  )}
+                  {data.fullList.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-ink mb-3">
+                        Full {activeDeptName} Ranking
+                      </h3>
+                      <StaffRankTable
+                        rows={data.fullList}
+                        highlightTeacherId={currentTeacherId}
+                        showDepartmentColumn={false}
+                      />
+                    </div>
+                  )}
                 </>
               )}
             </div>
           )}
 
-          {/* ================================================================
+          {/* ==============================================================
               DIRECTOR / PRINCIPAL VIEW
-              — "All School" tab: school top3 + full school table
-              — Dept tab:        dept top3 podium + full dept table
-                                 + school top3 in a collapsible aside
-          ================================================================ */}
+              School tab: School Top Performers → Your Ranking → Full Ranking
+              Dept tab:   Top Performers → Full Dept Table + School ref
+          ============================================================== */}
           {viewMode === "director" && (
-            <div className="space-y-6">
+            <div className="space-y-8">
               {!activeDeptId ? (
-                /* All-school tab */
+                /* School tab */
                 <>
                   <div>
-                    <h3 className="text-sm font-semibold text-ink mb-3">
-                      School Top Performers
-                    </h3>
-                    <Top3Leaderboard top3={data.top3} />
+                    <h3 className="text-sm font-semibold text-ink mb-3">School Top Performers</h3>
+                    <Top3Leaderboard top3={data.top3} highlightTeacherId={currentTeacherId} />
                   </div>
-                  <div>
-                    <h3 className="text-sm font-semibold text-ink mb-3">All Staff Rankings</h3>
-                    <StaffRankTable
-                      rows={data.fullList}
-                      highlightTeacherId={currentTeacherId}
-                      showDepartmentColumn={true}
-                    />
-                  </div>
+                  {data.ownRow && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-ink mb-3">Your Ranking</h3>
+                      <OwnRankCard row={data.ownRow} context="school" />
+                    </div>
+                  )}
+                  {data.fullList.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-ink mb-3">Full School Ranking</h3>
+                      <StaffRankTable
+                        rows={data.fullList}
+                        highlightTeacherId={currentTeacherId}
+                        showDepartmentColumn={true}
+                      />
+                    </div>
+                  )}
                 </>
               ) : (
                 /* Dept tab */
@@ -380,23 +529,29 @@ export default function StaffPerformancePage({
                     departmentName={activeDeptName}
                     highlightTeacherId={currentTeacherId}
                   />
+                  {data.ownRow && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-ink mb-3">Your Ranking</h3>
+                      <OwnRankCard row={data.ownRow} context="dept" />
+                    </div>
+                  )}
+                  {data.fullList.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-ink mb-3">
+                        {activeDeptName} Department Ranking
+                      </h3>
+                      <StaffRankTable
+                        rows={data.fullList}
+                        highlightTeacherId={currentTeacherId}
+                        showDepartmentColumn={false}
+                      />
+                    </div>
+                  )}
 
-                  <div>
-                    <h3 className="text-sm font-semibold text-ink mb-3">
-                      {activeDeptName} Department Rankings
-                    </h3>
-                    <StaffRankTable
-                      rows={data.fullList}
-                      highlightTeacherId={currentTeacherId}
-                      showDepartmentColumn={false}
-                    />
-                  </div>
-
-                  {/* School-wide top 3 as a reference sidebar */}
                   {data.schoolTop3 && data.schoolTop3.length > 0 && (
                     <details className="rounded-xl border border-line bg-paper/50">
                       <summary className="px-4 py-3 text-sm font-medium text-ink cursor-pointer select-none">
-                        School-wide Top 3 (reference)
+                        School-wide Top Performers (reference)
                       </summary>
                       <div className="px-4 pb-4 pt-2">
                         <Top3Leaderboard top3={data.schoolTop3} />
@@ -407,6 +562,7 @@ export default function StaffPerformancePage({
               )}
             </div>
           )}
+
         </div>
       )}
     </div>

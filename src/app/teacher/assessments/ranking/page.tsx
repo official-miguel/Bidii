@@ -10,13 +10,8 @@ const db = prisma as any;
 /**
  * Teacher staff-performance / ranking page.
  *
- * What each teacher sees:
- *  - Their own rank card (always).
- *  - Department peers (all teachers in their own dept).
- *  - School top 3 as a reference section.
- *
- * viewMode="teacher" in StaffPerformancePage already handles the
- * "school top3" vs "my dept" toggle — we just need to pass the right props.
+ * Passes all departments the teacher belongs to so the page can show a
+ * dept-filter dropdown when they are in more than one department.
  */
 export default async function TeacherRankingPage() {
   const user = await getCurrentUser();
@@ -24,15 +19,45 @@ export default async function TeacherRankingPage() {
 
   const actor = await resolveAssessmentActor(user, user.schoolId);
 
-  // Own primary department.
-  let ownDepartmentId: string | undefined;
+  // Collect all departments this teacher belongs to (primary + HOD roles).
+  const ownDeptIds: string[] = [];
+  let primaryDeptId: string | undefined;
+
   if (actor.teacher?.id) {
     const t = await prisma.teacher.findUnique({
       where: { id: actor.teacher.id },
       select: { primaryDepartmentId: true },
     });
-    ownDepartmentId = t?.primaryDepartmentId ?? undefined;
+    primaryDeptId = t?.primaryDepartmentId ?? undefined;
+    if (primaryDeptId) ownDeptIds.push(primaryDeptId);
+
+    // Also pick up any department where this teacher is HOD
+    const hodDepts = await prisma.department.findMany({
+      where: { schoolId: user.schoolId, headTeacherId: actor.teacher.id },
+      select: { id: true },
+    });
+    for (const d of hodDepts) {
+      if (!ownDeptIds.includes(d.id)) ownDeptIds.push(d.id);
+    }
   }
+
+  // Fetch dept stubs for the teacher's departments
+  const teacherDepartments =
+    ownDeptIds.length > 0
+      ? await prisma.department.findMany({
+          where: { schoolId: user.schoolId, id: { in: ownDeptIds } },
+          orderBy: { name: "asc" },
+          select: { id: true, name: true },
+        })
+      : [];
+
+  // Put primary dept first in the list
+  const sortedTeacherDepts = primaryDeptId
+    ? [
+        ...teacherDepartments.filter((d) => d.id === primaryDeptId),
+        ...teacherDepartments.filter((d) => d.id !== primaryDeptId),
+      ]
+    : teacherDepartments;
 
   const framework = await db.assessmentFramework.findFirst({
     where: { schoolId: user.schoolId, type: "EIGHT_FOUR_FOUR", isActive: true },
@@ -43,11 +68,17 @@ export default async function TeacherRankingPage() {
     ? (await db.assessmentPeriod.findMany({
         where: { schoolId: user.schoolId, frameworkId: framework.id },
         orderBy: [{ academicYear: "desc" }, { term: "desc" }],
-        select: { id: true, name: true, academicYear: true, term: true, isCurrent: true },
-      }) as Array<{ id: string; name: string; academicYear: string; term: number | null; isCurrent: boolean }>)
+        select: {
+          id: true, name: true, academicYear: true, term: true, isCurrent: true,
+        },
+      }) as Array<{
+        id: string; name: string; academicYear: string;
+        term: number | null; isCurrent: boolean;
+      }>)
     : [];
 
-  const currentPeriodId = periods.find((p) => p.isCurrent)?.id ?? periods[0]?.id ?? "";
+  const currentPeriodId =
+    periods.find((p) => p.isCurrent)?.id ?? periods[0]?.id ?? "";
 
   return (
     <div className="space-y-5">
@@ -60,7 +91,8 @@ export default async function TeacherRankingPage() {
       <StaffPerformancePage
         viewMode="teacher"
         periodId={currentPeriodId}
-        departmentId={ownDepartmentId}
+        departmentId={primaryDeptId}
+        teacherDepartments={sortedTeacherDepts}
         currentTeacherId={actor.teacher?.id}
         periods={periods}
       />
