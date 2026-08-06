@@ -75,11 +75,12 @@ async function requireAttendanceAccess(classId: string, action: "view" | "create
   return { user, teacher, allowed: false as const };
 }
 
-/// One GET route, four modes selected by query params (keeps the whole
+/// One GET route, five modes selected by query params (keeps the whole
 /// module on a single endpoint):
 ///   ?classId=&date=            roster for taking attendance (existing)
 ///   ?studentId=                one student's full history + summary
 ///   ?analytics=1&from=&to=     range analytics grouped by form/stream/student
+///   ?absentToday=1[&date=]     list of absent students with class info + 30-day rate trend
 ///   (none)                     today's school-wide stats (principal dashboard)
 export async function GET(req: NextRequest) {
   const params    = req.nextUrl.searchParams;
@@ -244,6 +245,96 @@ export async function GET(req: NextRequest) {
         status:    r.status,
         className: r.schoolClass.name,
       })),
+    });
+  }
+
+  // ── Absent Today mode ────────────────────────────────────────────────────
+  // ?absentToday=1[&date=YYYY-MM-DD]
+  // Returns the list of students who are ABSENT on the given date (default:
+  // today), along with their class, admission number, and a 30-day attendance
+  // rate for the mark-trend column on the drilldown page.
+  if (params.get("absentToday")) {
+    const user = await requireRole("PRINCIPAL") ?? await requirePermission("ATTENDANCE", "view");
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const date = dateParam ? parseDateOnly(dateParam) : parseDateOnly(isoDay(new Date()));
+    if (!date) return NextResponse.json({ error: "Invalid date. Use YYYY-MM-DD." }, { status: 400 });
+
+    // 30-day window for the trend rate
+    const trendFrom = new Date(date.getTime() - 29 * 86400000);
+
+    type AbsentRow = {
+      student_id: string;
+      full_name: string;
+      admission_number: string;
+      class_id: string;
+      class_name: string;
+      form: number;
+      stream: string | null;
+      trend_present: bigint;
+      trend_absent: bigint;
+    };
+
+    // Parameters: $1 = schoolId, $2 = date, $3 = trendFrom (30 days ago)
+    const rows = await prisma.$queryRawUnsafe<AbsentRow[]>(
+      `SELECT
+         s.id                                                                 AS student_id,
+         s."fullName"                                                         AS full_name,
+         s."admissionNumber"                                                  AS admission_number,
+         sc.id                                                                AS class_id,
+         sc."name"                                                            AS class_name,
+         sc."form",
+         sc.stream,
+         COALESCE(t.trend_present, 0)::bigint                                AS trend_present,
+         COALESCE(t.trend_absent,  0)::bigint                                AS trend_absent
+       FROM "Attendance" a
+       JOIN "Student"     s  ON s.id  = a."studentId"
+       JOIN "SchoolClass" sc ON sc.id = a."classId"
+       -- 30-day aggregate for the trend column (LEFT JOIN so rows still appear even with no history)
+       LEFT JOIN (
+         SELECT
+           "studentId",
+           COUNT(*) FILTER (WHERE status = 'PRESENT')::bigint AS trend_present,
+           COUNT(*) FILTER (WHERE status = 'ABSENT')::bigint  AS trend_absent
+         FROM   "Attendance"
+         WHERE  "schoolId" = $1
+           AND  date >= $3
+           AND  date <= $2
+         GROUP BY "studentId"
+       ) t ON t."studentId" = s.id
+       WHERE a."schoolId" = $1
+         AND a.date       = $2
+         AND a.status     = 'ABSENT'
+       ORDER BY sc."form" ASC, sc."name" ASC, s."fullName" ASC`,
+      user.schoolId,
+      date,
+      trendFrom,
+    );
+
+    const students = rows.map((r) => {
+      const trendPresent = Number(r.trend_present);
+      const trendAbsent  = Number(r.trend_absent);
+      const trendTotal   = trendPresent + trendAbsent;
+      return {
+        studentId:       r.student_id,
+        fullName:        r.full_name,
+        admissionNumber: r.admission_number,
+        classId:         r.class_id,
+        className:       r.class_name,
+        form:            r.form,
+        stream:          r.stream ?? null,
+        trend: {
+          present: trendPresent,
+          absent:  trendAbsent,
+          rate:    trendTotal > 0 ? Math.round((trendPresent / trendTotal) * 100) : null,
+        },
+      };
+    });
+
+    return NextResponse.json({
+      date:  isoDay(date),
+      total: students.length,
+      students,
     });
   }
 
