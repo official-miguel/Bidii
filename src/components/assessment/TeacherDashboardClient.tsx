@@ -14,7 +14,6 @@
 import { useState } from "react";
 import dynamic from "next/dynamic";
 import {
-  BookOpen,
   Users,
   ChevronRight,
   ArrowLeft,
@@ -74,6 +73,7 @@ type TopTab = "my_classes" | "full_school";
 type DrillState = { classId: string; className: string; subjectId?: string; frameworkType: string } | null;
 
 // ── Class tile card ────────────────────────────────────────────────────────────
+// Clicking the card always goes straight to full analysis — no expand/collapse.
 function ClassTileCard({
   tile,
   onDrill,
@@ -81,75 +81,35 @@ function ClassTileCard({
   tile: ClassTile;
   onDrill: (classId: string, className: string, subjectId: string | undefined, frameworkType: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-
-  const hasManySubjects = tile.subjects.length > 1;
+  // Pass the first subject id so DashboardCharts can pre-filter; if the
+  // teacher teaches multiple subjects in this class we pass undefined so the
+  // charts show all of them (same behaviour as principal's dashboard).
+  const subjectId = tile.subjects.length === 1 ? tile.subjects[0]?.id : undefined;
 
   return (
-    <div className="bg-white border border-line rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-      {/* Class header */}
-      <button
-        type="button"
-        onClick={() => {
-          if (hasManySubjects) {
-            setExpanded((v) => !v);
-          } else {
-            onDrill(tile.classId, tile.className, tile.subjects[0]?.id, tile.frameworkType);
-          }
-        }}
-        className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-slate-50/60 transition-colors text-left group"
-      >
+    <button
+      type="button"
+      onClick={() => onDrill(tile.classId, tile.className, subjectId, tile.frameworkType)}
+      className="group bg-white border border-line rounded-xl overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all text-left w-full"
+    >
+      <div className="flex items-center gap-3 px-4 py-3.5">
         <div className="shrink-0 w-9 h-9 rounded-lg bg-royal/10 flex items-center justify-center">
           <GraduationCap className="w-4.5 h-4.5 text-royal" />
         </div>
         <div className="flex-1 min-w-0">
           <p className="font-semibold text-ink text-sm">{tile.className}</p>
-          <p className="text-xs text-slate mt-0.5">
-            {tile.subjects.length} subject{tile.subjects.length !== 1 ? "s" : ""}
-          </p>
-        </div>
-        <div className="shrink-0 flex items-center gap-2">
-          {hasManySubjects ? (
-            <span className="text-xs text-royal font-medium">
-              {expanded ? "collapse" : "expand"}
-            </span>
-          ) : (
-            <span className="text-xs text-royal font-medium flex items-center gap-0.5">
-              Analyse
-              <ChevronRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
-            </span>
+          {tile.subjects.length > 0 && (
+            <p className="text-xs text-slate mt-0.5 truncate">
+              {tile.subjects.map((s) => s.name).join(" · ")}
+            </p>
           )}
         </div>
-      </button>
-
-      {/* Subject list (expanded or always shown for single subject) */}
-      {(!hasManySubjects || expanded) && tile.subjects.length > 0 && (
-        <div className="border-t border-line divide-y divide-line/50">
-          {tile.subjects.map((subj) => (
-            <button
-              key={subj.id}
-              type="button"
-              onClick={() => onDrill(tile.classId, tile.className, subj.id, tile.frameworkType)}
-              className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-teal-50/40 transition-colors text-left group/subj"
-            >
-              <div className="shrink-0 w-7 h-7 rounded-md bg-teal/10 flex items-center justify-center">
-                <BookOpen className="w-3.5 h-3.5 text-teal" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-ink font-medium truncate">{subj.name}</p>
-                {subj.code && (
-                  <p className="text-[11px] text-slate">{subj.code}</p>
-                )}
-              </div>
-              <span className="shrink-0 text-xs text-teal font-medium flex items-center gap-0.5 opacity-0 group-hover/subj:opacity-100 transition-opacity">
-                View
-                <ChevronRight className="w-3 h-3 transition-transform group-hover/subj:translate-x-0.5" />
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+        <span className="shrink-0 text-xs text-royal font-medium flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          Analyse
+          <ChevronRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
+        </span>
+      </div>
+    </button>
   );
 }
 

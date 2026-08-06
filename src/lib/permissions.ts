@@ -230,6 +230,7 @@ export async function getTeacherEffectivePermissions(user: User): Promise<Effect
   merge("RECORDS_DISCIPLINE",   { canView: true, canCreate: true });
   merge("RECORDS_ACHIEVEMENTS", { canView: true, canCreate: true });
   merge("ATTENDANCE",           { canView: true });
+  merge("ACCOMMODATION",        { canView: true });
 
   if (teacher) {
     const hasSubjectAssignments =
