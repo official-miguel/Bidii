@@ -198,27 +198,11 @@ export async function GET(req: NextRequest) {
     if (user.role === "TEACHER") {
       const teacher = await prisma.teacher.findUnique({
         where: { userId: user.id },
-        select: {
-          id: true,
-          classTeacherOf: { select: { id: true } },
-        },
+        select: { schoolId: true },
       });
+      // All teachers in the school can view a student's attendance history
+      // (needed for profile cards accessible from global search / people tiles).
       if (!teacher) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
-      // Class teacher of the student's class: allowed.
-      if (teacher.classTeacherOf?.id !== student.classId) {
-        // Not class teacher — must be a subject/elective teacher of that class.
-        const hasAssignment =
-          (await prisma.classSubjectTeacher.findFirst({
-            where: { classId: student.classId, teacherId: teacher.id },
-            select: { classId: true },
-          })) ??
-          (await prisma.classElectiveGroupTeacher.findFirst({
-            where: { classId: student.classId, teacherId: teacher.id },
-            select: { classId: true },
-          }));
-        if (!hasAssignment) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      }
     }
 
     // Limit to the most-recent 365 days so a student who has been enrolled
