@@ -1,20 +1,36 @@
 "use client";
 
 import type { TeacherRankResult } from "@/lib/assessment/teacherRanking";
+import RankIcon from "./RankIcon";
 
 interface Top3LeaderboardProps {
   top3: TeacherRankResult[];
+  /** Optional: highlight a specific teacher (e.g. the viewer). */
+  highlightTeacherId?: string;
 }
 
-const MEDALS = ["🥇", "🥈", "🥉"];
 const CARD_STYLES = [
-  "border-amber-300 bg-amber-50",
-  "border-slate-300 bg-slate-50",
-  "border-orange-300 bg-orange-50",
+  // 1st — gold
+  "border-amber-400 bg-gradient-to-b from-amber-50 to-white",
+  // 2nd — silver
+  "border-slate-300 bg-gradient-to-b from-slate-50 to-white",
+  // 3rd — bronze
+  "border-orange-300 bg-gradient-to-b from-orange-50 to-white",
 ];
-const ORDER = [1, 0, 2]; // podium: 2nd | 1st | 3rd
 
-export default function Top3Leaderboard({ top3 }: Top3LeaderboardProps) {
+const SCORE_STYLES = [
+  "text-amber-700 font-semibold",
+  "text-slate-600 font-semibold",
+  "text-orange-700 font-semibold",
+];
+
+/** Podium visual order: 2nd | 1st | 3rd */
+const ORDER = [1, 0, 2];
+
+export default function Top3Leaderboard({
+  top3,
+  highlightTeacherId,
+}: Top3LeaderboardProps) {
   if (top3.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-line px-4 py-10 text-center text-sm text-slate">
@@ -30,24 +46,54 @@ export default function Top3Leaderboard({ top3 }: Top3LeaderboardProps) {
         {ORDER.map((idx) => {
           const entry = top3[idx];
           if (!entry) return null;
-          const isFirst = idx === 0;
+          const isFirst     = idx === 0;
+          const isHighlight = entry.teacherId === highlightTeacherId;
 
           return (
             <div
               key={entry.teacherId}
-              className={`flex flex-col items-center rounded-xl border-2 px-5 py-4 w-44 shadow-sm
-                ${CARD_STYLES[idx]} ${isFirst ? "mb-0" : "mb-2"}`}
+              className={`flex flex-col items-center rounded-xl border-2 px-5 py-4 w-44 shadow-sm transition-all
+                ${CARD_STYLES[idx]}
+                ${isFirst ? "mb-0 scale-105 shadow-md" : "mb-2"}
+                ${isHighlight ? "ring-2 ring-royal ring-offset-2" : ""}`}
             >
-              <span className="text-2xl mb-1">{MEDALS[idx]}</span>
-              <p className="font-bold text-ink text-sm text-center leading-tight">
+              {/* Position icon */}
+              <RankIcon rank={idx + 1} size={42} className="mb-2" />
+
+              {/* Name */}
+              <p className="font-bold text-ink text-sm text-center leading-tight mt-1">
                 {entry.teacherName}
               </p>
+
+              {/* Subject */}
               {entry.subjectName && (
-                <p className="text-xs text-slate text-center mt-0.5">{entry.subjectName}</p>
+                <p className="text-xs text-slate text-center mt-0.5 leading-tight">
+                  {entry.subjectName}
+                </p>
               )}
-              <p className="text-xs font-medium text-royal mt-2">
-                Score: {(entry.compositeScore * 100).toFixed(1)}
+
+              {/* Score */}
+              <p className={`text-xs mt-2 ${SCORE_STYLES[idx]}`}>
+                {(entry.compositeScore * 100).toFixed(1)} pts
               </p>
+
+              {/* Trend */}
+              {entry.trendDirection !== 0 && (
+                <span
+                  className={`text-xs mt-0.5 font-medium ${
+                    entry.trendDirection === 1 ? "text-green-600" : "text-red-500"
+                  }`}
+                >
+                  {entry.trendDirection === 1 ? "↑ Improved" : "↓ Declined"}
+                </span>
+              )}
+
+              {/* "You" badge */}
+              {isHighlight && (
+                <span className="mt-1.5 text-[10px] bg-royal text-white px-2 py-0.5 rounded-full font-medium">
+                  You
+                </span>
+              )}
             </div>
           );
         })}

@@ -1,6 +1,8 @@
 "use client";
 
 import type { TeacherRankResult } from "@/lib/assessment/teacherRanking";
+import RankIcon from "./RankIcon";
+import { Building2 } from "lucide-react";
 
 interface DeptTop3LeaderboardProps {
   top3: TeacherRankResult[];
@@ -10,9 +12,7 @@ interface DeptTop3LeaderboardProps {
   highlightTeacherId?: string;
 }
 
-const MEDALS = ["🥇", "🥈", "🥉"];
-
-/** podium visual order: 2nd | 1st | 3rd */
+/** Podium visual order: 2nd | 1st | 3rd */
 const ORDER = [1, 0, 2];
 
 const CARD_BASE =
@@ -33,6 +33,12 @@ const RANK_LABEL_STYLES = [
   "text-orange-700 bg-orange-100",
 ];
 
+const SCORE_STYLES = [
+  "text-amber-700",
+  "text-slate-600",
+  "text-orange-700",
+];
+
 export default function DeptTop3Leaderboard({
   top3,
   departmentName,
@@ -51,7 +57,7 @@ export default function DeptTop3Leaderboard({
       {/* Department badge */}
       <div className="flex items-center gap-2">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-royal/10 px-3 py-1 text-xs font-semibold text-royal">
-          <span>🏫</span>
+          <Building2 className="w-3.5 h-3.5 shrink-0" />
           {departmentName} Department
         </span>
         <span className="text-xs text-slate">Top performers this period</span>
@@ -70,11 +76,11 @@ export default function DeptTop3Leaderboard({
               <div
                 key={entry.teacherId}
                 className={`${CARD_BASE} ${CARD_STYLES[idx]} ${
-                  isFirst ? "mb-0 scale-105" : "mb-3"
+                  isFirst ? "mb-0 scale-105 shadow-md" : "mb-3"
                 } ${isHighlight ? "ring-2 ring-royal ring-offset-2" : ""}`}
               >
-                {/* Medal */}
-                <span className="text-3xl mb-1 leading-none">{MEDALS[idx]}</span>
+                {/* Position icon */}
+                <RankIcon rank={idx + 1} size={40} className="mb-1" />
 
                 {/* Rank pill */}
                 <span
@@ -96,7 +102,7 @@ export default function DeptTop3Leaderboard({
                 )}
 
                 {/* Score */}
-                <p className="text-xs font-semibold text-royal mt-2">
+                <p className={`text-xs font-semibold mt-2 ${SCORE_STYLES[idx]}`}>
                   {(entry.compositeScore * 100).toFixed(1)} pts
                 </p>
 

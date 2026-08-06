@@ -33,7 +33,9 @@ export default async function TeacherAssessmentsLayout({
     },
   });
 
-  const hasDept      = !!teacher?.primaryDepartmentId;
+  // Show dept analytics nav item when the teacher belongs to any department
+  // (primary dept) or is an HOD. The page itself enforces scoping.
+  const hasDept = !!teacher?.primaryDepartmentId;
   const isClassTeacher = !!teacher?.classTeacherOf;
 
   const navItems: AssessmentNavItem[] = [

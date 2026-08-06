@@ -96,6 +96,10 @@ type DashboardData = {
 type Props = {
   classes: { id: string; name: string; form: number }[];
   subjects: { id: string; name: string; applicableForms: number[] }[];
+  /** Pre-select a class in ExamFilterBar on first render (used by tile drill-down). */
+  defaultClassId?: string;
+  /** Pre-select a subject in ExamFilterBar on first render (used by tile drill-down). */
+  defaultSubjectId?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -198,7 +202,7 @@ function heatColourPts(pts: number | null): string {
 // Main component
 // ---------------------------------------------------------------------------
 
-export default function DashboardCharts({ classes, subjects }: Props) {
+export default function DashboardCharts({ classes, subjects, defaultClassId, defaultSubjectId }: Props) {
   // ── Filter state — driven entirely by ExamFilterBar ───────────────────────
   const [periodId,  setPeriodId]  = useState("");
   const [classId,   setClassId]   = useState("");
@@ -373,6 +377,8 @@ export default function DashboardCharts({ classes, subjects }: Props) {
         subjects={subjects}
         hideSubject={true}
         onChange={handleFilterChange}
+        defaultClassId={defaultClassId}
+        defaultSubjectId={defaultSubjectId}
       />
 
       {error && <ErrorBanner message={error} />}
