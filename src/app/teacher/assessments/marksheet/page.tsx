@@ -22,22 +22,6 @@ export default async function TeacherMarksheetPage({
   const actor = await resolveAssessmentActor(user, user.schoolId);
   const classTeacherOfId = actor.classTeacherOfId;
 
-  // Resolve this teacher's primary department and the subjects it owns.
-  let deptSubjectIds: Set<string> = new Set();
-  if (actor.teacher?.id) {
-    const teacherRow = await prisma.teacher.findUnique({
-      where: { id: actor.teacher.id },
-      select: { primaryDepartmentId: true },
-    });
-    if (teacherRow?.primaryDepartmentId) {
-      const deptSubjects = await prisma.subject.findMany({
-        where: { schoolId: user.schoolId, departmentId: teacherRow.primaryDepartmentId },
-        select: { id: true },
-      });
-      deptSubjectIds = new Set(deptSubjects.map((s) => s.id));
-    }
-  }
-
   // ── Resolve all periods for the period selector ───────────────────────────
   const framework = await db.assessmentFramework.findFirst({
     where: { schoolId: user.schoolId, type: "EIGHT_FOUR_FOUR", isActive: true },
@@ -56,7 +40,43 @@ export default async function TeacherMarksheetPage({
     : [];
 
   const currentPeriod = allPeriods.find((p) => p.isCurrent) ?? allPeriods[0] ?? null;
-  const currentPeriodId = searchParams.periodId ?? currentPeriod?.id ?? "";
+  const activePeriodId = searchParams.periodId ?? currentPeriod?.id ?? "";
+
+  // ── Determine mode ────────────────────────────────────────────────────────
+  // Landing mode: no classId or no subjectId — show the cards grid.
+  const isGridMode = !!(searchParams.classId && searchParams.subjectId);
+
+  if (!isGridMode) {
+    // Landing — just render the card grid via MarksheetPageClient.
+    // No need to resolve classes/subjects on the server; TeacherMarksheetCards
+    // fetches the assignments client-side.
+    return (
+      <MarksheetPageClient
+        periods={allPeriods}
+        activePeriodId={activePeriodId}
+        isGridMode={false}
+      >
+        {/* children unused in landing mode */}
+        <></>
+      </MarksheetPageClient>
+    );
+  }
+
+  // ── Grid mode — resolve teacher's subject access ──────────────────────────
+  let deptSubjectIds: Set<string> = new Set();
+  if (actor.teacher?.id) {
+    const teacherRow = await prisma.teacher.findUnique({
+      where: { id: actor.teacher.id },
+      select: { primaryDepartmentId: true },
+    });
+    if (teacherRow?.primaryDepartmentId) {
+      const deptSubjects = await prisma.subject.findMany({
+        where: { schoolId: user.schoolId, departmentId: teacherRow.primaryDepartmentId },
+        select: { id: true },
+      });
+      deptSubjectIds = new Set(deptSubjects.map((s) => s.id));
+    }
+  }
 
   // ── Resolve classes ───────────────────────────────────────────────────────
   const allClasses = await db.schoolClass.findMany({
@@ -90,13 +110,10 @@ export default async function TeacherMarksheetPage({
 
   if (classes.length === 0) {
     return (
-      <MarksheetPageClient periods={allPeriods} activePeriodId={currentPeriodId}>
-        <div>
-          <h1 className="font-display text-xl font-semibold text-ink mb-1">Mark Sheets</h1>
-          <div className="rounded-lg border border-dashed border-line px-6 py-10 text-center text-sm text-slate">
-            You have no class assignments yet. Contact the principal to be assigned to
-            classes and subjects.
-          </div>
+      <MarksheetPageClient periods={allPeriods} activePeriodId={activePeriodId} isGridMode={true}>
+        <div className="rounded-lg border border-dashed border-line px-6 py-10 text-center text-sm text-slate">
+          You have no class assignments yet. Contact the principal to be assigned to
+          classes and subjects.
         </div>
       </MarksheetPageClient>
     );
@@ -104,10 +121,10 @@ export default async function TeacherMarksheetPage({
 
   const defaultClassId = searchParams.classId ?? classes[0]?.id ?? "";
   const selectedClass  = classes.find((c) => c.id === defaultClassId) ?? classes[0];
-  const framework2     = selectedClass?.frameworkType ?? "EIGHT_FOUR_FOUR";
+  const frameworkType  = selectedClass?.frameworkType ?? "EIGHT_FOUR_FOUR";
 
   // ── CBE path ──────────────────────────────────────────────────────────────
-  if (framework2 === "CBE") {
+  if (frameworkType === "CBE") {
     const cbeFramework = await db.assessmentFramework.findFirst({
       where: { schoolId: user.schoolId, type: "CBE", isActive: true },
       select: { id: true },
@@ -127,7 +144,6 @@ export default async function TeacherMarksheetPage({
         ["SUBJECT_TEACHER", "EXAM_OFFICER", "DIRECTOR"].includes(r.role)
       );
 
-    // Collect CBE periods separately
     const cbePeriods: typeof allPeriods = framework
       ? allPeriods
       : await (async () => {
@@ -144,7 +160,7 @@ export default async function TeacherMarksheetPage({
         })();
 
     return (
-      <MarksheetPageClient periods={cbePeriods} activePeriodId={currentPeriodId}>
+      <MarksheetPageClient periods={cbePeriods} activePeriodId={activePeriodId} isGridMode={true}>
         <div className="space-y-4">
           <div>
             <h1 className="font-display text-xl font-semibold text-ink">Mark Sheets</h1>
@@ -199,24 +215,23 @@ export default async function TeacherMarksheetPage({
 
   if (viewableSubjects.length === 0) {
     return (
-      <MarksheetPageClient periods={allPeriods} activePeriodId={currentPeriodId}>
-        <div>
-          <h1 className="font-display text-xl font-semibold text-ink mb-1">Mark Sheets</h1>
-          <div className="rounded-lg border border-dashed border-line px-6 py-10 text-center text-sm text-slate">
-            You don&apos;t have access to any subject marksheets yet. Contact the principal
-            to be assigned a subject role.
-          </div>
+      <MarksheetPageClient periods={allPeriods} activePeriodId={activePeriodId} isGridMode={true}>
+        <div className="rounded-lg border border-dashed border-line px-6 py-10 text-center text-sm text-slate">
+          You don&apos;t have access to any subject marksheets yet. Contact the principal
+          to be assigned a subject role.
         </div>
       </MarksheetPageClient>
     );
   }
 
   return (
-    <MarksheetPageClient periods={allPeriods} activePeriodId={currentPeriodId}>
+    <MarksheetPageClient periods={allPeriods} activePeriodId={activePeriodId} isGridMode={true}>
       <div className="space-y-4">
         <div>
-          <h1 className="font-display text-xl font-semibold text-ink">Mark Sheets</h1>
-          <p className="text-sm text-slate mt-0.5">
+          <h1 className="font-display text-xl font-semibold text-ink dark:text-dark-text">
+            {selectedClass?.name ?? "Mark Sheet"}
+          </h1>
+          <p className="text-sm text-slate mt-0.5 dark:text-dark-muted">
             {editAllowed
               ? "Enter and update scores for your assigned subjects."
               : "View-only — you don't have edit access for this subject."}
@@ -227,14 +242,14 @@ export default async function TeacherMarksheetPage({
           subjects={viewableSubjects}
           defaultClassId={defaultClassId}
           defaultSubjectId={defaultSubjectId}
-          lockClass={classes.length === 1}
+          lockClass={true}
           readOnly={!editAllowed}
           canManagePapers={canManagePapers}
         />
-        {currentPeriodId && defaultClassId && (
-          <DoneBar role="teacher" classId={defaultClassId} periodId={currentPeriodId} />
+        {activePeriodId && defaultClassId && (
+          <DoneBar role="teacher" classId={defaultClassId} periodId={activePeriodId} />
         )}
-        {currentPeriodId && defaultClassId && <div className="h-20" />}
+        {activePeriodId && defaultClassId && <div className="h-20" />}
       </div>
     </MarksheetPageClient>
   );

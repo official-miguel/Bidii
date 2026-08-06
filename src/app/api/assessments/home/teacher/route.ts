@@ -23,11 +23,17 @@ export interface TeacherClassCard {
  * Returns one card per (class, subject) assignment for the authenticated teacher.
  * Guard: authenticated TEACHER only (403 for other roles).
  *
+ * Query params:
+ *   periodId — optional; if supplied, entered counts are calculated for that
+ *              period instead of the school's current period.
+ *
  * DB optimisation: replaces a Promise.all loop that issued 2 × N queries
  * (one student.count + one assessmentItem.findMany per assignment) with two
  * batched queries — O(1) round-trips regardless of assignment count.
  */
-export async function GET() {
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const periodIdParam = searchParams.get("periodId") ?? null;
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (user.role !== "TEACHER") {
@@ -44,11 +50,16 @@ export async function GET() {
 
   // Fetch the current period and all assignments in parallel — neither
   // depends on the other.
-  const [currentPeriod, assignments] = await Promise.all([
-    db.assessmentPeriod.findFirst({
-      where: { schoolId: user.schoolId, isCurrent: true },
-      select: { id: true, name: true, frameworkId: true },
-    }) as Promise<{ id: string; name: string; frameworkId: string } | null>,
+  const [resolvedPeriod, assignments] = await Promise.all([
+    periodIdParam
+      ? db.assessmentPeriod.findFirst({
+          where: { id: periodIdParam, schoolId: user.schoolId },
+          select: { id: true, name: true, frameworkId: true },
+        }) as Promise<{ id: string; name: string; frameworkId: string } | null>
+      : db.assessmentPeriod.findFirst({
+          where: { schoolId: user.schoolId, isCurrent: true },
+          select: { id: true, name: true, frameworkId: true },
+        }) as Promise<{ id: string; name: string; frameworkId: string } | null>,
 
     db.classSubjectTeacher.findMany({
       where: { teacherId: teacher.id },
@@ -67,7 +78,7 @@ export async function GET() {
   ]);
 
   if (assignments.length === 0) {
-    return NextResponse.json({ cards: [], currentPeriod });
+    return NextResponse.json({ cards: [], currentPeriod: resolvedPeriod });
   }
 
   const assignedClassIds = [...new Set(assignments.map((a) => a.classId))];
@@ -84,14 +95,14 @@ export async function GET() {
     studentCountRows.map((r) => [r.classId, r._count.id])
   );
 
-  // Batch 2: entered student IDs per (subjectId, classId) for the current
+  // Batch 2: entered student IDs per (subjectId, classId) for the resolved
   // period — one query instead of N.
   let enteredMap = new Map<string, number>(); // key: "classId:subjectId"
-  if (currentPeriod) {
+  if (resolvedPeriod) {
     const enteredItems = await db.assessmentItem.findMany({
       where: {
         schoolId: user.schoolId,
-        periodId: currentPeriod.id,
+        periodId: resolvedPeriod.id,
         subjectId: { in: assignedSubjectIds },
         student: { classId: { in: assignedClassIds } },
       },
@@ -119,8 +130,8 @@ export async function GET() {
     subjectName: a.subject.name,
     subjectCode: a.subject.code,
     frameworkType: a.schoolClass.frameworkType,
-    periodId: currentPeriod?.id ?? null,
-    periodName: currentPeriod?.name ?? null,
+    periodId: resolvedPeriod?.id ?? null,
+    periodName: resolvedPeriod?.name ?? null,
     totalStudents: studentCountByClass.get(a.classId) ?? 0,
     enteredCount: enteredMap.get(`${a.classId}:${a.subjectId}`) ?? 0,
   }));
@@ -133,5 +144,5 @@ export async function GET() {
     return a.className.localeCompare(b.className);
   });
 
-  return NextResponse.json({ cards, currentPeriod });
+  return NextResponse.json({ cards, currentPeriod: resolvedPeriod });
 }
